@@ -238,6 +238,7 @@ function App() {
     <div className="app-shell">
       {!isLoggedIn ? (
         <section className="login-card">
+          <div className="brand-mark" aria-hidden="true">M</div>
           <p className="eyebrow">共有用メディアボックス</p>
           <h1>動画・音声・画像を簡単に共有できます。</h1>
           <p className="lead">ログインしてファイルを追加し、すぐに確認できます。</p>
@@ -257,7 +258,6 @@ function App() {
           </form>
 
           {error ? <p className="message error">{error}</p> : null}
-        
         </section>
       ) : (
         <>
@@ -267,8 +267,8 @@ function App() {
               <h2>メディア共有</h2>
             </div>
             <div className="topbar-stats">
-              <span>{items.length} 件</span>
-              <span>{items.reduce((sum, item) => sum + (item.size || 0), 0) ? formatSize(items.reduce((sum, item) => sum + (item.size || 0), 0)) : '0 MB'}</span>
+              <span className="stat-badge">{items.length} 件</span>
+              <span className="stat-badge">{items.reduce((sum, item) => sum + (item.size || 0), 0) ? formatSize(items.reduce((sum, item) => sum + (item.size || 0), 0)) : '0 MB'}</span>
               <button type="button" className="secondary-button" onClick={handleLogout}>
                 ログアウト
               </button>
