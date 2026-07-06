@@ -105,7 +105,7 @@ function App() {
       return
     }
 
-    setError('Sai mật khẩu. Mẫu: 123456')
+    setError('パスワードが違います。サンプル: 123456')
   }
 
   const handleUpload = async (event) => {
@@ -114,7 +114,7 @@ function App() {
 
     const kind = getMediaKind(file.type, file.name)
     if (kind === 'file') {
-      setError('Chỉ hỗ trợ video, audio hoặc ảnh.')
+      setError('動画・音声・画像ファイルのみ対応しています。')
       event.target.value = ''
       return
     }
@@ -128,7 +128,7 @@ function App() {
       setSelectedItemId(record.id)
     } catch (uploadError) {
       console.error(uploadError)
-      setError('Upload thất bại.')
+      setError('アップロードに失敗しました。')
     } finally {
       setUploading(false)
       event.target.value = ''
@@ -154,47 +154,47 @@ function App() {
     <div className="app-shell">
       {!isLoggedIn ? (
         <section className="login-card">
-          <p className="eyebrow">Hộp chia sẻ media</p>
-          <h1>Upload và chia sẻ video, audio, ảnh một cách đơn giản.</h1>
-          <p className="lead">Đăng nhập, thêm file, rồi xem ngay trên trang.</p>
+          <p className="eyebrow">共有用メディアボックス</p>
+          <h1>動画・音声・画像を簡単に共有できます。</h1>
+          <p className="lead">ログインしてファイルを追加し、すぐに確認できます。</p>
 
           <form className="login-form" onSubmit={handleLogin}>
             <label className="sr-only" htmlFor="password">
-              Mật khẩu
+              パスワード
             </label>
             <input
               id="password"
               type="password"
               value={password}
-              placeholder="Nhập mật khẩu"
+              placeholder="パスワードを入力"
               onChange={(event) => setPassword(event.target.value)}
             />
-            <button type="submit">Đăng nhập</button>
+            <button type="submit">ログイン</button>
           </form>
 
           {error ? <p className="message error">{error}</p> : null}
-          <p className="hint">Mật khẩu mẫu: 123456</p>
+          <p className="hint">サンプルパスワード: 123456</p>
         </section>
       ) : (
         <>
           <header className="topbar">
             <div>
-              <p className="eyebrow">Kho media riêng</p>
-              <h2>Media share</h2>
+              <p className="eyebrow">共有メディアスペース</p>
+              <h2>メディア共有</h2>
             </div>
             <div className="topbar-stats">
-              <span>{items.length} mục</span>
+              <span>{items.length} 件</span>
               <span>{items.reduce((sum, item) => sum + (item.size || 0), 0) ? formatSize(items.reduce((sum, item) => sum + (item.size || 0), 0)) : '0 MB'}</span>
             </div>
           </header>
 
           <section className="upload-card">
             <div>
-              <p className="eyebrow">Upload ngay</p>
-              <h3>Thêm file vào hộp chia sẻ</h3>
+              <p className="eyebrow">すぐアップロード</p>
+              <h3>メディアを共有ボックスへ追加</h3>
             </div>
             <label className="upload-button" htmlFor="video-upload">
-              {uploading ? 'Đang upload...' : 'Chọn file'}
+              {uploading ? 'アップロード中...' : 'ファイルを追加'}
             </label>
             <input id="video-upload" type="file" accept="video/*,audio/*,image/*" onChange={handleUpload} />
           </section>
@@ -207,11 +207,11 @@ function App() {
                 <>
                   <div className="player-header">
                     <div>
-                      <p className="eyebrow">Xem trước</p>
+                      <p className="eyebrow">プレビュー</p>
                       <h3>{selectedItem.name}</h3>
                     </div>
                     <button type="button" className="danger-button" onClick={() => handleDelete(selectedItem.id)}>
-                      Xóa
+                      削除
                     </button>
                   </div>
 
@@ -228,26 +228,26 @@ function App() {
 
                   <div className="video-meta">
                     <span>{formatSize(selectedItem.size)}</span>
-                    <span>{new Date(selectedItem.createdAt).toLocaleString('vi-VN')}</span>
+                    <span>{new Date(selectedItem.createdAt).toLocaleString('ja-JP')}</span>
                   </div>
                 </>
               ) : (
                 <div className="empty-state">
-                  <h3>Chưa có file nào.</h3>
-                  <p>Hãy thêm file đầu tiên để bắt đầu.</p>
+                  <h3>まだメディアがありません。</h3>
+                  <p>最初のファイルを追加して共有を始めましょう。</p>
                 </div>
               )}
             </section>
 
             <aside className="list-card">
               <div className="list-header">
-                <h3>Danh sách file</h3>
-                <span>{items.length} mục</span>
+                <h3>メディア一覧</h3>
+                <span>{items.length} 件</span>
               </div>
 
               {items.length === 0 ? (
                 <div className="empty-list">
-                  <p>File upload sẽ hiện ở đây.</p>
+                  <p>アップロードしたファイルがここに表示されます。</p>
                 </div>
               ) : (
                 <ul className="video-list">
