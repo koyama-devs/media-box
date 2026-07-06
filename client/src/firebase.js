@@ -7,7 +7,7 @@ const firebaseConfig = {
   apiKey: 'AIzaSyBrzxY4sc2BC_5y1ymax08DkHbVoEKDo-8',
   authDomain: 'hana-mediabox.firebaseapp.com',
   projectId: 'hana-mediabox',
-  storageBucket: 'hana-mediabox.firebasestorage.app',
+  storageBucket: 'hana-mediabox.appspot.com',
   messagingSenderId: '334684002373',
   appId: '1:334684002373:web:b36dada39c02f415bc6b2c',
   measurementId: 'G-W1CXBBMWC0',
