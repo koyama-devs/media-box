@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
+import { uploadFileToFirebase } from './firebase'
 
 const STORAGE_KEY = 'media-share-lite-items'
 const PASSWORD = '123456'
@@ -19,10 +20,10 @@ function getMediaKind(fileType, fileName = '') {
   return 'file'
 }
 
-function createMediaRecord(file) {
+function createMediaRecord(file, urlOverride) {
   return new Promise((resolve, reject) => {
     try {
-      const objectUrl = URL.createObjectURL(file)
+      const objectUrl = urlOverride || URL.createObjectURL(file)
       const kind = getMediaKind(file.type, file.name)
 
       resolve({
@@ -140,9 +141,18 @@ function App() {
     setError('')
 
     try {
-      const record = await createMediaRecord(file)
-      setItems((prevItems) => [record, ...prevItems])
-      setSelectedItemId(record.id)
+        // Try uploading to Firebase Storage first. If it fails, fall back to local blob URL.
+        try {
+          const { url } = await uploadFileToFirebase(file)
+          const record = await createMediaRecord(file, url)
+          setItems((prevItems) => [record, ...prevItems])
+          setSelectedItemId(record.id)
+        } catch (remoteErr) {
+          console.warn('Firebase upload failed, falling back to local preview', remoteErr)
+          const record = await createMediaRecord(file)
+          setItems((prevItems) => [record, ...prevItems])
+          setSelectedItemId(record.id)
+        }
     } catch (uploadError) {
       console.error(uploadError)
       setError('アップロードに失敗しました。')
