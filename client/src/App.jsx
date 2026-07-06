@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
 const STORAGE_KEY = 'media-share-lite-items'
@@ -55,6 +55,7 @@ function App() {
   const [items, setItems] = useState([])
   const [selectedItemId, setSelectedItemId] = useState(null)
   const [uploading, setUploading] = useState(false)
+  const blobUrlsRef = useRef(new Set())
 
   useEffect(() => {
     try {
@@ -82,14 +83,30 @@ function App() {
   }, [items])
 
   useEffect(() => {
+    const currentUrls = new Set(
+      items
+        .filter((item) => item.url?.startsWith('blob:'))
+        .map((item) => item.url),
+    )
+
+    blobUrlsRef.current.forEach((url) => {
+      if (!currentUrls.has(url)) {
+        URL.revokeObjectURL(url)
+      }
+    })
+
+    blobUrlsRef.current = currentUrls
+  }, [items])
+
+  useEffect(() => {
     return () => {
-      items.forEach((item) => {
-        if (item.url?.startsWith('blob:')) {
-          URL.revokeObjectURL(item.url)
+      blobUrlsRef.current.forEach((url) => {
+        if (url?.startsWith('blob:')) {
+          URL.revokeObjectURL(url)
         }
       })
     }
-  }, [items])
+  }, [])
 
   const selectedItem = useMemo(
     () => items.find((item) => item.id === selectedItemId) || items[0] || null,
