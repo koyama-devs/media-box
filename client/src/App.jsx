@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import { uploadFileToFirebase } from './firebase'
+import {
+  deleteMediaItem,
+  getFirebaseErrorMessage,
+  loadMediaBlobUrl,
+  MAX_FILE_SIZE,
+  subscribeToMediaItems,
+  uploadMediaFile,
+} from './firebase'
 
-const STORAGE_KEY = 'media-share-lite-items'
-const PASSWORD = '123456'
+const AUTH_KEY = 'media-share-lite-auth'
+const PASSWORD = 'hiro'
 
 function getMediaKind(fileType, fileName = '') {
   const type = (fileType || '').toLowerCase()
@@ -20,25 +27,12 @@ function getMediaKind(fileType, fileName = '') {
   return 'file'
 }
 
-function createMediaRecord(file, urlOverride) {
-  return new Promise((resolve, reject) => {
-    try {
-      const objectUrl = urlOverride || URL.createObjectURL(file)
-      const kind = getMediaKind(file.type, file.name)
-
-      resolve({
-        id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        name: file.name,
-        type: file.type || 'application/octet-stream',
-        kind,
-        size: file.size,
-        createdAt: new Date().toISOString(),
-        url: objectUrl,
-      })
-    } catch (error) {
-      reject(error)
-    }
-  })
+function createMediaMetadata(file) {
+  return {
+    name: file.name,
+    type: file.type || 'application/octet-stream',
+    kind: getMediaKind(file.type, file.name),
+  }
 }
 
 function formatSize(bytes) {
@@ -50,45 +44,63 @@ function formatSize(bytes) {
 }
 
 function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [isLoggedIn, setIsLoggedIn] = useState(() => {
+    try {
+      return window.localStorage.getItem(AUTH_KEY) === 'true'
+    } catch {
+      return false
+    }
+  })
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [items, setItems] = useState([])
   const [selectedItemId, setSelectedItemId] = useState(null)
   const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadingFileName, setUploadingFileName] = useState('')
+  const [loadingItems, setLoadingItems] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState(null)
+  const [loadingPreview, setLoadingPreview] = useState(false)
   const blobUrlsRef = useRef(new Set())
 
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(STORAGE_KEY)
-      if (!saved) return
+  const selectedItem = useMemo(
+    () => items.find((item) => item.id === selectedItemId) || items[0] || null,
+    [items, selectedItemId],
+  )
 
-      const parsed = JSON.parse(saved)
-      if (Array.isArray(parsed)) {
-        setItems(parsed)
-        if (parsed[0]) {
-          setSelectedItemId(parsed[0].id)
-        }
-      }
-    } catch {
-      window.localStorage.removeItem(STORAGE_KEY)
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setItems([])
+      setSelectedItemId(null)
+      setLoadingItems(false)
+      return undefined
     }
-  }, [])
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items))
-    } catch {
-      // Ignore storage errors and keep the app working.
-    }
-  }, [items])
+    setLoadingItems(true)
 
-  useEffect(() => {
-    const currentUrls = new Set(
-      items
-        .filter((item) => item.url?.startsWith('blob:'))
-        .map((item) => item.url),
+    const unsubscribe = subscribeToMediaItems(
+      (nextItems) => {
+        setItems(nextItems)
+        setSelectedItemId((currentId) => {
+          if (currentId && nextItems.some((item) => item.id === currentId)) {
+            return currentId
+          }
+          return nextItems[0]?.id || null
+        })
+        setLoadingItems(false)
+      },
+      (loadError) => {
+        console.error(loadError)
+        setError(getFirebaseErrorMessage(loadError))
+        setLoadingItems(false)
+      },
     )
+
+    return unsubscribe
+  }, [isLoggedIn])
+
+  useEffect(() => {
+    const currentUrls = new Set(previewUrl?.startsWith('blob:') ? [previewUrl] : [])
 
     blobUrlsRef.current.forEach((url) => {
       if (!currentUrls.has(url)) {
@@ -97,7 +109,40 @@ function App() {
     })
 
     blobUrlsRef.current = currentUrls
-  }, [items])
+  }, [previewUrl])
+
+  useEffect(() => {
+    if (!selectedItem) {
+      setPreviewUrl(null)
+      setLoadingPreview(false)
+      return undefined
+    }
+
+    let cancelled = false
+    setLoadingPreview(true)
+    setPreviewUrl(null)
+
+    loadMediaBlobUrl(selectedItem.id, selectedItem.type)
+      .then((url) => {
+        if (!cancelled) {
+          setPreviewUrl(url)
+          setLoadingPreview(false)
+        } else {
+          URL.revokeObjectURL(url)
+        }
+      })
+      .catch((previewError) => {
+        console.error(previewError)
+        if (!cancelled) {
+          setError(getFirebaseErrorMessage(previewError))
+          setLoadingPreview(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedItem?.id, selectedItem?.type])
 
   useEffect(() => {
     return () => {
@@ -109,21 +154,32 @@ function App() {
     }
   }, [])
 
-  const selectedItem = useMemo(
-    () => items.find((item) => item.id === selectedItemId) || items[0] || null,
-    [items, selectedItemId],
-  )
-
   const handleLogin = (event) => {
     event.preventDefault()
 
     if (password === PASSWORD) {
+      try {
+        window.localStorage.setItem(AUTH_KEY, 'true')
+      } catch {
+        // Ignore storage errors and keep the app working.
+      }
       setIsLoggedIn(true)
       setError('')
       return
     }
 
-    setError('パスワードが違います。サンプル: 123456')
+    setError('パスワードが違います。')
+  }
+
+  const handleLogout = () => {
+    try {
+      window.localStorage.removeItem(AUTH_KEY)
+    } catch {
+      // Ignore storage errors and keep the app working.
+    }
+    setIsLoggedIn(false)
+    setPassword('')
+    setError('')
   }
 
   const handleUpload = async (event) => {
@@ -137,43 +193,44 @@ function App() {
       return
     }
 
+    if (file.size > MAX_FILE_SIZE) {
+      setError(`ファイルは${formatSize(MAX_FILE_SIZE)}以下にしてください。`)
+      event.target.value = ''
+      return
+    }
+
     setUploading(true)
+    setUploadProgress(0)
+    setUploadingFileName(file.name)
     setError('')
 
     try {
-        // Try uploading to Firebase Storage first. If it fails, fall back to local blob URL.
-        try {
-          const { url } = await uploadFileToFirebase(file)
-          const record = await createMediaRecord(file, url)
-          setItems((prevItems) => [record, ...prevItems])
-          setSelectedItemId(record.id)
-        } catch (remoteErr) {
-          console.warn('Firebase upload failed, falling back to local preview', remoteErr)
-          const record = await createMediaRecord(file)
-          setItems((prevItems) => [record, ...prevItems])
-          setSelectedItemId(record.id)
-        }
+      const metadata = createMediaMetadata(file)
+      const id = await uploadMediaFile(file, metadata, setUploadProgress)
+      setSelectedItemId(id)
+      setLoadingItems(false)
     } catch (uploadError) {
       console.error(uploadError)
-      setError('アップロードに失敗しました。')
+      setError(getFirebaseErrorMessage(uploadError))
     } finally {
       setUploading(false)
+      setUploadProgress(0)
+      setUploadingFileName('')
       event.target.value = ''
     }
   }
 
-  const handleDelete = (itemId) => {
-    const nextItems = items.filter((item) => item.id !== itemId)
-    const removedItem = items.find((item) => item.id === itemId)
+  const handleDelete = async (itemId) => {
+    if (!items.find((item) => item.id === itemId)) return
 
-    if (removedItem?.url?.startsWith('blob:')) {
-      URL.revokeObjectURL(removedItem.url)
-    }
-
-    setItems(nextItems)
-
-    if (selectedItemId === itemId) {
-      setSelectedItemId(nextItems[0]?.id || null)
+    try {
+      await deleteMediaItem(itemId)
+      if (selectedItemId === itemId) {
+        setPreviewUrl(null)
+      }
+    } catch (deleteError) {
+      console.error(deleteError)
+      setError('削除に失敗しました。')
     }
   }
 
@@ -200,7 +257,7 @@ function App() {
           </form>
 
           {error ? <p className="message error">{error}</p> : null}
-          <p className="hint">サンプルパスワード: 123456</p>
+        
         </section>
       ) : (
         <>
@@ -212,6 +269,9 @@ function App() {
             <div className="topbar-stats">
               <span>{items.length} 件</span>
               <span>{items.reduce((sum, item) => sum + (item.size || 0), 0) ? formatSize(items.reduce((sum, item) => sum + (item.size || 0), 0)) : '0 MB'}</span>
+              <button type="button" className="secondary-button" onClick={handleLogout}>
+                ログアウト
+              </button>
             </div>
           </header>
 
@@ -219,18 +279,34 @@ function App() {
             <div>
               <p className="eyebrow">すぐアップロード</p>
               <h3>メディアを共有ボックスへ追加</h3>
+              <p className="hint">1ファイルあたり最大 {formatSize(MAX_FILE_SIZE)}までアップロードできます</p>
+              {uploading ? (
+                <div className="upload-progress-wrap">
+                  <p className="upload-progress-label">
+                    {uploadingFileName} — {uploadProgress}%
+                  </p>
+                  <div className="upload-progress-track" aria-hidden="true">
+                    <div className="upload-progress-bar" style={{ width: `${uploadProgress}%` }} />
+                  </div>
+                </div>
+              ) : null}
             </div>
-            <label className="upload-button" htmlFor="video-upload">
+            <label className={`upload-button ${uploading ? 'disabled' : ''}`} htmlFor="video-upload">
               {uploading ? 'アップロード中...' : 'ファイルを追加'}
             </label>
-            <input id="video-upload" type="file" accept="video/*,audio/*,image/*" onChange={handleUpload} />
+            <input id="video-upload" type="file" accept="video/*,audio/*,image/*" disabled={uploading} onChange={handleUpload} />
           </section>
 
           {error ? <p className="message error">{error}</p> : null}
 
           <main className="content-grid">
             <section className="player-card">
-              {selectedItem ? (
+              {loadingItems ? (
+                <div className="empty-state">
+                  <h3>読み込み中...</h3>
+                  <p>クラウドからメディア一覧を取得しています。</p>
+                </div>
+              ) : selectedItem ? (
                 <>
                   <div className="player-header">
                     <div>
@@ -242,15 +318,27 @@ function App() {
                     </button>
                   </div>
 
-                  {selectedItem.kind === 'image' ? (
-                    <img className="media-preview" src={selectedItem.url} alt={selectedItem.name} />
-                  ) : selectedItem.kind === 'audio' ? (
-                    <div className="audio-card">
-                      <p>{selectedItem.name}</p>
-                      <audio controls src={selectedItem.url} />
+                  {loadingPreview ? (
+                    <div className="empty-state">
+                      <h3>プレビュー読み込み中...</h3>
                     </div>
+                  ) : previewUrl ? (
+                    <>
+                      {selectedItem.kind === 'image' ? (
+                        <img className="media-preview" src={previewUrl} alt={selectedItem.name} />
+                      ) : selectedItem.kind === 'audio' ? (
+                        <div className="audio-card">
+                          <p>{selectedItem.name}</p>
+                          <audio controls src={previewUrl} />
+                        </div>
+                      ) : (
+                        <video className="video-player" controls playsInline preload="metadata" src={previewUrl} />
+                      )}
+                    </>
                   ) : (
-                    <video className="video-player" controls playsInline preload="metadata" src={selectedItem.url} />
+                    <div className="empty-state">
+                      <h3>プレビューを読み込めませんでした。</h3>
+                    </div>
                   )}
 
                   <div className="video-meta">
@@ -272,7 +360,11 @@ function App() {
                 <span>{items.length} 件</span>
               </div>
 
-              {items.length === 0 ? (
+              {loadingItems ? (
+                <div className="empty-list">
+                  <p>読み込み中...</p>
+                </div>
+              ) : items.length === 0 ? (
                 <div className="empty-list">
                   <p>アップロードしたファイルがここに表示されます。</p>
                 </div>

@@ -1,5 +1,9 @@
 {
+  "firestore": {
+    "rules": "firestore.rules"
+  },
   "hosting": {
+    "site": "hana-mediabox",
     "public": "dist",
     "ignore": [
       "firebase.json",
