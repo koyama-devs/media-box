@@ -61,11 +61,25 @@ function App() {
   const [loadingItems, setLoadingItems] = useState(false)
   const [previewUrl, setPreviewUrl] = useState(null)
   const [loadingPreview, setLoadingPreview] = useState(false)
-  const [playlistMode, setPlaylistMode] = useState(false)
+  const [playlistMode, setPlaylistMode] = useState(true)
   const blobUrlsRef = useRef(new Set())
+
+  // Ref tới player hiện tại (audio hoặc video)
   const mediaRef = useRef(null)
+  
+  // Có cần autoplay sau khi đổi bài không
   const shouldAutoPlayRef = useRef(false)
+  
+  // Đang phát playlist hay không
   const imageTimerRef = useRef(null)
+  
+  // Đánh dấu media hiện tại đã sẵn sàng
+  const mediaReadyRef = useRef(false)
+  
+  // Tránh play() nhiều lần
+  const playRequestRef = useRef(0)
+
+  const previewRequestRef = useRef(0)
 
   const selectedItem = useMemo(
     () => items.find((item) => item.id === selectedItemId) || items[0] || null,
@@ -85,19 +99,72 @@ function App() {
   }, [items, selectedIndex])
 
   const selectItem = useCallback((itemId, autoPlay = false) => {
+
+    mediaReadyRef.current = false
+
+    playRequestRef.current++
+
     shouldAutoPlayRef.current = autoPlay
+
     setSelectedItemId(itemId)
+
+}, [])
+
+const playNext = useCallback(() => {
+
+  const nextId = getItemIdAtOffset(1)
+
+  if (!nextId) return
+
+  selectItem(
+      nextId,
+      playlistMode
+  )
+
+}, [
+  getItemIdAtOffset,
+  playlistMode,
+  selectItem
+])
+
+const playPrevious = useCallback(() => {
+
+  const prevId = getItemIdAtOffset(-1)
+
+  if (!prevId) return
+
+  selectItem(
+      prevId,
+      playlistMode
+  )
+
+}, [
+  getItemIdAtOffset,
+  playlistMode,
+  selectItem
+])
+
+  const autoPlayCurrentMedia = useCallback(async () => {
+    if (!shouldAutoPlayRef.current) return
+  
+    const media = mediaRef.current
+  
+    if (!media) return
+  
+    try {
+      shouldAutoPlayRef.current = false
+  
+      await media.play()
+    } catch (err) {
+      console.error('Autoplay failed:', err)
+    }
   }, [])
 
-  const playNext = useCallback(() => {
-    const nextId = getItemIdAtOffset(1)
-    if (nextId) selectItem(nextId, playlistMode)
-  }, [getItemIdAtOffset, playlistMode, selectItem])
-
-  const playPrevious = useCallback(() => {
-    const prevId = getItemIdAtOffset(-1)
-    if (prevId) selectItem(prevId, playlistMode)
-  }, [getItemIdAtOffset, playlistMode, selectItem])
+  const handleMediaCanPlay = useCallback(() => {
+    mediaReadyRef.current = true
+  
+    autoPlayCurrentMedia()
+  }, [autoPlayCurrentMedia])
 
   const startPlaylist = useCallback(() => {
     if (items.length === 0) return
@@ -106,10 +173,18 @@ function App() {
   }, [items, selectedItem?.id, selectItem])
 
   const handleMediaEnded = useCallback(() => {
-    if (!playlistMode) return
-    const nextId = getItemIdAtOffset(1)
-    if (nextId) selectItem(nextId, true)
-  }, [getItemIdAtOffset, playlistMode, selectItem])
+
+        if (!playlistMode) return
+
+        if (items.length <= 1) return
+
+        playNext()
+
+    }, [
+        playlistMode,
+        items.length,
+        playNext
+    ])
 
   useEffect(() => {
     if (!isLoggedIn) {
@@ -155,67 +230,137 @@ function App() {
   }, [previewUrl])
 
   useEffect(() => {
+
     if (!selectedItem) {
-      setPreviewUrl(null)
-      setLoadingPreview(false)
-      return undefined
+      mediaReadyRef.current = false
+      playRequestRef.current++
+        setPreviewUrl(null)
+        setLoadingPreview(false)
+        return
     }
 
-    let cancelled = false
+    const requestId = ++previewRequestRef.current
+
     setLoadingPreview(true)
     setPreviewUrl(null)
 
-    loadMediaBlobUrl(selectedItem.id, selectedItem.type)
-      .then((url) => {
-        if (!cancelled) {
-          setPreviewUrl(url)
-          setLoadingPreview(false)
-        } else {
-          URL.revokeObjectURL(url)
-        }
-      })
-      .catch((previewError) => {
-        console.error(previewError)
-        if (!cancelled) {
-          setError(getFirebaseErrorMessage(previewError))
-          setLoadingPreview(false)
-        }
-      })
+    loadMediaBlobUrl(
+        selectedItem.id,
+        selectedItem.type
+    )
+        .then((url) => {
 
-    return () => {
-      cancelled = true
-    }
-  }, [selectedItem?.id, selectedItem?.type])
+            // Nếu trong lúc đang tải người dùng đã chuyển bài,
+            // bỏ luôn kết quả cũ.
 
-  useEffect(() => {
-    if (!previewUrl || loadingPreview || !playlistMode || !shouldAutoPlayRef.current) return undefined
+            if (requestId !== previewRequestRef.current) {
+                URL.revokeObjectURL(url)
+                return
+            }
 
-    if (selectedItem?.kind === 'audio' || selectedItem?.kind === 'video') {
-      shouldAutoPlayRef.current = false
-      const timer = window.setTimeout(() => {
-        mediaRef.current?.play().catch(() => {})
-      }, 0)
-      return () => window.clearTimeout(timer)
-    }
+            if (previewUrl?.startsWith('blob:')) {
+              URL.revokeObjectURL(previewUrl)
+            }
+            setPreviewUrl(url)
+            blobUrlsRef.current.add(url)
+            setLoadingPreview(false)
 
-    return undefined
-  }, [previewUrl, loadingPreview, playlistMode, selectedItem?.kind])
+        })
+        .catch((err) => {
 
-  useEffect(() => {
-    if (!playlistMode || !previewUrl || loadingPreview || selectedItem?.kind !== 'image') {
-      return undefined
-    }
+            if (requestId !== previewRequestRef.current)
+                return
 
-    imageTimerRef.current = window.setTimeout(() => {
-      playNext()
-    }, 5000)
+            console.error(err)
 
-    return () => {
+            setError(
+                getFirebaseErrorMessage(err)
+            )
+
+            setLoadingPreview(false)
+
+        })
+
+}, [
+    selectedItem?.id,
+    selectedItem?.type
+])
+
+    useEffect(() => {
+
+      if (!playlistMode) return
+
+      if (!previewUrl) return
+
+      if (loadingPreview) return
+
+      if (!shouldAutoPlayRef.current) return
+
+      if (selectedItem?.kind === 'image') return
+
+      if (!mediaReadyRef.current) return
+
+      autoPlayCurrentMedia()
+
+  }, [
+      previewUrl,
+      loadingPreview,
+      playlistMode,
+      selectedItem?.id,
+      selectedItem?.kind,
+      autoPlayCurrentMedia
+  ])
+
+    useEffect(() => {
+
+      if (!playlistMode) return
+
+      if (!previewUrl) return
+
+      if (loadingPreview) return
+
+      if (selectedItem?.kind !== 'image') return
+
       if (imageTimerRef.current) {
-        window.clearTimeout(imageTimerRef.current)
+          clearTimeout(imageTimerRef.current)
       }
-    }
-  }, [playlistMode, previewUrl, loadingPreview, selectedItem?.id, selectedItem?.kind, playNext])
+
+      imageTimerRef.current = setTimeout(() => {
+
+          playNext()
+
+      }, 5000)
+
+      return () => {
+
+          if (imageTimerRef.current) {
+              clearTimeout(imageTimerRef.current)
+          }
+
+      }
+
+  }, [
+      playlistMode,
+      previewUrl,
+      loadingPreview,
+      selectedItem?.id,
+      selectedItem?.kind,
+      playNext
+  ])
+
+    useEffect(() => {
+
+      const media = mediaRef.current
+
+      if (!media) return
+
+      media.pause()
+
+      media.currentTime = 0
+
+  }, [
+      selectedItem?.id
+  ])
 
   useEffect(() => {
     return () => {
@@ -299,8 +444,18 @@ function App() {
     try {
       await deleteMediaItem(itemId)
       if (selectedItemId === itemId) {
+
+        if (mediaRef.current) {
+            mediaRef.current.pause()
+        }
+    
+        if (previewUrl?.startsWith('blob:')) {
+            URL.revokeObjectURL(previewUrl)
+        }
+    
         setPreviewUrl(null)
-      }
+    
+    }
     } catch (deleteError) {
       console.error(deleteError)
       setError('削除に失敗しました。')
@@ -416,22 +571,38 @@ function App() {
                   ) : previewUrl ? (
                     <>
                       {selectedItem.kind === 'image' ? (
-                        <img className="media-preview" src={previewUrl} alt={selectedItem.name} />
+                          <img
+                              key={selectedItem.id}
+                              className="media-preview"
+                              src={previewUrl}
+                              alt={selectedItem.name}
+                          />
                       ) : selectedItem.kind === 'audio' ? (
-                        <div className="audio-card">
-                          <p>{selectedItem.name}</p>
-                          <audio ref={mediaRef} controls src={previewUrl} onEnded={handleMediaEnded} />
-                        </div>
+                          <div className="audio-card">
+                              <p>{selectedItem.name}</p>
+
+                              <audio
+                                  key={`audio-${selectedItem.id}`}
+                                  ref={mediaRef}
+                                  controls
+                                  preload="metadata"
+                                  src={previewUrl}
+                                  onCanPlay={handleMediaCanPlay}
+                                  onEnded={handleMediaEnded}
+                              />
+                          </div>
                       ) : (
-                        <video
-                          ref={mediaRef}
-                          className="video-player"
-                          controls
-                          playsInline
-                          preload="metadata"
-                          src={previewUrl}
-                          onEnded={handleMediaEnded}
-                        />
+                          <video
+                              key={`video-${selectedItem.id}`}
+                              ref={mediaRef}
+                              className="video-player"
+                              controls
+                              playsInline
+                              preload="metadata"
+                              src={previewUrl}
+                              onCanPlay={handleMediaCanPlay}
+                              onEnded={handleMediaEnded}
+                          />
                       )}
                     </>
                   ) : (
