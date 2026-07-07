@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import {
   deleteMediaItem,
@@ -61,12 +61,55 @@ function App() {
   const [loadingItems, setLoadingItems] = useState(false)
   const [previewUrl, setPreviewUrl] = useState(null)
   const [loadingPreview, setLoadingPreview] = useState(false)
+  const [playlistMode, setPlaylistMode] = useState(false)
   const blobUrlsRef = useRef(new Set())
+  const mediaRef = useRef(null)
+  const shouldAutoPlayRef = useRef(false)
+  const imageTimerRef = useRef(null)
 
   const selectedItem = useMemo(
     () => items.find((item) => item.id === selectedItemId) || items[0] || null,
     [items, selectedItemId],
   )
+
+  const selectedIndex = useMemo(
+    () => items.findIndex((item) => item.id === selectedItemId),
+    [items, selectedItemId],
+  )
+
+  const getItemIdAtOffset = useCallback((offset) => {
+    if (items.length === 0) return null
+    const baseIndex = selectedIndex >= 0 ? selectedIndex : 0
+    const nextIndex = (baseIndex + offset + items.length) % items.length
+    return items[nextIndex]?.id || null
+  }, [items, selectedIndex])
+
+  const selectItem = useCallback((itemId, autoPlay = false) => {
+    shouldAutoPlayRef.current = autoPlay
+    setSelectedItemId(itemId)
+  }, [])
+
+  const playNext = useCallback(() => {
+    const nextId = getItemIdAtOffset(1)
+    if (nextId) selectItem(nextId, playlistMode)
+  }, [getItemIdAtOffset, playlistMode, selectItem])
+
+  const playPrevious = useCallback(() => {
+    const prevId = getItemIdAtOffset(-1)
+    if (prevId) selectItem(prevId, playlistMode)
+  }, [getItemIdAtOffset, playlistMode, selectItem])
+
+  const startPlaylist = useCallback(() => {
+    if (items.length === 0) return
+    setPlaylistMode(true)
+    selectItem(selectedItem?.id || items[0].id, true)
+  }, [items, selectedItem?.id, selectItem])
+
+  const handleMediaEnded = useCallback(() => {
+    if (!playlistMode) return
+    const nextId = getItemIdAtOffset(1)
+    if (nextId) selectItem(nextId, true)
+  }, [getItemIdAtOffset, playlistMode, selectItem])
 
   useEffect(() => {
     if (!isLoggedIn) {
@@ -143,6 +186,36 @@ function App() {
       cancelled = true
     }
   }, [selectedItem?.id, selectedItem?.type])
+
+  useEffect(() => {
+    if (!previewUrl || loadingPreview || !playlistMode || !shouldAutoPlayRef.current) return undefined
+
+    if (selectedItem?.kind === 'audio' || selectedItem?.kind === 'video') {
+      shouldAutoPlayRef.current = false
+      const timer = window.setTimeout(() => {
+        mediaRef.current?.play().catch(() => {})
+      }, 0)
+      return () => window.clearTimeout(timer)
+    }
+
+    return undefined
+  }, [previewUrl, loadingPreview, playlistMode, selectedItem?.kind])
+
+  useEffect(() => {
+    if (!playlistMode || !previewUrl || loadingPreview || selectedItem?.kind !== 'image') {
+      return undefined
+    }
+
+    imageTimerRef.current = window.setTimeout(() => {
+      playNext()
+    }, 5000)
+
+    return () => {
+      if (imageTimerRef.current) {
+        window.clearTimeout(imageTimerRef.current)
+      }
+    }
+  }, [playlistMode, previewUrl, loadingPreview, selectedItem?.id, selectedItem?.kind, playNext])
 
   useEffect(() => {
     return () => {
@@ -313,9 +386,27 @@ function App() {
                       <p className="eyebrow">プレビュー</p>
                       <h3>{selectedItem.name}</h3>
                     </div>
-                    <button type="button" className="danger-button" onClick={() => handleDelete(selectedItem.id)}>
-                      削除
-                    </button>
+                    <div className="player-actions">
+                      <button type="button" className="secondary-button" onClick={playPrevious} disabled={items.length < 2}>
+                        前へ
+                      </button>
+                      <button type="button" className="secondary-button" onClick={playNext} disabled={items.length < 2}>
+                        次へ
+                      </button>
+                      <button
+                        type="button"
+                        className={`secondary-button ${playlistMode ? 'active' : ''}`}
+                        onClick={() => setPlaylistMode((current) => !current)}
+                      >
+                        {playlistMode ? '連続再生 ON' : '連続再生 OFF'}
+                      </button>
+                      <button type="button" className="primary-button" onClick={startPlaylist} disabled={items.length === 0}>
+                        リスト再生
+                      </button>
+                      <button type="button" className="danger-button" onClick={() => handleDelete(selectedItem.id)}>
+                        削除
+                      </button>
+                    </div>
                   </div>
 
                   {loadingPreview ? (
@@ -329,10 +420,18 @@ function App() {
                       ) : selectedItem.kind === 'audio' ? (
                         <div className="audio-card">
                           <p>{selectedItem.name}</p>
-                          <audio controls src={previewUrl} />
+                          <audio ref={mediaRef} controls src={previewUrl} onEnded={handleMediaEnded} />
                         </div>
                       ) : (
-                        <video className="video-player" controls playsInline preload="metadata" src={previewUrl} />
+                        <video
+                          ref={mediaRef}
+                          className="video-player"
+                          controls
+                          playsInline
+                          preload="metadata"
+                          src={previewUrl}
+                          onEnded={handleMediaEnded}
+                        />
                       )}
                     </>
                   ) : (
@@ -372,7 +471,7 @@ function App() {
                 <ul className="video-list">
                   {items.map((item) => (
                     <li key={item.id} className={`video-item ${selectedItem?.id === item.id ? 'active' : ''}`}>
-                      <button type="button" className="video-title" onClick={() => setSelectedItemId(item.id)}>
+                      <button type="button" className="video-title" onClick={() => selectItem(item.id)}>
                         <strong>{item.name}</strong>
                         <span>{formatSize(item.size)}</span>
                       </button>

@@ -232,6 +232,38 @@
   margin-bottom: 18px;
 }
 
+.player-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.secondary-button.active {
+  background: rgba(37, 99, 235, 0.18);
+  border-color: var(--blue-500);
+  color: var(--text-primary);
+}
+
+.primary-button {
+  background: linear-gradient(135deg, var(--blue-600), var(--blue-500));
+  color: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 10px 16px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  box-shadow: 0 4px 16px var(--blue-glow);
+}
+
+.primary-button:disabled,
+.secondary-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .list-header span {
   color: var(--text-muted);
   font-size: 0.9rem;
@@ -476,6 +508,16 @@
   .video-item {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .player-actions {
+    justify-content: stretch;
+  }
+
+  .player-actions .secondary-button,
+  .player-actions .primary-button,
+  .player-actions .danger-button {
+    width: 100%;
   }
 
   .topbar-stats {
