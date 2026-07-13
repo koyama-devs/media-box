@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="はな・メディアボックス">
+  <defs>
+    <linearGradient id="label-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="55%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#1e3a8a"/>
+    </linearGradient>
+    <radialGradient id="shine" cx="30%" cy="26%" r="72%">
+      <stop offset="0%" stop-color="rgba(255,255,255,0.22)"/>
+      <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+    </radialGradient>
+  </defs>
+
+  <circle cx="100" cy="100" r="100" fill="url(#label-bg)"/>
+  <circle cx="100" cy="100" r="100" fill="url(#shine)"/>
+
+  <!-- sakura background -->
+  <g fill="#fbcfe8" opacity="0.38">
+    <g transform="translate(38 42) rotate(-18)">
+      <ellipse cx="0" cy="-8" rx="5" ry="8"/>
+      <ellipse cx="7.6" cy="-2.5" rx="5" ry="8" transform="rotate(72)"/>
+      <ellipse cx="4.7" cy="6.5" rx="5" ry="8" transform="rotate(144)"/>
+      <ellipse cx="-4.7" cy="6.5" rx="5" ry="8" transform="rotate(216)"/>
+      <ellipse cx="-7.6" cy="-2.5" rx="5" ry="8" transform="rotate(288)"/>
+      <circle cx="0" cy="0" r="3" fill="#fda4af"/>
+    </g>
+    <g transform="translate(158 52) rotate(12) scale(0.85)">
+      <ellipse cx="0" cy="-8" rx="5" ry="8"/>
+      <ellipse cx="7.6" cy="-2.5" rx="5" ry="8" transform="rotate(72)"/>
+      <ellipse cx="4.7" cy="6.5" rx="5" ry="8" transform="rotate(144)"/>
+      <ellipse cx="-4.7" cy="6.5" rx="5" ry="8" transform="rotate(216)"/>
+      <ellipse cx="-7.6" cy="-2.5" rx="5" ry="8" transform="rotate(288)"/>
+      <circle cx="0" cy="0" r="3" fill="#fda4af"/>
+    </g>
+    <g transform="translate(30 158) rotate(8) scale(0.65)">
+      <ellipse cx="0" cy="-8" rx="5" ry="8"/>
+      <ellipse cx="7.6" cy="-2.5" rx="5" ry="8" transform="rotate(72)"/>
+      <ellipse cx="4.7" cy="6.5" rx="5" ry="8" transform="rotate(144)"/>
+      <ellipse cx="-4.7" cy="6.5" rx="5" ry="8" transform="rotate(216)"/>
+      <ellipse cx="-7.6" cy="-2.5" rx="5" ry="8" transform="rotate(288)"/>
+      <circle cx="0" cy="0" r="3" fill="#fda4af"/>
+    </g>
+    <g transform="translate(170 158) rotate(-24) scale(0.65)">
+      <ellipse cx="0" cy="-8" rx="5" ry="8"/>
+      <ellipse cx="7.6" cy="-2.5" rx="5" ry="8" transform="rotate(72)"/>
+      <ellipse cx="4.7" cy="6.5" rx="5" ry="8" transform="rotate(144)"/>
+      <ellipse cx="-4.7" cy="6.5" rx="5" ry="8" transform="rotate(216)"/>
+      <ellipse cx="-7.6" cy="-2.5" rx="5" ry="8" transform="rotate(288)"/>
+      <circle cx="0" cy="0" r="3" fill="#fda4af"/>
+    </g>
+    <ellipse cx="100" cy="36" rx="7" ry="4" transform="rotate(-8 100 36)" opacity="0.55"/>
+    <ellipse cx="168" cy="100" rx="6" ry="3.5" transform="rotate(22 168 100)" opacity="0.5"/>
+    <ellipse cx="32" cy="100" rx="6" ry="3.5" transform="rotate(-30 32 100)" opacity="0.5"/>
+  </g>
+
+  <circle cx="100" cy="100" r="76" fill="none" stroke="rgba(255,255,255,0.11)" stroke-width="1.2"/>
+  <circle cx="100" cy="100" r="58" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>
+
+  <!-- center hole (tránh đè chữ) -->
+  <circle cx="100" cy="100" r="14" fill="#0f172a" opacity="0.35"/>
+  <circle cx="100" cy="100" r="14" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+
+  <text
+    x="100"
+    y="78"
+    text-anchor="middle"
+    fill="rgba(255,255,255,0.95)"
+    font-size="20"
+    font-family="'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', system-ui, sans-serif"
+    font-weight="600"
+    letter-spacing="0.12em"
+  >はな</text>
+  <text
+    x="100"
+    y="136"
+    text-anchor="middle"
+    fill="rgba(255,255,255,0.82)"
+    font-size="10.5"
+    font-family="'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', system-ui, sans-serif"
+    letter-spacing="0.12em"
+  >メディアボックス</text>
+</svg>
