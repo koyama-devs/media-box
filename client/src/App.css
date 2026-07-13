@@ -1349,6 +1349,16 @@
   display: block;
 }
 
+.action-icon--spin {
+  animation: action-spin 0.75s linear infinite;
+}
+
+@keyframes action-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .icon-button--download,
 .icon-button--link,
 .icon-button--rename {
@@ -1366,10 +1376,24 @@
   box-shadow: 0 4px 14px var(--blue-glow);
 }
 
+.icon-button--download.is-busy {
+  cursor: wait;
+  opacity: 1;
+  color: #fff;
+  border-color: rgba(147, 197, 253, 0.55);
+  background: linear-gradient(135deg, var(--blue-600), var(--blue-500));
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+}
+
+.icon-button--download.is-done,
 .icon-button--link.is-copied {
   color: #86efac;
   border-color: rgba(74, 222, 128, 0.45);
   background: rgba(22, 163, 74, 0.18);
+}
+
+.icon-button--download:disabled {
+  cursor: wait;
 }
 
 .icon-button.danger:hover {

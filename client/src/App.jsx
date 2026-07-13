@@ -185,6 +185,27 @@ function RenameIcon() {
   )
 }
 
+function SpinnerIcon() {
+  return (
+    <svg className="action-icon action-icon--spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle
+        cx="12"
+        cy="12"
+        r="8"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeOpacity="0.25"
+      />
+      <path
+        d="M12 4a8 8 0 0 1 8 8"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(() => {
     try {
@@ -214,6 +235,8 @@ function App() {
   const [dragItemId, setDragItemId] = useState(null)
   const [dragOverItemId, setDragOverItemId] = useState(null)
   const [copiedItemId, setCopiedItemId] = useState(null)
+  const [downloadingItemId, setDownloadingItemId] = useState(null)
+  const [downloadedItemId, setDownloadedItemId] = useState(null)
   const [pendingDeleteId, setPendingDeleteId] = useState(null)
   const [swipeReveal, setSwipeReveal] = useState(null)
   const urlTrackAppliedRef = useRef(false)
@@ -997,18 +1020,67 @@ const playPrevious = useCallback(() => {
 
   const downloadTrack = async (item) => {
     if (!item || (item.kind !== 'audio' && item.kind !== 'video')) return
+    if (downloadingItemId) return
+
+    setDownloadingItemId(item.id)
+    setError('')
+
+    let createdObjectUrl = null
     try {
       const url = await ensureMediaUrl(item.id, item.type)
+      const response = await fetch(url)
+      if (!response.ok) {
+        throw new Error('ファイルの取得に失敗しました。')
+      }
+      const blob = await response.blob()
+      const fileName = item.name || 'media'
+      const file = new File([blob], fileName, {
+        type: item.type || blob.type || 'application/octet-stream',
+      })
+
+      const canShareFiles =
+        typeof navigator.canShare === 'function' &&
+        typeof navigator.share === 'function' &&
+        navigator.canShare({ files: [file] })
+
+      if (canShareFiles) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: getDisplayName(fileName),
+          })
+          setDownloadedItemId(item.id)
+          window.setTimeout(() => {
+            setDownloadedItemId((current) => (current === item.id ? null : current))
+          }, 1600)
+          return
+        } catch (shareError) {
+          if (shareError?.name === 'AbortError') return
+          // Fall through to anchor download
+        }
+      }
+
+      createdObjectUrl = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = item.name || 'media'
+      anchor.href = createdObjectUrl
+      anchor.download = fileName
       anchor.rel = 'noopener'
       document.body.appendChild(anchor)
       anchor.click()
       anchor.remove()
+
+      setDownloadedItemId(item.id)
+      window.setTimeout(() => {
+        setDownloadedItemId((current) => (current === item.id ? null : current))
+      }, 1600)
     } catch (downloadError) {
       console.error(downloadError)
       setError(downloadError?.message || 'ダウンロードに失敗しました。')
+    } finally {
+      if (createdObjectUrl) {
+        window.setTimeout(() => URL.revokeObjectURL(createdObjectUrl), 30_000)
+      }
+      setDownloadingItemId(null)
     }
   }
 
@@ -1509,15 +1581,31 @@ const playPrevious = useCallback(() => {
                             </button>
                             <button
                               type="button"
-                              className="icon-button icon-button--download"
-                              title="ダウンロード"
+                              className={`icon-button icon-button--download${
+                                downloadingItemId === item.id ? ' is-busy' : ''
+                              }${downloadedItemId === item.id ? ' is-done' : ''}`}
+                              title={
+                                downloadingItemId === item.id
+                                  ? 'ダウンロード準備中...'
+                                  : downloadedItemId === item.id
+                                    ? 'ダウンロード開始'
+                                    : 'ダウンロード'
+                              }
                               aria-label="ダウンロード"
+                              aria-busy={downloadingItemId === item.id}
+                              disabled={downloadingItemId === item.id}
                               onClick={(event) => {
                                 event.stopPropagation()
                                 downloadTrack(item)
                               }}
                             >
-                              <DownloadIcon />
+                              {downloadingItemId === item.id ? (
+                                <SpinnerIcon />
+                              ) : downloadedItemId === item.id ? (
+                                <CheckIcon />
+                              ) : (
+                                <DownloadIcon />
+                              )}
                             </button>
                             <button
                               type="button"
