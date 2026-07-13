@@ -134,7 +134,11 @@ function App() {
   const [dragItemId, setDragItemId] = useState(null)
   const [dragOverItemId, setDragOverItemId] = useState(null)
   const [copiedItemId, setCopiedItemId] = useState(null)
+  const [pendingDeleteId, setPendingDeleteId] = useState(null)
+  const [swipedItemId, setSwipedItemId] = useState(null)
   const urlTrackAppliedRef = useRef(false)
+  const swipeStartRef = useRef({ x: 0, y: 0, id: null, ignoring: false })
+  const swipeOffsetRef = useRef(0)
   const blobUrlsRef = useRef(new Set())
   const mediaUrlCacheRef = useRef(new Map())
 
@@ -928,6 +932,31 @@ const playPrevious = useCallback(() => {
     }
   }
 
+  const requestDelete = (itemId) => {
+    setPendingDeleteId(itemId)
+    setSwipedItemId(null)
+  }
+
+  const cancelDelete = () => {
+    setPendingDeleteId(null)
+  }
+
+  const confirmDelete = async () => {
+    if (!pendingDeleteId) return
+    const itemId = pendingDeleteId
+    setPendingDeleteId(null)
+    await handleDelete(itemId)
+  }
+
+  useEffect(() => {
+    if (!pendingDeleteId) return undefined
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') cancelDelete()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [pendingDeleteId])
+
   const handleDelete = async (itemId) => {
     const target = items.find((item) => item.id === itemId)
     if (!target) return
@@ -1085,7 +1114,7 @@ const playPrevious = useCallback(() => {
                       <button type="button" className="primary-button" onClick={startPlaylist} disabled={playableItems.length === 0}>
                         リスト再生
                       </button>
-                      <button type="button" className="danger-button" onClick={() => handleDelete(selectedItem.id)}>
+                      <button type="button" className="danger-button" onClick={() => requestDelete(selectedItem.id)}>
                         削除
                       </button>
                     </div>
@@ -1178,6 +1207,7 @@ const playPrevious = useCallback(() => {
                   ドラッグで並び替え、リンク共有・ダウンロード・
                   <span className="hint-rename-icon" aria-hidden="true">✎</span>
                   {' '}で編集
+                  <span className="playlist-hint-mobile"> · 左にスワイプで削除</span>
                 </p>
               ) : null}
 
@@ -1191,7 +1221,9 @@ const playPrevious = useCallback(() => {
                 </div>
               ) : (
                 <ul className="video-list">
-                  {playableItems.map((item) => (
+                  {playableItems.map((item) => {
+                    const isSwiped = swipedItemId === item.id
+                    return (
                     <li
                       key={item.id}
                       className={[
@@ -1199,9 +1231,11 @@ const playPrevious = useCallback(() => {
                         selectedItem?.id === item.id ? 'active' : '',
                         dragItemId === item.id ? 'is-dragging' : '',
                         dragOverItemId === item.id ? 'is-drag-over' : '',
+                        isSwiped ? 'is-swiped' : '',
                       ].filter(Boolean).join(' ')}
-                      draggable={editingItemId !== item.id}
+                      draggable={editingItemId !== item.id && !isSwiped}
                       onDragStart={(event) => {
+                        if (swipedItemId) setSwipedItemId(null)
                         setDragItemId(item.id)
                         event.dataTransfer.effectAllowed = 'move'
                         event.dataTransfer.setData('text/plain', item.id)
@@ -1230,6 +1264,63 @@ const playPrevious = useCallback(() => {
                         setDragOverItemId(null)
                       }}
                     >
+                      <div className="video-item-swipe-action" aria-hidden={!isSwiped}>
+                        <button
+                          type="button"
+                          className="swipe-delete-btn"
+                          tabIndex={isSwiped ? 0 : -1}
+                          onClick={() => requestDelete(item.id)}
+                        >
+                          削除
+                        </button>
+                      </div>
+
+                      <div
+                        className="video-item-body"
+                        onTouchStart={(event) => {
+                          const touch = event.touches[0]
+                          if (!touch) return
+                          swipeStartRef.current = {
+                            x: touch.clientX,
+                            y: touch.clientY,
+                            id: item.id,
+                            ignoring: false,
+                          }
+                          swipeOffsetRef.current = isSwiped ? -72 : 0
+                        }}
+                        onTouchMove={(event) => {
+                          const touch = event.touches[0]
+                          const start = swipeStartRef.current
+                          if (!touch || start.id !== item.id) return
+                          const dx = touch.clientX - start.x
+                          const dy = touch.clientY - start.y
+                          if (!start.ignoring && Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 8) {
+                            swipeStartRef.current.ignoring = true
+                            return
+                          }
+                          if (start.ignoring) return
+                          if (Math.abs(dx) > 8) {
+                            event.preventDefault()
+                          }
+                          const next = Math.min(0, Math.max(-72, (isSwiped ? -72 : 0) + dx))
+                          swipeOffsetRef.current = next
+                          event.currentTarget.style.transform = `translateX(${next}px)`
+                        }}
+                        onTouchEnd={(event) => {
+                          const start = swipeStartRef.current
+                          if (start.id !== item.id) return
+                          const shouldOpen = swipeOffsetRef.current <= -40
+                          event.currentTarget.style.transform = ''
+                          setSwipedItemId(shouldOpen ? item.id : null)
+                          swipeStartRef.current = { x: 0, y: 0, id: null, ignoring: false }
+                          swipeOffsetRef.current = 0
+                        }}
+                        onTouchCancel={(event) => {
+                          event.currentTarget.style.transform = ''
+                          swipeStartRef.current = { x: 0, y: 0, id: null, ignoring: false }
+                          swipeOffsetRef.current = 0
+                        }}
+                      >
                       <span className="drag-handle" title="ドラッグで並び替え" aria-hidden="true">
                         ⠿
                       </span>
@@ -1263,7 +1354,17 @@ const playPrevious = useCallback(() => {
                           </button>
                         </form>
                       ) : (
-                        <button type="button" className="video-title" onClick={() => selectItem(item.id)}>
+                        <button
+                          type="button"
+                          className="video-title"
+                          onClick={() => {
+                            if (isSwiped) {
+                              setSwipedItemId(null)
+                              return
+                            }
+                            selectItem(item.id)
+                          }}
+                        >
                           <strong>
                             <span className={`kind-chip kind-${item.kind}`} aria-hidden="true">
                               {item.kind === 'audio' ? '♪' : '▶'}
@@ -1311,12 +1412,20 @@ const playPrevious = useCallback(() => {
                             </button>
                           </>
                         ) : null}
-                        <button type="button" className="icon-button danger" onClick={() => handleDelete(item.id)}>
+                        <button
+                          type="button"
+                          className="icon-button danger item-delete-btn"
+                          title="削除"
+                          aria-label="削除"
+                          onClick={() => requestDelete(item.id)}
+                        >
                           ×
                         </button>
                       </div>
+                      </div>
                     </li>
-                  ))}
+                    )
+                  })}
                 </ul>
               )}
 
@@ -1347,7 +1456,13 @@ const playPrevious = useCallback(() => {
                             {formatSize(item.size)}
                           </span>
                         </button>
-                        <button type="button" className="icon-button danger" onClick={() => handleDelete(item.id)}>
+                        <button
+                          type="button"
+                          className="icon-button danger item-delete-btn"
+                          title="削除"
+                          aria-label="削除"
+                          onClick={() => requestDelete(item.id)}
+                        >
                           ×
                         </button>
                       </li>
@@ -1359,6 +1474,34 @@ const playPrevious = useCallback(() => {
           </main>
         </>
       )}
+
+      {pendingDeleteId ? (
+        <div className="confirm-overlay" role="presentation" onClick={cancelDelete}>
+          <div
+            className="confirm-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-confirm-title"
+            aria-describedby="delete-confirm-desc"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 id="delete-confirm-title">削除の確認</h3>
+            <p id="delete-confirm-desc">
+              「{getDisplayName(items.find((item) => item.id === pendingDeleteId)?.name || '')}」を削除しますか？
+              <br />
+              この操作は取り消せません。
+            </p>
+            <div className="confirm-actions">
+              <button type="button" className="secondary-button" onClick={cancelDelete}>
+                キャンセル
+              </button>
+              <button type="button" className="danger-button" onClick={confirmDelete}>
+                削除する
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

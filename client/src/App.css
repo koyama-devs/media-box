@@ -1056,15 +1056,69 @@
 }
 
 .video-item {
+  position: relative;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 8px;
-  padding: 12px 14px;
+  gap: 0;
+  padding: 0;
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid transparent;
   transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+  overflow: hidden;
+}
+
+.video-item-swipe-action {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 72px;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  z-index: 0;
+}
+
+.swipe-delete-btn {
+  flex: 1;
+  border: none;
+  margin: 0;
+  padding: 0;
+  background: #dc2626;
+  color: #fff;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.video-item-body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 14px;
+  background: #0c121c;
+  transition: transform 0.2s ease;
+  touch-action: pan-y;
+}
+
+.video-item:hover .video-item-body {
+  background: #111827;
+}
+
+.video-item.active .video-item-body {
+  background: #152033;
+}
+
+.video-item.is-swiped .video-item-body {
+  transform: translateX(-72px);
+}
+
+.playlist-hint-mobile {
+  display: none;
 }
 
 .video-item:hover {
@@ -1321,6 +1375,51 @@
   border: 0;
 }
 
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(2, 6, 23, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.confirm-dialog {
+  width: min(100%, 360px);
+  padding: 22px 20px 18px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: linear-gradient(160deg, #1e293b, #0f172a 70%);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+}
+
+.confirm-dialog h3 {
+  margin: 0 0 10px;
+  font-size: 1.05rem;
+  color: var(--text-primary);
+}
+
+.confirm-dialog p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.video-item.cover-item {
+  gap: 8px;
+  padding: 12px 14px;
+}
+
 @media (max-width: 900px) {
   .content-grid {
     grid-template-columns: 1fr;
@@ -1378,6 +1477,22 @@
 
   .video-item {
     flex-direction: row;
+  }
+
+  .item-delete-btn {
+    display: none;
+  }
+
+  .cover-item .item-delete-btn {
+    display: inline-flex;
+  }
+
+  .playlist-hint-mobile {
+    display: inline;
+  }
+
+  .drag-handle {
+    display: none;
   }
 
   .vinyl-deco {
