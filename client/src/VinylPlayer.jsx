@@ -9,11 +9,11 @@ import defaultLabelUrl from './assets/vinyl-label-default.svg?url'
 const DEFAULT_LABEL = defaultLabelUrl
 
 const JACKET_STYLES = [
+  { id: 'petal', label: 'ペタル', url: jacketPetalUrl },
   { id: 'sakura', label: 'サクラ', url: jacketSakuraUrl },
   { id: 'poster', label: 'ポスター', url: jacketPosterUrl },
   { id: 'record', label: 'スリーブ', url: jacketRecordUrl },
   { id: 'paper', label: 'ペーパー', url: jacketPaperUrl },
-  { id: 'petal', label: 'ペタル', url: jacketPetalUrl },
 ]
 
 const JACKET_STYLE_KEY = 'hana-mediabox-jacket-style'
