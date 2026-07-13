@@ -105,6 +105,86 @@ function formatSize(bytes) {
   return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`
 }
 
+function DownloadIcon() {
+  return (
+    <svg className="action-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 3.5v11.2"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M8.2 11.2 12 15l3.8-3.8"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M5 18.5h14"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
+function LinkIcon() {
+  return (
+    <svg className="action-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M10 13a5 5 0 0 0 7.07.07l1.86-1.86a5 5 0 0 0-7.07-7.07L10.4 5.6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M14 11a5 5 0 0 0-7.07-.07L5.07 12.8a5 5 0 0 0 7.07 7.07L13.6 18.4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function CheckIcon() {
+  return (
+    <svg className="action-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M5.5 12.5 10 17l8.5-9"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function RenameIcon() {
+  return (
+    <svg className="action-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M5 19h3.2L18.4 8.8a1.9 1.9 0 0 0 0-2.7L17 4.7a1.9 1.9 0 0 0-2.7 0L4.1 14.9V19z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M13.4 5.6 17.5 9.7"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(() => {
     try {
@@ -1204,9 +1284,14 @@ const playPrevious = useCallback(() => {
               </div>
               {playableItems.length > 1 ? (
                 <p className="playlist-hint">
-                  ドラッグで並び替え、リンク共有・ダウンロード・
-                  <span className="hint-rename-icon" aria-hidden="true">✎</span>
-                  {' '}で編集
+                  ドラッグで並び替え、リンク共有・ダウンロード
+                  <span className="playlist-hint-desktop">
+                    ・
+                    <span className="hint-rename-icon" aria-hidden="true">
+                      <RenameIcon />
+                    </span>
+                    {' '}で編集
+                  </span>
                   <span className="playlist-hint-mobile"> · 右スワイプで編集 / 左スワイプで削除</span>
                 </p>
               ) : null}
@@ -1281,7 +1366,9 @@ const playPrevious = useCallback(() => {
                             startRename(item, event)
                           }}
                         >
-                          <span className="swipe-rename-icon" aria-hidden="true">✎</span>
+                          <span className="swipe-rename-icon" aria-hidden="true">
+                            <RenameIcon />
+                          </span>
                         </button>
                       </div>
 
@@ -1410,7 +1497,7 @@ const playPrevious = useCallback(() => {
                           <>
                             <button
                               type="button"
-                              className="icon-button"
+                              className={`icon-button icon-button--link${copiedItemId === item.id ? ' is-copied' : ''}`}
                               title={copiedItemId === item.id ? 'コピーしました' : 'リンクをコピー'}
                               aria-label="リンクをコピー"
                               onClick={(event) => {
@@ -1418,11 +1505,11 @@ const playPrevious = useCallback(() => {
                                 copyTrackLink(item.id)
                               }}
                             >
-                              {copiedItemId === item.id ? '✓' : '🔗'}
+                              {copiedItemId === item.id ? <CheckIcon /> : <LinkIcon />}
                             </button>
                             <button
                               type="button"
-                              className="icon-button"
+                              className="icon-button icon-button--download"
                               title="ダウンロード"
                               aria-label="ダウンロード"
                               onClick={(event) => {
@@ -1430,7 +1517,7 @@ const playPrevious = useCallback(() => {
                                 downloadTrack(item)
                               }}
                             >
-                              ⬇
+                              <DownloadIcon />
                             </button>
                             <button
                               type="button"
@@ -1438,7 +1525,7 @@ const playPrevious = useCallback(() => {
                               title="名前を変更"
                               onClick={(event) => startRename(item, event)}
                             >
-                              ✎
+                              <RenameIcon />
                             </button>
                           </>
                         ) : null}
