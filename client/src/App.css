@@ -1071,7 +1071,8 @@
 
 .video-item-swipe-action {
   position: absolute;
-  inset: 0 0 0 auto;
+  top: 0;
+  bottom: 0;
   width: 72px;
   display: flex;
   align-items: stretch;
@@ -1079,17 +1080,44 @@
   z-index: 0;
 }
 
-.swipe-delete-btn {
+.video-item-swipe-action--rename {
+  left: 0;
+}
+
+.video-item-swipe-action--delete {
+  right: 0;
+}
+
+.swipe-delete-btn,
+.swipe-rename-btn {
   flex: 1;
   border: none;
   margin: 0;
   padding: 0;
-  background: #dc2626;
-  color: #fff;
   font: inherit;
   font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
+}
+
+.swipe-delete-btn {
+  background: #dc2626;
+  color: #fff;
+}
+
+.swipe-rename-btn {
+  background: #2563eb;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.swipe-rename-icon {
+  display: inline-block;
+  transform: scaleX(-1);
+  font-size: 1.05rem;
+  line-height: 1;
 }
 
 .video-item-body {
@@ -1113,8 +1141,12 @@
   background: #152033;
 }
 
-.video-item.is-swiped .video-item-body {
+.video-item.is-swiped-delete .video-item-body {
   transform: translateX(-72px);
+}
+
+.video-item.is-swiped-rename .video-item-body {
+  transform: translateX(72px);
 }
 
 .playlist-hint-mobile {
@@ -1479,7 +1511,8 @@
     flex-direction: row;
   }
 
-  .item-delete-btn {
+  .item-delete-btn,
+  .item-rename-btn {
     display: none;
   }
 

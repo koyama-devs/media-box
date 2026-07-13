@@ -135,7 +135,7 @@ function App() {
   const [dragOverItemId, setDragOverItemId] = useState(null)
   const [copiedItemId, setCopiedItemId] = useState(null)
   const [pendingDeleteId, setPendingDeleteId] = useState(null)
-  const [swipedItemId, setSwipedItemId] = useState(null)
+  const [swipeReveal, setSwipeReveal] = useState(null)
   const urlTrackAppliedRef = useRef(false)
   const swipeStartRef = useRef({ x: 0, y: 0, id: null, ignoring: false })
   const swipeOffsetRef = useRef(0)
@@ -934,7 +934,7 @@ const playPrevious = useCallback(() => {
 
   const requestDelete = (itemId) => {
     setPendingDeleteId(itemId)
-    setSwipedItemId(null)
+    setSwipeReveal(null)
   }
 
   const cancelDelete = () => {
@@ -1207,7 +1207,7 @@ const playPrevious = useCallback(() => {
                   ドラッグで並び替え、リンク共有・ダウンロード・
                   <span className="hint-rename-icon" aria-hidden="true">✎</span>
                   {' '}で編集
-                  <span className="playlist-hint-mobile"> · 左にスワイプで削除</span>
+                  <span className="playlist-hint-mobile"> · 右スワイプで編集 / 左スワイプで削除</span>
                 </p>
               ) : null}
 
@@ -1222,7 +1222,8 @@ const playPrevious = useCallback(() => {
               ) : (
                 <ul className="video-list">
                   {playableItems.map((item) => {
-                    const isSwiped = swipedItemId === item.id
+                    const swipeMode = swipeReveal?.id === item.id ? swipeReveal.mode : null
+                    const baseOffset = swipeMode === 'delete' ? -72 : swipeMode === 'rename' ? 72 : 0
                     return (
                     <li
                       key={item.id}
@@ -1231,11 +1232,12 @@ const playPrevious = useCallback(() => {
                         selectedItem?.id === item.id ? 'active' : '',
                         dragItemId === item.id ? 'is-dragging' : '',
                         dragOverItemId === item.id ? 'is-drag-over' : '',
-                        isSwiped ? 'is-swiped' : '',
+                        swipeMode === 'delete' ? 'is-swiped-delete' : '',
+                        swipeMode === 'rename' ? 'is-swiped-rename' : '',
                       ].filter(Boolean).join(' ')}
-                      draggable={editingItemId !== item.id && !isSwiped}
+                      draggable={editingItemId !== item.id && !swipeMode}
                       onDragStart={(event) => {
-                        if (swipedItemId) setSwipedItemId(null)
+                        if (swipeReveal) setSwipeReveal(null)
                         setDragItemId(item.id)
                         event.dataTransfer.effectAllowed = 'move'
                         event.dataTransfer.setData('text/plain', item.id)
@@ -1264,11 +1266,33 @@ const playPrevious = useCallback(() => {
                         setDragOverItemId(null)
                       }}
                     >
-                      <div className="video-item-swipe-action" aria-hidden={!isSwiped}>
+                      <div
+                        className="video-item-swipe-action video-item-swipe-action--rename"
+                        aria-hidden={swipeMode !== 'rename'}
+                      >
+                        <button
+                          type="button"
+                          className="swipe-rename-btn"
+                          tabIndex={swipeMode === 'rename' ? 0 : -1}
+                          title="名前を変更"
+                          aria-label="名前を変更"
+                          onClick={(event) => {
+                            setSwipeReveal(null)
+                            startRename(item, event)
+                          }}
+                        >
+                          <span className="swipe-rename-icon" aria-hidden="true">✎</span>
+                        </button>
+                      </div>
+
+                      <div
+                        className="video-item-swipe-action video-item-swipe-action--delete"
+                        aria-hidden={swipeMode !== 'delete'}
+                      >
                         <button
                           type="button"
                           className="swipe-delete-btn"
-                          tabIndex={isSwiped ? 0 : -1}
+                          tabIndex={swipeMode === 'delete' ? 0 : -1}
                           onClick={() => requestDelete(item.id)}
                         >
                           削除
@@ -1286,7 +1310,7 @@ const playPrevious = useCallback(() => {
                             id: item.id,
                             ignoring: false,
                           }
-                          swipeOffsetRef.current = isSwiped ? -72 : 0
+                          swipeOffsetRef.current = baseOffset
                         }}
                         onTouchMove={(event) => {
                           const touch = event.touches[0]
@@ -1302,16 +1326,22 @@ const playPrevious = useCallback(() => {
                           if (Math.abs(dx) > 8) {
                             event.preventDefault()
                           }
-                          const next = Math.min(0, Math.max(-72, (isSwiped ? -72 : 0) + dx))
+                          const next = Math.min(72, Math.max(-72, baseOffset + dx))
                           swipeOffsetRef.current = next
                           event.currentTarget.style.transform = `translateX(${next}px)`
                         }}
                         onTouchEnd={(event) => {
                           const start = swipeStartRef.current
                           if (start.id !== item.id) return
-                          const shouldOpen = swipeOffsetRef.current <= -40
+                          const offset = swipeOffsetRef.current
                           event.currentTarget.style.transform = ''
-                          setSwipedItemId(shouldOpen ? item.id : null)
+                          if (offset <= -40) {
+                            setSwipeReveal({ id: item.id, mode: 'delete' })
+                          } else if (offset >= 40) {
+                            setSwipeReveal({ id: item.id, mode: 'rename' })
+                          } else {
+                            setSwipeReveal(null)
+                          }
                           swipeStartRef.current = { x: 0, y: 0, id: null, ignoring: false }
                           swipeOffsetRef.current = 0
                         }}
@@ -1358,8 +1388,8 @@ const playPrevious = useCallback(() => {
                           type="button"
                           className="video-title"
                           onClick={() => {
-                            if (isSwiped) {
-                              setSwipedItemId(null)
+                            if (swipeMode) {
+                              setSwipeReveal(null)
                               return
                             }
                             selectItem(item.id)
@@ -1404,7 +1434,7 @@ const playPrevious = useCallback(() => {
                             </button>
                             <button
                               type="button"
-                              className="icon-button icon-button--rename"
+                              className="icon-button icon-button--rename item-rename-btn"
                               title="名前を変更"
                               onClick={(event) => startRename(item, event)}
                             >
