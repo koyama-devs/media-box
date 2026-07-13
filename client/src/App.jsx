@@ -1174,7 +1174,11 @@ const playPrevious = useCallback(() => {
                 <span>{playableItems.length} 件</span>
               </div>
               {playableItems.length > 1 ? (
-                <p className="playlist-hint">ドラッグで並び替え、リンク共有・ダウンロード・✎ で編集</p>
+                <p className="playlist-hint">
+                  ドラッグで並び替え、リンク共有・ダウンロード・
+                  <span className="hint-rename-icon" aria-hidden="true">✎</span>
+                  {' '}で編集
+                </p>
               ) : null}
 
               {loadingItems ? (
@@ -1299,7 +1303,7 @@ const playPrevious = useCallback(() => {
                             </button>
                             <button
                               type="button"
-                              className="icon-button"
+                              className="icon-button icon-button--rename"
                               title="名前を変更"
                               onClick={(event) => startRename(item, event)}
                             >

@@ -1137,6 +1137,15 @@
   cursor: not-allowed;
 }
 
+.icon-button--rename {
+  transform: scaleX(-1);
+}
+
+.hint-rename-icon {
+  display: inline-block;
+  transform: scaleX(-1);
+}
+
 .video-title {
   flex: 1;
   text-align: left;
