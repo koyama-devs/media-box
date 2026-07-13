@@ -105,24 +105,14 @@ function formatSize(bytes) {
   return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`
 }
 
-function DownloadIcon() {
+function ShareIcon() {
   return (
     <svg className="action-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="18" cy="5" r="2.4" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="6" cy="12" r="2.4" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="18" cy="19" r="2.4" stroke="currentColor" strokeWidth="1.8" />
       <path
-        d="M12 3.5v11.2"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M8.2 11.2 12 15l3.8-3.8"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M5 18.5h14"
+        d="M8.2 10.8 15.7 6.4M8.2 13.2 15.7 17.6"
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinecap="round"
@@ -235,8 +225,8 @@ function App() {
   const [dragItemId, setDragItemId] = useState(null)
   const [dragOverItemId, setDragOverItemId] = useState(null)
   const [copiedItemId, setCopiedItemId] = useState(null)
-  const [downloadingItemId, setDownloadingItemId] = useState(null)
-  const [downloadedItemId, setDownloadedItemId] = useState(null)
+  const [sharingItemId, setSharingItemId] = useState(null)
+  const [sharedItemId, setSharedItemId] = useState(null)
   const [pendingDeleteId, setPendingDeleteId] = useState(null)
   const [swipeReveal, setSwipeReveal] = useState(null)
   const urlTrackAppliedRef = useRef(false)
@@ -1018,11 +1008,14 @@ const playPrevious = useCallback(() => {
     }
   }
 
-  const downloadTrack = async (item) => {
+  const shareTrack = async (item) => {
     if (!item || (item.kind !== 'audio' && item.kind !== 'video')) return
-    if (downloadingItemId) return
+    if (sharingItemId) return
 
-    setDownloadingItemId(item.id)
+    const fileName = item.name || 'media'
+    const displayName = getDisplayName(fileName)
+
+    setSharingItemId(item.id)
     setError('')
 
     let createdObjectUrl = null
@@ -1033,7 +1026,6 @@ const playPrevious = useCallback(() => {
         throw new Error('ファイルの取得に失敗しました。')
       }
       const blob = await response.blob()
-      const fileName = item.name || 'media'
       const file = new File([blob], fileName, {
         type: item.type || blob.type || 'application/octet-stream',
       })
@@ -1047,11 +1039,12 @@ const playPrevious = useCallback(() => {
         try {
           await navigator.share({
             files: [file],
-            title: getDisplayName(fileName),
+            title: fileName,
+            text: fileName,
           })
-          setDownloadedItemId(item.id)
+          setSharedItemId(item.id)
           window.setTimeout(() => {
-            setDownloadedItemId((current) => (current === item.id ? null : current))
+            setSharedItemId((current) => (current === item.id ? null : current))
           }, 1600)
           return
         } catch (shareError) {
@@ -1065,22 +1058,23 @@ const playPrevious = useCallback(() => {
       anchor.href = createdObjectUrl
       anchor.download = fileName
       anchor.rel = 'noopener'
+      anchor.setAttribute('download', fileName)
       document.body.appendChild(anchor)
       anchor.click()
       anchor.remove()
 
-      setDownloadedItemId(item.id)
+      setSharedItemId(item.id)
       window.setTimeout(() => {
-        setDownloadedItemId((current) => (current === item.id ? null : current))
+        setSharedItemId((current) => (current === item.id ? null : current))
       }, 1600)
-    } catch (downloadError) {
-      console.error(downloadError)
-      setError(downloadError?.message || 'ダウンロードに失敗しました。')
+    } catch (shareError) {
+      console.error(shareError)
+      setError(shareError?.message || `「${displayName}」の共有に失敗しました。`)
     } finally {
       if (createdObjectUrl) {
         window.setTimeout(() => URL.revokeObjectURL(createdObjectUrl), 30_000)
       }
-      setDownloadingItemId(null)
+      setSharingItemId(null)
     }
   }
 
@@ -1356,7 +1350,7 @@ const playPrevious = useCallback(() => {
               </div>
               {playableItems.length > 1 ? (
                 <p className="playlist-hint">
-                  ドラッグで並び替え、リンク共有・ダウンロード
+                  ドラッグで並び替え、リンク共有・ファイル共有
                   <span className="playlist-hint-desktop">
                     ・
                     <span className="hint-rename-icon" aria-hidden="true">
@@ -1365,6 +1359,11 @@ const playPrevious = useCallback(() => {
                     {' '}で編集
                   </span>
                   <span className="playlist-hint-mobile"> · 右スワイプで編集 / 左スワイプで削除</span>
+                </p>
+              ) : null}
+              {sharingItemId ? (
+                <p className="share-status" role="status" aria-live="polite">
+                  「{items.find((entry) => entry.id === sharingItemId)?.name || 'media'}」を準備中...
                 </p>
               ) : null}
 
@@ -1581,30 +1580,30 @@ const playPrevious = useCallback(() => {
                             </button>
                             <button
                               type="button"
-                              className={`icon-button icon-button--download${
-                                downloadingItemId === item.id ? ' is-busy' : ''
-                              }${downloadedItemId === item.id ? ' is-done' : ''}`}
+                              className={`icon-button icon-button--share${
+                                sharingItemId === item.id ? ' is-busy' : ''
+                              }${sharedItemId === item.id ? ' is-done' : ''}`}
                               title={
-                                downloadingItemId === item.id
-                                  ? 'ダウンロード準備中...'
-                                  : downloadedItemId === item.id
-                                    ? 'ダウンロード開始'
-                                    : 'ダウンロード'
+                                sharingItemId === item.id
+                                  ? `「${item.name || getDisplayName(item.name)}」を準備中...`
+                                  : sharedItemId === item.id
+                                    ? '共有しました'
+                                    : `「${item.name || 'media'}」を共有`
                               }
-                              aria-label="ダウンロード"
-                              aria-busy={downloadingItemId === item.id}
-                              disabled={downloadingItemId === item.id}
+                              aria-label={`「${item.name || 'media'}」を共有`}
+                              aria-busy={sharingItemId === item.id}
+                              disabled={sharingItemId === item.id}
                               onClick={(event) => {
                                 event.stopPropagation()
-                                downloadTrack(item)
+                                shareTrack(item)
                               }}
                             >
-                              {downloadingItemId === item.id ? (
+                              {sharingItemId === item.id ? (
                                 <SpinnerIcon />
-                              ) : downloadedItemId === item.id ? (
+                              ) : sharedItemId === item.id ? (
                                 <CheckIcon />
                               ) : (
-                                <DownloadIcon />
+                                <ShareIcon />
                               )}
                             </button>
                             <button

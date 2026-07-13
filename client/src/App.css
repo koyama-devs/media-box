@@ -1175,6 +1175,17 @@
   color: var(--text-muted);
 }
 
+.share-status {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  color: #dbeafe;
+  background: rgba(37, 99, 235, 0.18);
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  word-break: break-all;
+}
+
 .drag-handle {
   color: var(--text-muted);
   cursor: grab;
@@ -1359,7 +1370,7 @@
   }
 }
 
-.icon-button--download,
+.icon-button--share,
 .icon-button--link,
 .icon-button--rename {
   color: var(--blue-400);
@@ -1367,7 +1378,7 @@
   background: rgba(37, 99, 235, 0.12);
 }
 
-.icon-button--download:hover,
+.icon-button--share:hover,
 .icon-button--link:hover,
 .icon-button--rename:hover {
   color: #fff;
@@ -1376,7 +1387,7 @@
   box-shadow: 0 4px 14px var(--blue-glow);
 }
 
-.icon-button--download.is-busy {
+.icon-button--share.is-busy {
   cursor: wait;
   opacity: 1;
   color: #fff;
@@ -1385,14 +1396,14 @@
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
 }
 
-.icon-button--download.is-done,
+.icon-button--share.is-done,
 .icon-button--link.is-copied {
   color: #86efac;
   border-color: rgba(74, 222, 128, 0.45);
   background: rgba(22, 163, 74, 0.18);
 }
 
-.icon-button--download:disabled {
+.icon-button--share:disabled {
   cursor: wait;
 }
 
