@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img" aria-label="Jacket style paper">
+  <defs>
+    <linearGradient id="paper" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a2332"/>
+      <stop offset="100%" stop-color="#243044"/>
+    </linearGradient>
+    <pattern id="grain" width="4" height="4" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1.5" r="0.45" fill="rgba(255,255,255,0.05)"/>
+      <circle cx="3" cy="3" r="0.35" fill="rgba(0,0,0,0.08)"/>
+    </pattern>
+  </defs>
+  <rect width="400" height="400" fill="url(#paper)"/>
+  <rect width="400" height="400" fill="url(#grain)"/>
+  <rect x="0" y="0" width="14" height="400" fill="rgba(0,0,0,0.35)"/>
+  <rect x="36" y="36" width="328" height="328" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+  <rect x="48" y="48" width="304" height="304" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+  <text x="120" y="368" text-anchor="middle" fill="rgba(255,255,255,0.72)" font-size="18" font-family="'Hiragino Sans','Yu Gothic UI',Meiryo,sans-serif" letter-spacing="0.36em">&#12399;&#12394;</text>
+  <text x="120" y="388" text-anchor="middle" fill="rgba(255,255,255,0.36)" font-size="10" font-family="'Hiragino Sans','Yu Gothic UI',Meiryo,sans-serif" letter-spacing="0.28em">MEDIA BOX</text>
+  <line x1="80" y1="348" x2="160" y2="348" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+</svg>

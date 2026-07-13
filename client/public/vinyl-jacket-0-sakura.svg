@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img" aria-label="Jacket style sakura">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="45%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e3a5f"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="35%" cy="78%" r="55%">
+      <stop offset="0%" stop-color="rgba(59,130,246,0.22)"/>
+      <stop offset="100%" stop-color="rgba(59,130,246,0)"/>
+    </radialGradient>
+    <linearGradient id="hanaFill" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fff7fb"/>
+      <stop offset="45%" stop-color="#fbcfe8"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="400" fill="url(#bg)"/>
+  <rect width="400" height="400" fill="url(#glow)"/>
+  <rect x="0" y="0" width="14" height="400" fill="rgba(0,0,0,0.35)"/>
+  <rect x="18" y="18" width="364" height="364" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="1.5"/>
+  <g fill="#fbcfe8" opacity="0.45">
+    <g transform="translate(52 300) rotate(-12) scale(1.35)">
+      <ellipse cx="0" cy="-8" rx="5" ry="8"/>
+      <ellipse cx="7.6" cy="-2.5" rx="5" ry="8" transform="rotate(72)"/>
+      <ellipse cx="4.7" cy="6.5" rx="5" ry="8" transform="rotate(144)"/>
+      <ellipse cx="-4.7" cy="6.5" rx="5" ry="8" transform="rotate(216)"/>
+      <ellipse cx="-7.6" cy="-2.5" rx="5" ry="8" transform="rotate(288)"/>
+      <circle cx="0" cy="0" r="3" fill="#fda4af"/>
+    </g>
+    <g transform="translate(168 336) rotate(6) scale(1.05)">
+      <ellipse cx="0" cy="-8" rx="5" ry="8"/>
+      <ellipse cx="7.6" cy="-2.5" rx="5" ry="8" transform="rotate(72)"/>
+      <ellipse cx="4.7" cy="6.5" rx="5" ry="8" transform="rotate(144)"/>
+      <ellipse cx="-4.7" cy="6.5" rx="5" ry="8" transform="rotate(216)"/>
+      <ellipse cx="-7.6" cy="-2.5" rx="5" ry="8" transform="rotate(288)"/>
+      <circle cx="0" cy="0" r="3" fill="#fda4af"/>
+    </g>
+  </g>
+
+  <!-- wordmark block: left-bottom, clear of notes on right -->
+  <text x="40" y="348" fill="rgba(251,207,232,0.55)" font-size="9" font-family="Georgia,'Times New Roman',serif" letter-spacing="0.34em">HANA</text>
+  <text x="41" y="378" fill="rgba(15,23,42,0.35)" font-size="28" font-family="'Hiragino Mincho ProN','Yu Mincho',Georgia,serif" letter-spacing="0.18em">&#12399;&#12394;</text>
+  <text x="40" y="377" fill="url(#hanaFill)" font-size="28" font-family="'Hiragino Mincho ProN','Yu Mincho',Georgia,serif" letter-spacing="0.18em">&#12399;&#12394;</text>
+  <line x1="40" y1="386" x2="132" y2="386" stroke="rgba(251,207,232,0.35)" stroke-width="1"/>
+  <text x="40" y="398" fill="rgba(191,219,254,0.55)" font-size="8" font-family="'Hiragino Sans','Yu Gothic UI',Meiryo,sans-serif" letter-spacing="0.2em">&#12513;&#12487;&#12451;&#12450;&#12508;&#12483;&#12463;&#12473;</text>
+</svg>

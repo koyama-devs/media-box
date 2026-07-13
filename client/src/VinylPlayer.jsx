@@ -1,9 +1,35 @@
 import { useEffect, useRef, useState } from 'react'
-import defaultJacketUrl from './assets/vinyl-jacket-default.svg?url'
+import jacketSakuraUrl from './assets/vinyl-jacket-0-sakura.svg?url'
+import jacketPosterUrl from './assets/vinyl-jacket-1-poster.svg?url'
+import jacketRecordUrl from './assets/vinyl-jacket-2-record.svg?url'
+import jacketPaperUrl from './assets/vinyl-jacket-3-paper.svg?url'
+import jacketPetalUrl from './assets/vinyl-jacket-4-petal.svg?url'
 import defaultLabelUrl from './assets/vinyl-label-default.svg?url'
 
 const DEFAULT_LABEL = defaultLabelUrl
-const DEFAULT_JACKET = defaultJacketUrl
+
+const JACKET_STYLES = [
+  { id: 'sakura', label: 'サクラ', url: jacketSakuraUrl },
+  { id: 'poster', label: 'ポスター', url: jacketPosterUrl },
+  { id: 'record', label: 'スリーブ', url: jacketRecordUrl },
+  { id: 'paper', label: 'ペーパー', url: jacketPaperUrl },
+  { id: 'petal', label: 'ペタル', url: jacketPetalUrl },
+]
+
+const JACKET_STYLE_KEY = 'hana-mediabox-jacket-style'
+
+function readJacketStyleIndex() {
+  try {
+    const raw = localStorage.getItem(JACKET_STYLE_KEY)
+    const index = Number(raw)
+    if (Number.isInteger(index) && index >= 0 && index < JACKET_STYLES.length) {
+      return index
+    }
+  } catch {
+    /* ignore */
+  }
+  return 0
+}
 
 function MusicNoteIcon() {
   return (
@@ -37,6 +63,38 @@ function TrashIcon() {
   )
 }
 
+function StyleSwapIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <rect x="3.5" y="3.5" width="8" height="8" rx="1.5"/>
+      <rect x="12.5" y="12.5" width="8" height="8" rx="1.5"/>
+      <path d="M14 6.5h3.5V10M10 17.5H6.5V14" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  )
+}
+
+function SleeveIcon({ open }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <rect x="3.5" y="4.5" width="11" height="15" rx="1.5"/>
+      <circle
+        cx={open ? 17.5 : 12.5}
+        cy="12"
+        r="4.2"
+        fill="currentColor"
+        fillOpacity="0.22"
+        style={{ transition: 'cx 0.25s ease' }}
+      />
+      <circle
+        cx={open ? 17.5 : 12.5}
+        cy="12"
+        r="4.2"
+        style={{ transition: 'cx 0.25s ease' }}
+      />
+    </svg>
+  )
+}
+
 export default function VinylPlayer({
   title,
   coverSrc,
@@ -56,10 +114,33 @@ export default function VinylPlayer({
   const coverInputRef = useRef(null)
   const jacketInputRef = useRef(null)
   const [labelSrc, setLabelSrc] = useState(DEFAULT_LABEL)
+  const [jacketStyleIndex, setJacketStyleIndex] = useState(readJacketStyleIndex)
+  const [isPeekingJacket, setIsPeekingJacket] = useState(false)
 
   useEffect(() => {
     setLabelSrc(coverSrc || DEFAULT_LABEL)
   }, [coverSrc])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(JACKET_STYLE_KEY, String(jacketStyleIndex))
+    } catch {
+      /* ignore */
+    }
+  }, [jacketStyleIndex])
+
+  useEffect(() => {
+    if (!isPeekingJacket) return undefined
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setIsPeekingJacket(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [isPeekingJacket])
+
+  const activeJacketStyle = JACKET_STYLES[jacketStyleIndex] || JACKET_STYLES[0]
+  const defaultJacketUrl = activeJacketStyle.url
+  const jacketBackgroundUrl = jacketSrc || defaultJacketUrl
 
   const openCoverPicker = () => {
     if (coverBusy || !onCoverPick) return
@@ -69,6 +150,16 @@ export default function VinylPlayer({
   const openJacketPicker = () => {
     if (jacketBusy || !onJacketPick) return
     jacketInputRef.current?.click()
+  }
+
+  const cycleJacketStyle = (event) => {
+    event.stopPropagation()
+    setJacketStyleIndex((current) => (current + 1) % JACKET_STYLES.length)
+  }
+
+  const toggleJacketPeek = (event) => {
+    event.stopPropagation()
+    setIsPeekingJacket((current) => !current)
   }
 
   const handleCoverFile = (event) => {
@@ -90,18 +181,53 @@ export default function VinylPlayer({
 
   return (
     <div className={`vinyl-player ${isPlaying ? 'is-playing' : ''}`}>
-      <div className={`vinyl-jacket ${useDefaultJacket ? 'is-default' : 'has-art'}`}>
+      <div
+        className={`vinyl-jacket ${useDefaultJacket ? 'is-default' : 'has-art'}${isPeekingJacket ? ' is-peeking' : ''}`}
+      >
         <div
           className="vinyl-jacket-art"
           aria-hidden="true"
           style={{
-            backgroundImage: `url("${jacketSrc || DEFAULT_JACKET}")`,
+            backgroundImage: `url("${jacketBackgroundUrl}")`,
           }}
         />
         <div className="vinyl-jacket-shade" aria-hidden="true" />
         <div className="vinyl-jacket-spine" aria-hidden="true" />
 
+        {useDefaultJacket ? (
+          <div className="vinyl-deco-group" aria-hidden="true">
+            <div className="vinyl-deco vinyl-deco--1">
+              <MusicNoteIcon />
+            </div>
+            <div className="vinyl-deco vinyl-deco--2">
+              <MusicNoteIcon />
+            </div>
+          </div>
+        ) : null}
+
         <div className="vinyl-cover-actions vinyl-cover-actions--jacket">
+          <button
+            type="button"
+            className={`vinyl-label-icon-btn${isPeekingJacket ? ' is-active' : ''}`}
+            onClick={toggleJacketPeek}
+            title={isPeekingJacket ? 'レコードを出す' : 'レコードをしまう'}
+            aria-label={isPeekingJacket ? 'レコードを出す' : 'レコードをしまう'}
+            aria-pressed={isPeekingJacket}
+          >
+            <SleeveIcon open={!isPeekingJacket} />
+          </button>
+          {useDefaultJacket ? (
+            <button
+              type="button"
+              className="vinyl-label-icon-btn vinyl-label-icon-btn--style"
+              onClick={cycleJacketStyle}
+              title={`デフォルトジャケット切替（${activeJacketStyle.label} ${jacketStyleIndex + 1}/${JACKET_STYLES.length}）`}
+              aria-label={`デフォルトジャケットを切り替える。現在：${activeJacketStyle.label}`}
+            >
+              <StyleSwapIcon />
+              <span className="vinyl-jacket-style-index">{jacketStyleIndex + 1}</span>
+            </button>
+          ) : null}
           {onJacketPick ? (
             <button
               type="button"
@@ -129,17 +255,6 @@ export default function VinylPlayer({
         </div>
 
         <div className={`vinyl-stage ${isPlaying ? 'is-playing' : ''}`}>
-          {useDefaultLabel ? (
-            <div className="vinyl-deco-group" aria-hidden="true">
-              <div className="vinyl-deco vinyl-deco--1">
-                <MusicNoteIcon />
-              </div>
-              <div className="vinyl-deco vinyl-deco--2">
-                <MusicNoteIcon />
-              </div>
-            </div>
-          ) : null}
-
           <button
             type="button"
             className="vinyl-tonearm"
@@ -154,7 +269,7 @@ export default function VinylPlayer({
           </button>
 
           <div
-            className="vinyl-disc"
+            className="vinyl-record"
             role="button"
             tabIndex={onTogglePlayback ? 0 : -1}
             onClick={handlePlaybackClick}
@@ -208,6 +323,12 @@ export default function VinylPlayer({
 
           <div className="vinyl-shadow" aria-hidden="true" />
         </div>
+
+        <div
+          className="vinyl-sleeve-flap"
+          aria-hidden="true"
+          style={{ backgroundImage: `url("${jacketBackgroundUrl}")` }}
+        />
       </div>
 
       <input

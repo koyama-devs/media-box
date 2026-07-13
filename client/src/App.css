@@ -487,6 +487,7 @@
     linear-gradient(135deg, rgba(8, 12, 20, 0.08), rgba(8, 12, 20, 0.22) 55%, rgba(8, 12, 20, 0.35)),
     radial-gradient(circle at 50% 48%, transparent 40%, rgba(8, 12, 20, 0.28) 78%);
   pointer-events: none;
+  transition: opacity 0.45s ease;
 }
 
 .vinyl-jacket-spine {
@@ -508,10 +509,86 @@
     inset 0 0 0 1px rgba(255, 255, 255, 0.05);
 }
 
-.vinyl-deco-group {
+.vinyl-stage {
+  position: absolute;
+  inset: 8%;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform-origin: 18% 50%;
+  transition:
+    transform 0.7s cubic-bezier(0.4, 0.05, 0.2, 1),
+    opacity 0.45s ease;
+}
+
+.vinyl-sleeve-flap {
   position: absolute;
   inset: 0;
   z-index: 4;
+  border-radius: inherit;
+  background-color: #0b1220;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  clip-path: inset(0 48% 0 0);
+  opacity: 0;
+  transform: translateX(-12px);
+  box-shadow: 6px 0 18px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  transition:
+    opacity 0.35s ease,
+    transform 0.7s cubic-bezier(0.4, 0.05, 0.2, 1);
+}
+
+.vinyl-sleeve-flap::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 48%;
+  bottom: 0;
+  width: 10px;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.35), rgba(255, 255, 255, 0.06) 45%, rgba(0, 0, 0, 0.2));
+  transform: translateX(100%);
+}
+
+.vinyl-jacket.is-peeking .vinyl-stage {
+  transform: translateX(-54%);
+  pointer-events: none;
+}
+
+.vinyl-jacket.is-peeking .vinyl-sleeve-flap {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.vinyl-jacket.is-peeking .vinyl-jacket-shade {
+  opacity: 0.2;
+}
+
+.vinyl-jacket.is-peeking .vinyl-record {
+  animation-play-state: paused !important;
+}
+
+.vinyl-jacket.is-peeking .vinyl-tonearm {
+  transform: rotate(52deg) translateY(2px);
+}
+
+.vinyl-jacket.is-peeking .vinyl-cover-actions--jacket {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.vinyl-jacket.is-peeking .vinyl-label-icon-btn.is-active {
+  background: rgba(37, 99, 235, 0.95);
+  border-color: rgba(147, 197, 253, 0.55);
+  color: #fff;
+}
+
+.vinyl-deco-group {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
   pointer-events: none;
 }
 
@@ -527,31 +604,26 @@
 }
 
 .vinyl-deco--1 {
-  top: 8%;
-  left: 0;
+  top: auto;
+  bottom: 7%;
+  left: auto;
+  right: 5%;
   width: 22px;
   height: 22px;
 }
 
 .vinyl-deco--2 {
-  top: 18%;
-  left: 1%;
+  top: auto;
+  bottom: 3%;
+  left: auto;
+  right: 13%;
   width: 15px;
   height: 15px;
   opacity: 0.48;
   transform: rotate(-10deg);
 }
 
-.vinyl-stage {
-  position: absolute;
-  inset: 8%;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.vinyl-disc {
+.vinyl-record {
   position: relative;
   width: 86%;
   height: 86%;
@@ -569,7 +641,7 @@
   cursor: pointer;
 }
 
-.vinyl-disc:focus-visible {
+.vinyl-record:focus-visible {
   outline: none;
   box-shadow:
     inset 0 0 0 2px rgba(255, 255, 255, 0.05),
@@ -577,7 +649,7 @@
     0 0 0 2px rgba(96, 165, 250, 0.45);
 }
 
-.vinyl-stage.is-playing .vinyl-disc {
+.vinyl-stage.is-playing .vinyl-record {
   animation-play-state: running;
 }
 
@@ -626,8 +698,8 @@
     filter 0.25s ease;
 }
 
-.vinyl-disc:hover .vinyl-label img,
-.vinyl-disc:focus-visible .vinyl-label img {
+.vinyl-record:hover .vinyl-label img,
+.vinyl-record:focus-visible .vinyl-label img {
   border-color: rgba(147, 197, 253, 0.55);
   box-shadow:
     inset 0 0 16px rgba(0, 0, 0, 0.35),
@@ -656,6 +728,7 @@
 .vinyl-cover-actions--jacket {
   top: 12px;
   left: 16px;
+  z-index: 7;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.18s ease;
@@ -675,6 +748,27 @@
 
 .vinyl-cover-actions--jacket .vinyl-label-icon-btn {
   backdrop-filter: blur(6px);
+}
+
+.vinyl-label-icon-btn--style {
+  position: relative;
+}
+
+.vinyl-jacket-style-index {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.95);
+  color: #eff6ff;
+  font-size: 0.58rem;
+  line-height: 12px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.55);
 }
 
 .vinyl-label-icon-btn {
