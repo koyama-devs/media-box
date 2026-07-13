@@ -129,9 +129,6 @@ function App() {
   // Đang chuyển bài trong playlist — bỏ qua pause/reset
   const isPlaylistAdvancingRef = useRef(false)
 
-  // Giữ src media cuối khi hiển thị ảnh trong playlist (mobile autoplay)
-  const lastMediaSrcRef = useRef(null)
-
   const playableItems = useMemo(
     () => items.filter((item) => item.kind === 'audio' || item.kind === 'video'),
     [items],
@@ -489,12 +486,6 @@ const playPrevious = useCallback(() => {
 
     blobUrlsRef.current = currentUrls
   }, [previewUrl])
-
-  useEffect(() => {
-    if (selectedItem?.kind !== 'image' && previewUrl) {
-      lastMediaSrcRef.current = previewUrl
-    }
-  }, [previewUrl, selectedItem?.kind])
 
   useEffect(() => {
     setIsMediaPlaying(false)
@@ -946,10 +937,18 @@ const playPrevious = useCallback(() => {
                       </button>
                       <button
                         type="button"
-                        className={`secondary-button ${playlistMode ? 'active' : ''}`}
+                        className={`playlist-toggle ${playlistMode ? 'is-on' : 'is-off'}`}
                         onClick={() => setPlaylistMode((current) => !current)}
+                        aria-pressed={playlistMode}
+                        title={playlistMode ? '連続再生をオフにする' : '連続再生をオンにする'}
                       >
-                        {playlistMode ? '連続再生 ON' : '連続再生 OFF'}
+                        <span className="playlist-toggle-label">連続再生</span>
+                        <span className="playlist-toggle-track" aria-hidden="true">
+                          <span className="playlist-toggle-knob" />
+                          <span className="playlist-toggle-state">
+                            {playlistMode ? 'ON' : 'OFF'}
+                          </span>
+                        </span>
                       </button>
                       <button type="button" className="primary-button" onClick={startPlaylist} disabled={playableItems.length === 0}>
                         リスト再生
@@ -966,98 +965,48 @@ const playPrevious = useCallback(() => {
                     </div>
                   ) : previewUrl ? (
                     <>
-                      {playlistMode ? (
-                        <>
-                          {selectedItem.kind === 'image' ? (
-                            <img
-                              key={selectedItem.id}
-                              className="media-preview"
-                              src={previewUrl}
-                              alt={selectedItem.name}
-                            />
-                          ) : null}
-                          {selectedItem.kind === 'audio' ? (
-                            <VinylPlayer
-                              title={getDisplayName(selectedItem.name)}
-                              coverSrc={coverPreviewUrl}
-                              isPlaying={isMediaPlaying}
-                              coverBusy={coverBusy}
-                              onCoverPick={handleCoverPick}
-                              onCoverClear={handleCoverClear}
-                              onTogglePlayback={handleTogglePlayback}
-                            >
-                              <video
-                                ref={mediaRef}
-                                className="video-player audio-only"
-                                controls
-                                playsInline
-                                preload="auto"
-                                src={previewUrl}
-                                onCanPlayThrough={handleMediaCanPlay}
-                                onEnded={handleMediaEnded}
-                                onPlay={handleMediaPlay}
-                                onPause={handleMediaPause}
-                              />
-                            </VinylPlayer>
-                          ) : (
-                            <video
-                              ref={mediaRef}
-                              className="video-player"
-                              controls={selectedItem.kind !== 'image'}
-                              playsInline
-                              preload="auto"
-                              src={selectedItem.kind === 'image' ? lastMediaSrcRef.current || undefined : previewUrl}
-                              style={selectedItem.kind === 'image' ? { position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' } : undefined}
-                              aria-hidden={selectedItem.kind === 'image'}
-                              tabIndex={selectedItem.kind === 'image' ? -1 : undefined}
-                              onCanPlayThrough={handleMediaCanPlay}
-                              onEnded={handleMediaEnded}
-                              onPlay={handleMediaPlay}
-                              onPause={handleMediaPause}
-                            />
-                          )}
-                        </>
-                      ) : selectedItem.kind === 'image' ? (
-                          <img
-                              key={selectedItem.id}
-                              className="media-preview"
-                              src={previewUrl}
-                              alt={selectedItem.name}
-                          />
+                      {selectedItem.kind === 'image' ? (
+                        <img
+                          key={selectedItem.id}
+                          className="media-preview"
+                          src={previewUrl}
+                          alt={selectedItem.name}
+                        />
                       ) : selectedItem.kind === 'audio' ? (
-                          <VinylPlayer
-                            title={getDisplayName(selectedItem.name)}
-                            coverSrc={coverPreviewUrl}
-                            isPlaying={isMediaPlaying}
-                            coverBusy={coverBusy}
-                            onCoverPick={handleCoverPick}
-                            onCoverClear={handleCoverClear}
-                            onTogglePlayback={handleTogglePlayback}
-                          >
-                            <audio
-                              ref={mediaRef}
-                              controls
-                              playsInline
-                              preload="auto"
-                              src={previewUrl}
-                              onCanPlayThrough={handleMediaCanPlay}
-                              onEnded={handleMediaEnded}
-                              onPlay={handleMediaPlay}
-                              onPause={handleMediaPause}
-                            />
-                          </VinylPlayer>
+                        <VinylPlayer
+                          title={getDisplayName(selectedItem.name)}
+                          coverSrc={coverPreviewUrl}
+                          isPlaying={isMediaPlaying}
+                          coverBusy={coverBusy}
+                          onCoverPick={handleCoverPick}
+                          onCoverClear={handleCoverClear}
+                          onTogglePlayback={handleTogglePlayback}
+                        >
+                          <video
+                            ref={mediaRef}
+                            className="video-player audio-only"
+                            controls
+                            playsInline
+                            preload="auto"
+                            src={previewUrl}
+                            onCanPlayThrough={handleMediaCanPlay}
+                            onEnded={handleMediaEnded}
+                            onPlay={handleMediaPlay}
+                            onPause={handleMediaPause}
+                          />
+                        </VinylPlayer>
                       ) : (
                         <video
-                        ref={mediaRef}
-                        className="video-player"
-                        controls
-                        playsInline
-                        preload="auto"
-                        src={previewUrl}
-                        onCanPlayThrough={handleMediaCanPlay}
-                        onEnded={handleMediaEnded}
-                        onPlay={handleMediaPlay}
-                        onPause={handleMediaPause}
+                          ref={mediaRef}
+                          className="video-player"
+                          controls
+                          playsInline
+                          preload="auto"
+                          src={previewUrl}
+                          onCanPlayThrough={handleMediaCanPlay}
+                          onEnded={handleMediaEnded}
+                          onPlay={handleMediaPlay}
+                          onPause={handleMediaPause}
                         />
                       )}
                     </>
