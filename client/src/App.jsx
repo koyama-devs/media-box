@@ -17,6 +17,27 @@ import VinylPlayer from './VinylPlayer'
 
 const AUTH_KEY = 'media-share-lite-auth'
 const PASSWORD = 'hiro'
+const TRACK_QUERY_KEY = 'track'
+
+function getTrackShareUrl(itemId) {
+  const url = new URL(window.location.href)
+  url.searchParams.set(TRACK_QUERY_KEY, itemId)
+  return url.toString()
+}
+
+function syncTrackQuery(itemId) {
+  try {
+    const url = new URL(window.location.href)
+    if (itemId) {
+      url.searchParams.set(TRACK_QUERY_KEY, itemId)
+    } else {
+      url.searchParams.delete(TRACK_QUERY_KEY)
+    }
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+  } catch {
+    /* ignore */
+  }
+}
 
 function getMediaKind(fileType, fileName = '') {
   const type = (fileType || '').toLowerCase()
@@ -112,6 +133,8 @@ function App() {
   const [editingName, setEditingName] = useState('')
   const [dragItemId, setDragItemId] = useState(null)
   const [dragOverItemId, setDragOverItemId] = useState(null)
+  const [copiedItemId, setCopiedItemId] = useState(null)
+  const urlTrackAppliedRef = useRef(false)
   const blobUrlsRef = useRef(new Set())
   const mediaUrlCacheRef = useRef(new Map())
 
@@ -187,8 +210,22 @@ function App() {
     shouldAutoPlayRef.current = autoPlay
 
     setSelectedItemId(itemId)
+    syncTrackQuery(itemId)
 
 }, [])
+
+  useEffect(() => {
+    if (urlTrackAppliedRef.current || playableItems.length === 0) return
+    urlTrackAppliedRef.current = true
+    try {
+      const trackId = new URLSearchParams(window.location.search).get(TRACK_QUERY_KEY)
+      if (trackId && playableItems.some((item) => item.id === trackId)) {
+        selectItem(trackId, false)
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [playableItems, selectItem])
 
   const advancePlaylistToItem = useCallback((nextItem, playImmediately = false) => {
     if (!nextItem || nextItem.kind === 'image') return false
@@ -861,12 +898,34 @@ const playPrevious = useCallback(() => {
     }
   }
 
-  const movePlayableItem = async (itemId, direction) => {
-    const currentIds = playableItems.map((item) => item.id)
-    const index = currentIds.indexOf(itemId)
-    const targetIndex = index + direction
-    if (index < 0 || targetIndex < 0 || targetIndex >= currentIds.length) return
-    await reorderPlayableItems(itemId, currentIds[targetIndex])
+  const copyTrackLink = async (itemId) => {
+    try {
+      await navigator.clipboard.writeText(getTrackShareUrl(itemId))
+      setCopiedItemId(itemId)
+      window.setTimeout(() => {
+        setCopiedItemId((current) => (current === itemId ? null : current))
+      }, 1600)
+    } catch (copyError) {
+      console.error(copyError)
+      setError('リンクのコピーに失敗しました。')
+    }
+  }
+
+  const downloadTrack = async (item) => {
+    if (!item || (item.kind !== 'audio' && item.kind !== 'video')) return
+    try {
+      const url = await ensureMediaUrl(item.id, item.type)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = item.name || 'media'
+      anchor.rel = 'noopener'
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+    } catch (downloadError) {
+      console.error(downloadError)
+      setError(downloadError?.message || 'ダウンロードに失敗しました。')
+    }
   }
 
   const handleDelete = async (itemId) => {
@@ -1115,7 +1174,7 @@ const playPrevious = useCallback(() => {
                 <span>{playableItems.length} 件</span>
               </div>
               {playableItems.length > 1 ? (
-                <p className="playlist-hint">ドラッグまたは ↑↓ で並び替え、✎ で名前変更</p>
+                <p className="playlist-hint">ドラッグで並び替え、リンク共有・ダウンロード・✎ で編集</p>
               ) : null}
 
               {loadingItems ? (
@@ -1128,7 +1187,7 @@ const playPrevious = useCallback(() => {
                 </div>
               ) : (
                 <ul className="video-list">
-                  {playableItems.map((item, index) => (
+                  {playableItems.map((item) => (
                     <li
                       key={item.id}
                       className={[
@@ -1217,20 +1276,26 @@ const playPrevious = useCallback(() => {
                             <button
                               type="button"
                               className="icon-button"
-                              title="上へ"
-                              disabled={index === 0}
-                              onClick={() => movePlayableItem(item.id, -1)}
+                              title={copiedItemId === item.id ? 'コピーしました' : 'リンクをコピー'}
+                              aria-label="リンクをコピー"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                copyTrackLink(item.id)
+                              }}
                             >
-                              ↑
+                              {copiedItemId === item.id ? '✓' : '🔗'}
                             </button>
                             <button
                               type="button"
                               className="icon-button"
-                              title="下へ"
-                              disabled={index === playableItems.length - 1}
-                              onClick={() => movePlayableItem(item.id, 1)}
+                              title="ダウンロード"
+                              aria-label="ダウンロード"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                downloadTrack(item)
+                              }}
                             >
-                              ↓
+                              ⬇
                             </button>
                             <button
                               type="button"
