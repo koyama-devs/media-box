@@ -63,6 +63,7 @@ function App() {
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [playlistMode, setPlaylistMode] = useState(true)
   const blobUrlsRef = useRef(new Set())
+  const mediaUrlCacheRef = useRef(new Map())
 
   // Ref tới player hiện tại (audio hoặc video)
   const mediaRef = useRef(null)
@@ -81,6 +82,12 @@ function App() {
 
   const previewRequestRef = useRef(0)
 
+  // Đang chuyển bài trong playlist — bỏ qua pause/reset
+  const isPlaylistAdvancingRef = useRef(false)
+
+  // Giữ src media cuối khi hiển thị ảnh trong playlist (mobile autoplay)
+  const lastMediaSrcRef = useRef(null)
+
   const selectedItem = useMemo(
     () => items.find((item) => item.id === selectedItemId) || items[0] || null,
     [items, selectedItemId],
@@ -98,6 +105,25 @@ function App() {
     return items[nextIndex]?.id || null
   }, [items, selectedIndex])
 
+  const ensureMediaUrl = useCallback(async (itemId, mimeType) => {
+    const cached = mediaUrlCacheRef.current.get(itemId)
+    if (cached) return cached
+
+    const url = await loadMediaBlobUrl(itemId, mimeType)
+    mediaUrlCacheRef.current.set(itemId, url)
+    blobUrlsRef.current.add(url)
+    return url
+  }, [])
+
+  const prefetchMediaUrl = useCallback((item) => {
+    if (!item || item.kind === 'image') return
+    if (mediaUrlCacheRef.current.has(item.id)) return
+
+    ensureMediaUrl(item.id, item.type).catch((err) => {
+      console.error('Prefetch failed:', err)
+    })
+  }, [ensureMediaUrl])
+
   const selectItem = useCallback((itemId, autoPlay = false) => {
 
     mediaReadyRef.current = false
@@ -109,6 +135,52 @@ function App() {
     setSelectedItemId(itemId)
 
 }, [])
+
+  const advancePlaylistToItem = useCallback((nextItem, playImmediately = false) => {
+    if (!nextItem) return false
+
+    if (nextItem.kind === 'image') {
+      selectItem(nextItem.id, playlistMode)
+      return true
+    }
+
+    const nextUrl = mediaUrlCacheRef.current.get(nextItem.id)
+    const media = mediaRef.current
+
+    if (!playImmediately || !nextUrl || !media) {
+      selectItem(nextItem.id, playlistMode)
+      return false
+    }
+
+    isPlaylistAdvancingRef.current = true
+    shouldAutoPlayRef.current = true
+    mediaReadyRef.current = false
+
+    setSelectedItemId(nextItem.id)
+    setPreviewUrl(nextUrl)
+    setLoadingPreview(false)
+
+    media.src = nextUrl
+    media.load()
+
+    const playPromise = media.play()
+    if (playPromise) {
+      playPromise
+        .then(() => {
+          shouldAutoPlayRef.current = false
+        })
+        .catch(() => {
+          // Mobile có thể chặn — handleMediaCanPlay sẽ thử lại
+        })
+        .finally(() => {
+          isPlaylistAdvancingRef.current = false
+        })
+    } else {
+      isPlaylistAdvancingRef.current = false
+    }
+
+    return true
+  }, [playlistMode, selectItem])
 
 const playNext = useCallback(() => {
 
@@ -152,11 +224,10 @@ const playPrevious = useCallback(() => {
     if (!media) return
   
     try {
-      shouldAutoPlayRef.current = false
-  
       await media.play()
+      shouldAutoPlayRef.current = false
     } catch (err) {
-      console.error('Autoplay failed:', err)
+      console.log('Autoplay blocked:', err.name, err.message)
     }
   }, [])
 
@@ -173,18 +244,26 @@ const playPrevious = useCallback(() => {
   }, [items, selectedItem?.id, selectItem])
 
   const handleMediaEnded = useCallback(() => {
+    if (!playlistMode) return
+    if (items.length <= 1) return
 
-        if (!playlistMode) return
+    const nextId = getItemIdAtOffset(1)
+    if (!nextId) return
 
-        if (items.length <= 1) return
+    const nextItem = items.find((item) => item.id === nextId)
+    if (!nextItem) return
 
-        playNext()
-
-    }, [
-        playlistMode,
-        items.length,
-        playNext
-    ])
+    // Gọi play() đồng bộ trong ended — mobile chỉ cho phép trong chuỗi sự kiện này
+    if (!advancePlaylistToItem(nextItem, true)) {
+      playNext()
+    }
+  }, [
+    playlistMode,
+    items,
+    getItemIdAtOffset,
+    advancePlaylistToItem,
+    playNext,
+  ])
 
   useEffect(() => {
     if (!isLoggedIn) {
@@ -218,7 +297,10 @@ const playPrevious = useCallback(() => {
   }, [isLoggedIn])
 
   useEffect(() => {
-    const currentUrls = new Set(previewUrl?.startsWith('blob:') ? [previewUrl] : [])
+    const currentUrls = new Set([
+      ...(previewUrl?.startsWith('blob:') ? [previewUrl] : []),
+      ...mediaUrlCacheRef.current.values(),
+    ])
 
     blobUrlsRef.current.forEach((url) => {
       if (!currentUrls.has(url)) {
@@ -230,6 +312,12 @@ const playPrevious = useCallback(() => {
   }, [previewUrl])
 
   useEffect(() => {
+    if (selectedItem?.kind !== 'image' && previewUrl) {
+      lastMediaSrcRef.current = previewUrl
+    }
+  }, [previewUrl, selectedItem?.kind])
+
+  useEffect(() => {
 
     if (!selectedItem) {
       mediaReadyRef.current = false
@@ -239,12 +327,19 @@ const playPrevious = useCallback(() => {
         return
     }
 
+    const cachedUrl = mediaUrlCacheRef.current.get(selectedItem.id)
+    if (cachedUrl) {
+      setPreviewUrl(cachedUrl)
+      setLoadingPreview(false)
+      return
+    }
+
     const requestId = ++previewRequestRef.current
 
     setLoadingPreview(true)
     setPreviewUrl(null)
 
-    loadMediaBlobUrl(
+    ensureMediaUrl(
         selectedItem.id,
         selectedItem.type
     )
@@ -254,15 +349,10 @@ const playPrevious = useCallback(() => {
             // bỏ luôn kết quả cũ.
 
             if (requestId !== previewRequestRef.current) {
-                URL.revokeObjectURL(url)
                 return
             }
 
-            if (previewUrl?.startsWith('blob:')) {
-              URL.revokeObjectURL(previewUrl)
-            }
             setPreviewUrl(url)
-            blobUrlsRef.current.add(url)
             setLoadingPreview(false)
 
         })
@@ -283,8 +373,25 @@ const playPrevious = useCallback(() => {
 
 }, [
     selectedItem?.id,
-    selectedItem?.type
+    selectedItem?.type,
+    ensureMediaUrl,
 ])
+
+  useEffect(() => {
+    if (!playlistMode || !selectedItem) return
+
+    const nextId = getItemIdAtOffset(1)
+    if (!nextId) return
+
+    const nextItem = items.find((item) => item.id === nextId)
+    prefetchMediaUrl(nextItem)
+  }, [
+    playlistMode,
+    selectedItem?.id,
+    items,
+    getItemIdAtOffset,
+    prefetchMediaUrl,
+  ])
 
     useEffect(() => {
 
@@ -321,14 +428,18 @@ const playPrevious = useCallback(() => {
 
       if (selectedItem?.kind !== 'image') return
 
+      const nextId = getItemIdAtOffset(1)
+      const nextItem = items.find((item) => item.id === nextId)
+      prefetchMediaUrl(nextItem)
+
       if (imageTimerRef.current) {
           clearTimeout(imageTimerRef.current)
       }
 
       imageTimerRef.current = setTimeout(() => {
-
+        if (nextItem && !advancePlaylistToItem(nextItem, true)) {
           playNext()
-
+        }
       }, 5000)
 
       return () => {
@@ -345,10 +456,16 @@ const playPrevious = useCallback(() => {
       loadingPreview,
       selectedItem?.id,
       selectedItem?.kind,
+      items,
+      getItemIdAtOffset,
+      prefetchMediaUrl,
+      advancePlaylistToItem,
       playNext
   ])
 
     useEffect(() => {
+
+      if (isPlaylistAdvancingRef.current || shouldAutoPlayRef.current) return
 
       const media = mediaRef.current
 
@@ -570,7 +687,36 @@ const playPrevious = useCallback(() => {
                     </div>
                   ) : previewUrl ? (
                     <>
-                      {selectedItem.kind === 'image' ? (
+                      {playlistMode ? (
+                        <>
+                          {selectedItem.kind === 'image' ? (
+                            <img
+                              key={selectedItem.id}
+                              className="media-preview"
+                              src={previewUrl}
+                              alt={selectedItem.name}
+                            />
+                          ) : null}
+                          {selectedItem.kind === 'audio' ? (
+                            <div className="audio-card">
+                              <p>{selectedItem.name}</p>
+                            </div>
+                          ) : null}
+                          <video
+                            ref={mediaRef}
+                            className={selectedItem.kind === 'video' ? 'video-player' : 'video-player audio-only'}
+                            controls={selectedItem.kind !== 'image'}
+                            playsInline
+                            preload="auto"
+                            src={selectedItem.kind === 'image' ? lastMediaSrcRef.current || undefined : previewUrl}
+                            style={selectedItem.kind === 'image' ? { position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' } : undefined}
+                            aria-hidden={selectedItem.kind === 'image'}
+                            tabIndex={selectedItem.kind === 'image' ? -1 : undefined}
+                            onCanPlayThrough={handleMediaCanPlay}
+                            onEnded={handleMediaEnded}
+                          />
+                        </>
+                      ) : selectedItem.kind === 'image' ? (
                           <img
                               key={selectedItem.id}
                               className="media-preview"
@@ -582,27 +728,26 @@ const playPrevious = useCallback(() => {
                               <p>{selectedItem.name}</p>
 
                               <audio
-                                  key={`audio-${selectedItem.id}`}
-                                  ref={mediaRef}
-                                  controls
-                                  preload="metadata"
-                                  src={previewUrl}
-                                  onCanPlay={handleMediaCanPlay}
-                                  onEnded={handleMediaEnded}
+                                ref={mediaRef}
+                                controls
+                                playsInline
+                                preload="auto"
+                                src={previewUrl}
+                                onCanPlayThrough={handleMediaCanPlay}
+                                onEnded={handleMediaEnded}
                               />
                           </div>
                       ) : (
-                          <video
-                              key={`video-${selectedItem.id}`}
-                              ref={mediaRef}
-                              className="video-player"
-                              controls
-                              playsInline
-                              preload="metadata"
-                              src={previewUrl}
-                              onCanPlay={handleMediaCanPlay}
-                              onEnded={handleMediaEnded}
-                          />
+                        <video
+                        ref={mediaRef}
+                        className="video-player"
+                        controls
+                        playsInline
+                        preload="auto"
+                        src={previewUrl}
+                        onCanPlayThrough={handleMediaCanPlay}
+                        onEnded={handleMediaEnded}
+                        />
                       )}
                     </>
                   ) : (
