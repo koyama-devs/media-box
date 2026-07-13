@@ -8,6 +8,7 @@ import {
   sortMediaItems,
   subscribeToMediaItems,
   updateMediaCover,
+  updateMediaJacket,
   updateMediaName,
   updatePlaylistOrder,
   uploadMediaFile,
@@ -104,7 +105,9 @@ function App() {
   const [playlistMode, setPlaylistMode] = useState(true)
   const [isMediaPlaying, setIsMediaPlaying] = useState(false)
   const [coverPreviewUrl, setCoverPreviewUrl] = useState(null)
+  const [jacketPreviewUrl, setJacketPreviewUrl] = useState(null)
   const [coverBusy, setCoverBusy] = useState(false)
+  const [jacketBusy, setJacketBusy] = useState(false)
   const [editingItemId, setEditingItemId] = useState(null)
   const [editingName, setEditingName] = useState('')
   const [dragItemId, setDragItemId] = useState(null)
@@ -306,49 +309,51 @@ const playPrevious = useCallback(() => {
     }
   }, [])
 
+  const uploadPrivateImage = async (file, usage) => {
+    const kind = getMediaKind(file.type, file.name)
+    if (kind !== 'image') {
+      throw new Error('画像ファイルを選択してください。')
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      throw new Error(`ファイルは${formatSize(MAX_FILE_SIZE)}以下にしてください。`)
+    }
+
+    const metadata = createMediaMetadata(file, {
+      inLibrary: false,
+      usage,
+    })
+    return uploadMediaFile(file, metadata)
+  }
+
+  const cleanupPrivateImage = async (imageId) => {
+    if (!imageId) return
+    const previous = items.find((item) => item.id === imageId)
+    const stillUsed = items.some(
+      (item) =>
+        item.id !== selectedItem?.id &&
+        item.kind === 'audio' &&
+        (item.coverId === imageId || item.jacketId === imageId),
+    )
+    if (previous?.inLibrary === false && !stillUsed) {
+      await deleteMediaItem(imageId)
+      mediaUrlCacheRef.current.delete(imageId)
+    }
+  }
+
   const handleCoverPick = async (file) => {
     if (!selectedItem || selectedItem.kind !== 'audio') return
 
-    const kind = getMediaKind(file.type, file.name)
-    if (kind !== 'image') {
-      setError('画像ファイルを選択してください。')
-      return
-    }
-
-    if (file.size > MAX_FILE_SIZE) {
-      setError(`ファイルは${formatSize(MAX_FILE_SIZE)}以下にしてください。`)
-      return
-    }
-
     setCoverBusy(true)
     setError('')
-
     const previousCoverId = selectedItem.coverId || null
 
     try {
-      const metadata = createMediaMetadata(file, {
-        inLibrary: false,
-        usage: 'cover',
-      })
-      const coverId = await uploadMediaFile(file, metadata)
+      const coverId = await uploadPrivateImage(file, 'cover')
       await updateMediaCover(selectedItem.id, coverId)
-
-      if (previousCoverId && previousCoverId !== coverId) {
-        const previousCover = items.find((item) => item.id === previousCoverId)
-        const stillUsed = items.some(
-          (item) =>
-            item.id !== selectedItem.id &&
-            item.kind === 'audio' &&
-            item.coverId === previousCoverId,
-        )
-        if (previousCover?.inLibrary === false && !stillUsed) {
-          await deleteMediaItem(previousCoverId)
-          mediaUrlCacheRef.current.delete(previousCoverId)
-        }
-      }
+      await cleanupPrivateImage(previousCoverId === coverId ? null : previousCoverId)
     } catch (coverError) {
       console.error(coverError)
-      setError(getFirebaseErrorMessage(coverError) || 'カバー画像の設定に失敗しました。')
+      setError(coverError?.message || getFirebaseErrorMessage(coverError) || 'カバー画像の設定に失敗しました。')
     } finally {
       setCoverBusy(false)
     }
@@ -359,31 +364,55 @@ const playPrevious = useCallback(() => {
 
     setCoverBusy(true)
     setError('')
-
     const previousCoverId = selectedItem.coverId || null
 
     try {
       await updateMediaCover(selectedItem.id, null)
       setCoverPreviewUrl(null)
-
-      if (previousCoverId) {
-        const previousCover = items.find((item) => item.id === previousCoverId)
-        const stillUsed = items.some(
-          (item) =>
-            item.id !== selectedItem.id &&
-            item.kind === 'audio' &&
-            item.coverId === previousCoverId,
-        )
-        if (previousCover?.inLibrary === false && !stillUsed) {
-          await deleteMediaItem(previousCoverId)
-          mediaUrlCacheRef.current.delete(previousCoverId)
-        }
-      }
+      await cleanupPrivateImage(previousCoverId)
     } catch (coverError) {
       console.error(coverError)
       setError('カバー画像の削除に失敗しました。')
     } finally {
       setCoverBusy(false)
+    }
+  }
+
+  const handleJacketPick = async (file) => {
+    if (!selectedItem || selectedItem.kind !== 'audio') return
+
+    setJacketBusy(true)
+    setError('')
+    const previousJacketId = selectedItem.jacketId || null
+
+    try {
+      const jacketId = await uploadPrivateImage(file, 'jacket')
+      await updateMediaJacket(selectedItem.id, jacketId)
+      await cleanupPrivateImage(previousJacketId === jacketId ? null : previousJacketId)
+    } catch (jacketError) {
+      console.error(jacketError)
+      setError(jacketError?.message || getFirebaseErrorMessage(jacketError) || 'ジャケット画像の設定に失敗しました。')
+    } finally {
+      setJacketBusy(false)
+    }
+  }
+
+  const handleJacketClear = async () => {
+    if (!selectedItem || selectedItem.kind !== 'audio') return
+
+    setJacketBusy(true)
+    setError('')
+    const previousJacketId = selectedItem.jacketId || null
+
+    try {
+      await updateMediaJacket(selectedItem.id, null)
+      setJacketPreviewUrl(null)
+      await cleanupPrivateImage(previousJacketId)
+    } catch (jacketError) {
+      console.error(jacketError)
+      setError('ジャケット画像の削除に失敗しました。')
+    } finally {
+      setJacketBusy(false)
     }
   }
 
@@ -522,6 +551,38 @@ const playPrevious = useCallback(() => {
       cancelled = true
     }
   }, [selectedItem?.id, selectedItem?.kind, selectedItem?.coverId, items, ensureMediaUrl])
+
+  useEffect(() => {
+    if (selectedItem?.kind !== 'audio' || !selectedItem.jacketId) {
+      setJacketPreviewUrl(null)
+      return undefined
+    }
+
+    const jacketItem = items.find((item) => item.id === selectedItem.jacketId)
+    if (!jacketItem) {
+      setJacketPreviewUrl(null)
+      return undefined
+    }
+
+    let cancelled = false
+
+    ensureMediaUrl(jacketItem.id, jacketItem.type)
+      .then((url) => {
+        if (!cancelled) {
+          setJacketPreviewUrl(url)
+        }
+      })
+      .catch((err) => {
+        console.error(err)
+        if (!cancelled) {
+          setJacketPreviewUrl(null)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedItem?.id, selectedItem?.kind, selectedItem?.jacketId, items, ensureMediaUrl])
 
   useEffect(() => {
 
@@ -815,13 +876,25 @@ const playPrevious = useCallback(() => {
     try {
       if (target.kind === 'image') {
         const linkedAudios = items.filter(
-          (item) => item.kind === 'audio' && item.coverId === itemId,
+          (item) =>
+            item.kind === 'audio' &&
+            (item.coverId === itemId || item.jacketId === itemId),
         )
         await Promise.all(
-          linkedAudios.map((item) => updateMediaCover(item.id, null)),
+          linkedAudios.map(async (item) => {
+            if (item.coverId === itemId) {
+              await updateMediaCover(item.id, null)
+            }
+            if (item.jacketId === itemId) {
+              await updateMediaJacket(item.id, null)
+            }
+          }),
         )
         if (selectedItem?.coverId === itemId) {
           setCoverPreviewUrl(null)
+        }
+        if (selectedItem?.jacketId === itemId) {
+          setJacketPreviewUrl(null)
         }
       }
 
@@ -976,10 +1049,14 @@ const playPrevious = useCallback(() => {
                         <VinylPlayer
                           title={getDisplayName(selectedItem.name)}
                           coverSrc={coverPreviewUrl}
+                          jacketSrc={jacketPreviewUrl}
                           isPlaying={isMediaPlaying}
                           coverBusy={coverBusy}
+                          jacketBusy={jacketBusy}
                           onCoverPick={handleCoverPick}
                           onCoverClear={handleCoverClear}
+                          onJacketPick={handleJacketPick}
+                          onJacketClear={handleJacketClear}
                           onTogglePlayback={handleTogglePlayback}
                         >
                           <video

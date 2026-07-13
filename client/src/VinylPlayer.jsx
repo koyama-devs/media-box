@@ -1,6 +1,9 @@
-import { useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import defaultJacketUrl from './assets/vinyl-jacket-default.svg?url'
+import defaultLabelUrl from './assets/vinyl-label-default.svg?url'
 
-const DEFAULT_COVER = '/vinyl-label-default.svg'
+const DEFAULT_LABEL = defaultLabelUrl
+const DEFAULT_JACKET = defaultJacketUrl
 
 function MusicNoteIcon() {
   return (
@@ -37,27 +40,47 @@ function TrashIcon() {
 export default function VinylPlayer({
   title,
   coverSrc,
+  jacketSrc,
   isPlaying,
   coverBusy = false,
+  jacketBusy = false,
   onCoverPick,
   onCoverClear,
+  onJacketPick,
+  onJacketClear,
   onTogglePlayback,
   children,
 }) {
-  const useDefaultCover = !coverSrc
+  const useDefaultLabel = !coverSrc
+  const useDefaultJacket = !jacketSrc
   const coverInputRef = useRef(null)
+  const jacketInputRef = useRef(null)
+  const [labelSrc, setLabelSrc] = useState(DEFAULT_LABEL)
+
+  useEffect(() => {
+    setLabelSrc(coverSrc || DEFAULT_LABEL)
+  }, [coverSrc])
 
   const openCoverPicker = () => {
     if (coverBusy || !onCoverPick) return
     coverInputRef.current?.click()
   }
 
+  const openJacketPicker = () => {
+    if (jacketBusy || !onJacketPick) return
+    jacketInputRef.current?.click()
+  }
+
   const handleCoverFile = (event) => {
     const file = event.target.files?.[0]
     event.target.value = ''
-    if (file && onCoverPick) {
-      onCoverPick(file)
-    }
+    if (file && onCoverPick) onCoverPick(file)
+  }
+
+  const handleJacketFile = (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (file && onJacketPick) onJacketPick(file)
   }
 
   const handlePlaybackClick = () => {
@@ -66,84 +89,125 @@ export default function VinylPlayer({
   }
 
   return (
-    <div className="vinyl-player">
-      <div className={`vinyl-stage ${isPlaying ? 'is-playing' : ''}`}>
-        {useDefaultCover ? (
-          <div className="vinyl-deco-group" aria-hidden="true">
-            <div className="vinyl-deco vinyl-deco--1">
-              <MusicNoteIcon />
-            </div>
-            <div className="vinyl-deco vinyl-deco--2">
-              <MusicNoteIcon />
-            </div>
-          </div>
-        ) : null}
-
-        <button
-          type="button"
-          className="vinyl-tonearm"
-          onClick={handlePlaybackClick}
-          disabled={!onTogglePlayback}
-          title={isPlaying ? '一時停止' : '再生'}
-          aria-label={isPlaying ? '一時停止' : '再生'}
-        />
-
+    <div className={`vinyl-player ${isPlaying ? 'is-playing' : ''}`}>
+      <div className={`vinyl-jacket ${useDefaultJacket ? 'is-default' : 'has-art'}`}>
         <div
-          className="vinyl-disc"
-          role="button"
-          tabIndex={onTogglePlayback ? 0 : -1}
-          onClick={handlePlaybackClick}
-          onKeyDown={(event) => {
-            if (!onTogglePlayback) return
-            if (event.key !== 'Enter' && event.key !== ' ') return
-            event.preventDefault()
-            handlePlaybackClick()
+          className="vinyl-jacket-art"
+          aria-hidden="true"
+          style={{
+            backgroundImage: `url("${jacketSrc || DEFAULT_JACKET}")`,
           }}
-          title={isPlaying ? '一時停止' : '再生'}
-          aria-label={isPlaying ? '一時停止' : '再生'}
-        >
-          <div className="vinyl-grooves" aria-hidden="true" />
-          <div className={`vinyl-label ${coverBusy ? 'is-busy' : ''} ${useDefaultCover ? 'is-default' : 'has-cover'}`}>
-            <img
-              src={coverSrc || DEFAULT_COVER}
-              alt=""
-              onError={(event) => {
-                event.currentTarget.onerror = null
-                event.currentTarget.src = DEFAULT_COVER
-              }}
-            />
-          </div>
-          <div className="vinyl-spindle" aria-hidden="true" />
-        </div>
+        />
+        <div className="vinyl-jacket-shade" aria-hidden="true" />
+        <div className="vinyl-jacket-spine" aria-hidden="true" />
 
-        <div className="vinyl-cover-actions">
-          {onCoverPick ? (
+        <div className="vinyl-cover-actions vinyl-cover-actions--jacket">
+          {onJacketPick ? (
             <button
               type="button"
               className="vinyl-label-icon-btn"
-              onClick={openCoverPicker}
-              disabled={coverBusy}
-              title={useDefaultCover ? 'ラベルを設定' : 'ラベルを変更'}
-              aria-label={useDefaultCover ? 'ラベルを設定' : 'ラベルを変更'}
+              onClick={openJacketPicker}
+              disabled={jacketBusy}
+              title={useDefaultJacket ? 'ジャケットを設定' : 'ジャケットを変更'}
+              aria-label={useDefaultJacket ? 'ジャケットを設定' : 'ジャケットを変更'}
             >
               <ImageIcon />
             </button>
           ) : null}
-          {!useDefaultCover && onCoverClear ? (
+          {!useDefaultJacket && onJacketClear ? (
             <button
               type="button"
               className="vinyl-label-icon-btn vinyl-label-icon-btn--danger"
-              onClick={onCoverClear}
-              disabled={coverBusy}
-              title="ラベルを外す"
-              aria-label="ラベルを外す"
+              onClick={onJacketClear}
+              disabled={jacketBusy}
+              title="ジャケットを外す"
+              aria-label="ジャケットを外す"
             >
               <TrashIcon />
             </button>
           ) : null}
         </div>
 
-        <div className="vinyl-shadow" aria-hidden="true" />
+        <div className={`vinyl-stage ${isPlaying ? 'is-playing' : ''}`}>
+          {useDefaultLabel ? (
+            <div className="vinyl-deco-group" aria-hidden="true">
+              <div className="vinyl-deco vinyl-deco--1">
+                <MusicNoteIcon />
+              </div>
+              <div className="vinyl-deco vinyl-deco--2">
+                <MusicNoteIcon />
+              </div>
+            </div>
+          ) : null}
+
+          <button
+            type="button"
+            className="vinyl-tonearm"
+            onClick={handlePlaybackClick}
+            disabled={!onTogglePlayback}
+            title={isPlaying ? '一時停止' : '再生'}
+            aria-label={isPlaying ? '一時停止' : '再生'}
+          >
+            <span className="vinyl-tonearm-pivot" aria-hidden="true" />
+            <span className="vinyl-tonearm-shaft" aria-hidden="true" />
+            <span className="vinyl-tonearm-head" aria-hidden="true" />
+          </button>
+
+          <div
+            className="vinyl-disc"
+            role="button"
+            tabIndex={onTogglePlayback ? 0 : -1}
+            onClick={handlePlaybackClick}
+            onKeyDown={(event) => {
+              if (!onTogglePlayback) return
+              if (event.key !== 'Enter' && event.key !== ' ') return
+              event.preventDefault()
+              handlePlaybackClick()
+            }}
+            title={isPlaying ? '一時停止' : '再生'}
+            aria-label={isPlaying ? '一時停止' : '再生'}
+          >
+            <div className="vinyl-grooves" aria-hidden="true" />
+            <div className={`vinyl-label ${coverBusy ? 'is-busy' : ''} ${useDefaultLabel ? 'is-default' : 'has-cover'}`}>
+              <img
+                src={labelSrc}
+                alt=""
+                draggable={false}
+                onError={() => setLabelSrc(DEFAULT_LABEL)}
+              />
+            </div>
+            <div className="vinyl-spindle" aria-hidden="true" />
+          </div>
+
+          <div className="vinyl-cover-actions vinyl-cover-actions--label">
+            {onCoverPick ? (
+              <button
+                type="button"
+                className="vinyl-label-icon-btn"
+                onClick={openCoverPicker}
+                disabled={coverBusy}
+                title={useDefaultLabel ? 'ラベルを設定' : 'ラベルを変更'}
+                aria-label={useDefaultLabel ? 'ラベルを設定' : 'ラベルを変更'}
+              >
+                <ImageIcon />
+              </button>
+            ) : null}
+            {!useDefaultLabel && onCoverClear ? (
+              <button
+                type="button"
+                className="vinyl-label-icon-btn vinyl-label-icon-btn--danger"
+                onClick={onCoverClear}
+                disabled={coverBusy}
+                title="ラベルを外す"
+                aria-label="ラベルを外す"
+              >
+                <TrashIcon />
+              </button>
+            ) : null}
+          </div>
+
+          <div className="vinyl-shadow" aria-hidden="true" />
+        </div>
       </div>
 
       <input
@@ -152,6 +216,13 @@ export default function VinylPlayer({
         accept="image/*"
         className="sr-only"
         onChange={handleCoverFile}
+      />
+      <input
+        ref={jacketInputRef}
+        type="file"
+        accept="image/*"
+        className="sr-only"
+        onChange={handleJacketFile}
       />
 
       <p className="vinyl-track-title">{title}</p>

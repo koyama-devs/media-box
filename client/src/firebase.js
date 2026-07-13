@@ -150,6 +150,14 @@ export async function updateMediaCover(itemId, coverId) {
   )
 }
 
+export async function updateMediaJacket(itemId, jacketId) {
+  await setDoc(
+    doc(db, MEDIA_COLLECTION, itemId),
+    { jacketId: jacketId || null },
+    { merge: true },
+  )
+}
+
 export async function updateMediaName(itemId, name) {
   const trimmed = (name || '').trim()
   if (!trimmed) {
