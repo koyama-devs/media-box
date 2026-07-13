@@ -253,6 +253,21 @@ const playPrevious = useCallback(() => {
     setIsMediaPlaying(false)
   }, [])
 
+  const handleTogglePlayback = useCallback(async () => {
+    const media = mediaRef.current
+    if (!media) return
+
+    try {
+      if (media.paused) {
+        await media.play()
+      } else {
+        media.pause()
+      }
+    } catch (err) {
+      console.log('Toggle playback failed:', err.name, err.message)
+    }
+  }, [])
+
   const handleCoverPick = async (file) => {
     if (!selectedItem || selectedItem.kind !== 'audio') return
 
@@ -838,6 +853,7 @@ const playPrevious = useCallback(() => {
                               coverBusy={coverBusy}
                               onCoverPick={handleCoverPick}
                               onCoverClear={handleCoverClear}
+                              onTogglePlayback={handleTogglePlayback}
                             >
                               <video
                                 ref={mediaRef}
@@ -885,6 +901,7 @@ const playPrevious = useCallback(() => {
                             coverBusy={coverBusy}
                             onCoverPick={handleCoverPick}
                             onCoverClear={handleCoverClear}
+                            onTogglePlayback={handleTogglePlayback}
                           >
                             <audio
                               ref={mediaRef}

@@ -426,6 +426,15 @@
   animation: vinyl-spin 5.2s linear infinite;
   animation-play-state: paused;
   z-index: 1;
+  cursor: pointer;
+}
+
+.vinyl-disc:focus-visible {
+  outline: none;
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 255, 0.05),
+    inset 0 0 48px rgba(0, 0, 0, 0.75),
+    0 0 0 2px rgba(96, 165, 250, 0.45);
 }
 
 .vinyl-stage.is-playing .vinyl-disc {
@@ -452,18 +461,14 @@
   position: absolute;
   inset: 24%;
   border-radius: 50%;
-  overflow: visible;
+  overflow: hidden;
   border: none;
   box-shadow: none;
   padding: 0;
   margin: 0;
-  cursor: pointer;
   background: transparent;
   z-index: 2;
-}
-
-.vinyl-label:disabled {
-  cursor: wait;
+  pointer-events: none;
 }
 
 .vinyl-label img {
@@ -481,28 +486,30 @@
     filter 0.25s ease;
 }
 
-.vinyl-label:hover:not(:disabled) img,
-.vinyl-label:focus-visible:not(:disabled) img {
-  border-color: rgba(147, 197, 253, 0.85);
+.vinyl-disc:hover .vinyl-label img,
+.vinyl-disc:focus-visible .vinyl-label img {
+  border-color: rgba(147, 197, 253, 0.55);
   box-shadow:
     inset 0 0 16px rgba(0, 0, 0, 0.35),
-    0 0 0 2px rgba(96, 165, 250, 0.45),
-    0 0 18px rgba(59, 130, 246, 0.55);
-  filter: brightness(1.06);
+    0 0 0 2px rgba(96, 165, 250, 0.28),
+    0 0 14px rgba(59, 130, 246, 0.35);
 }
 
-.vinyl-label-reset {
+.vinyl-cover-actions {
   position: absolute;
-  top: 29%;
-  right: 29%;
+  top: 27%;
+  right: 24%;
   z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   opacity: 0;
-  transition: opacity 0.2s ease, background 0.2s ease, border-color 0.2s ease;
   pointer-events: none;
+  transition: opacity 0.2s ease;
 }
 
-.vinyl-stage:hover .vinyl-label-reset,
-.vinyl-stage:focus-within .vinyl-label-reset {
+.vinyl-stage:hover .vinyl-cover-actions,
+.vinyl-stage:focus-within .vinyl-cover-actions {
   opacity: 1;
   pointer-events: auto;
 }
@@ -528,10 +535,15 @@
   display: block;
 }
 
+.vinyl-label-icon-btn:hover:not(:disabled) {
+  background: rgba(37, 99, 235, 0.95);
+  border-color: rgba(147, 197, 253, 0.5);
+  color: #fff;
+}
+
 .vinyl-label-icon-btn--danger:hover:not(:disabled) {
   background: rgba(185, 28, 28, 0.95);
   border-color: rgba(252, 165, 165, 0.45);
-  color: #fff;
 }
 
 .vinyl-label-icon-btn:disabled {
@@ -555,21 +567,47 @@
 
 .vinyl-tonearm {
   position: absolute;
-  top: 7%;
-  right: 4%;
-  width: 44%;
-  height: 9px;
+  top: 4%;
+  right: 2%;
+  width: 48%;
+  height: 28px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
   transform-origin: 93% 50%;
   transform: rotate(24deg);
   transition: transform 0.75s cubic-bezier(0.34, 1.25, 0.64, 1);
   z-index: 3;
-  pointer-events: none;
+  cursor: pointer;
+}
+
+.vinyl-tonearm:disabled {
+  cursor: default;
+}
+
+.vinyl-tonearm:hover:not(:disabled)::before {
+  filter: brightness(1.12);
+}
+
+.vinyl-tonearm:focus-visible {
+  outline: none;
+}
+
+.vinyl-tonearm:focus-visible::before {
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.35),
+    0 0 0 2px rgba(96, 165, 250, 0.55);
 }
 
 .vinyl-tonearm::before {
   content: '';
   position: absolute;
-  inset: 0;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 9px;
+  margin-top: -4.5px;
   border-radius: 999px;
   background: linear-gradient(90deg, #4b5563, #e5e7eb);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);

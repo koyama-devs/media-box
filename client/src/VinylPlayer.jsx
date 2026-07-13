@@ -14,6 +14,16 @@ function MusicNoteIcon() {
   )
 }
 
+function ImageIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/>
+      <circle cx="9" cy="10" r="1.6"/>
+      <path d="M4.5 16.5 9 13l3.2 2.4L16 12l3.5 4.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  )
+}
+
 function TrashIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
@@ -31,6 +41,7 @@ export default function VinylPlayer({
   coverBusy = false,
   onCoverPick,
   onCoverClear,
+  onTogglePlayback,
   children,
 }) {
   const useDefaultCover = !coverSrc
@@ -49,6 +60,11 @@ export default function VinylPlayer({
     }
   }
 
+  const handlePlaybackClick = () => {
+    if (!onTogglePlayback) return
+    onTogglePlayback()
+  }
+
   return (
     <div className="vinyl-player">
       <div className={`vinyl-stage ${isPlaying ? 'is-playing' : ''}`}>
@@ -62,17 +78,32 @@ export default function VinylPlayer({
             </div>
           </div>
         ) : null}
-        <div className="vinyl-tonearm" aria-hidden="true" />
-        <div className="vinyl-disc">
+
+        <button
+          type="button"
+          className="vinyl-tonearm"
+          onClick={handlePlaybackClick}
+          disabled={!onTogglePlayback}
+          title={isPlaying ? '一時停止' : '再生'}
+          aria-label={isPlaying ? '一時停止' : '再生'}
+        />
+
+        <div
+          className="vinyl-disc"
+          role="button"
+          tabIndex={onTogglePlayback ? 0 : -1}
+          onClick={handlePlaybackClick}
+          onKeyDown={(event) => {
+            if (!onTogglePlayback) return
+            if (event.key !== 'Enter' && event.key !== ' ') return
+            event.preventDefault()
+            handlePlaybackClick()
+          }}
+          title={isPlaying ? '一時停止' : '再生'}
+          aria-label={isPlaying ? '一時停止' : '再生'}
+        >
           <div className="vinyl-grooves" aria-hidden="true" />
-          <button
-            type="button"
-            className={`vinyl-label ${coverBusy ? 'is-busy' : ''} ${useDefaultCover ? 'is-default' : 'has-cover'}`}
-            onClick={openCoverPicker}
-            disabled={coverBusy || !onCoverPick}
-            title={coverBusy ? '更新中...' : useDefaultCover ? 'ラベルを設定' : 'ラベルを変更'}
-            aria-label={coverBusy ? '更新中...' : useDefaultCover ? 'ラベルを設定' : 'ラベルを変更'}
-          >
+          <div className={`vinyl-label ${coverBusy ? 'is-busy' : ''} ${useDefaultCover ? 'is-default' : 'has-cover'}`}>
             <img
               src={coverSrc || DEFAULT_COVER}
               alt=""
@@ -81,21 +112,37 @@ export default function VinylPlayer({
                 event.currentTarget.src = DEFAULT_COVER
               }}
             />
-          </button>
+          </div>
           <div className="vinyl-spindle" aria-hidden="true" />
         </div>
-        {!useDefaultCover && onCoverClear ? (
-          <button
-            type="button"
-            className="vinyl-label-icon-btn vinyl-label-icon-btn--danger vinyl-label-reset"
-            onClick={onCoverClear}
-            disabled={coverBusy}
-            title="ラベルを外す"
-            aria-label="ラベルを外す"
-          >
-            <TrashIcon />
-          </button>
-        ) : null}
+
+        <div className="vinyl-cover-actions">
+          {onCoverPick ? (
+            <button
+              type="button"
+              className="vinyl-label-icon-btn"
+              onClick={openCoverPicker}
+              disabled={coverBusy}
+              title={useDefaultCover ? 'ラベルを設定' : 'ラベルを変更'}
+              aria-label={useDefaultCover ? 'ラベルを設定' : 'ラベルを変更'}
+            >
+              <ImageIcon />
+            </button>
+          ) : null}
+          {!useDefaultCover && onCoverClear ? (
+            <button
+              type="button"
+              className="vinyl-label-icon-btn vinyl-label-icon-btn--danger"
+              onClick={onCoverClear}
+              disabled={coverBusy}
+              title="ラベルを外す"
+              aria-label="ラベルを外す"
+            >
+              <TrashIcon />
+            </button>
+          ) : null}
+        </div>
+
         <div className="vinyl-shadow" aria-hidden="true" />
       </div>
 
