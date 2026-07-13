@@ -29,11 +29,12 @@ function getMediaKind(fileType, fileName = '') {
   return 'file'
 }
 
-function createMediaMetadata(file) {
+function createMediaMetadata(file, extras = {}) {
   return {
     name: file.name,
     type: file.type || 'application/octet-stream',
     kind: getMediaKind(file.type, file.name),
+    ...extras,
   }
 }
 
@@ -66,6 +67,7 @@ function App() {
   const [playlistMode, setPlaylistMode] = useState(true)
   const [isMediaPlaying, setIsMediaPlaying] = useState(false)
   const [coverPreviewUrl, setCoverPreviewUrl] = useState(null)
+  const [coverBusy, setCoverBusy] = useState(false)
   const blobUrlsRef = useRef(new Set())
   const mediaUrlCacheRef = useRef(new Map())
 
@@ -74,9 +76,6 @@ function App() {
   
   // Có cần autoplay sau khi đổi bài không
   const shouldAutoPlayRef = useRef(false)
-  
-  // Đang phát playlist hay không
-  const imageTimerRef = useRef(null)
   
   // Đánh dấu media hiện tại đã sẵn sàng
   const mediaReadyRef = useRef(false)
@@ -92,27 +91,32 @@ function App() {
   // Giữ src media cuối khi hiển thị ảnh trong playlist (mobile autoplay)
   const lastMediaSrcRef = useRef(null)
 
-  const selectedItem = useMemo(
-    () => items.find((item) => item.id === selectedItemId) || items[0] || null,
-    [items, selectedItemId],
-  )
-
-  const selectedIndex = useMemo(
-    () => items.findIndex((item) => item.id === selectedItemId),
-    [items, selectedItemId],
-  )
-
-  const imageItems = useMemo(
-    () => items.filter((item) => item.kind === 'image'),
+  const playableItems = useMemo(
+    () => items.filter((item) => item.kind === 'audio' || item.kind === 'video'),
     [items],
   )
 
+  const imageItems = useMemo(
+    () => items.filter((item) => item.kind === 'image' && item.inLibrary !== false),
+    [items],
+  )
+
+  const selectedItem = useMemo(
+    () => items.find((item) => item.id === selectedItemId) || playableItems[0] || null,
+    [items, selectedItemId, playableItems],
+  )
+
+  const selectedPlayableIndex = useMemo(
+    () => playableItems.findIndex((item) => item.id === selectedItemId),
+    [playableItems, selectedItemId],
+  )
+
   const getItemIdAtOffset = useCallback((offset) => {
-    if (items.length === 0) return null
-    const baseIndex = selectedIndex >= 0 ? selectedIndex : 0
-    const nextIndex = (baseIndex + offset + items.length) % items.length
-    return items[nextIndex]?.id || null
-  }, [items, selectedIndex])
+    if (playableItems.length === 0) return null
+    const baseIndex = selectedPlayableIndex >= 0 ? selectedPlayableIndex : 0
+    const nextIndex = (baseIndex + offset + playableItems.length) % playableItems.length
+    return playableItems[nextIndex]?.id || null
+  }, [playableItems, selectedPlayableIndex])
 
   const ensureMediaUrl = useCallback(async (itemId, mimeType) => {
     const cached = mediaUrlCacheRef.current.get(itemId)
@@ -146,12 +150,7 @@ function App() {
 }, [])
 
   const advancePlaylistToItem = useCallback((nextItem, playImmediately = false) => {
-    if (!nextItem) return false
-
-    if (nextItem.kind === 'image') {
-      selectItem(nextItem.id, playlistMode)
-      return true
-    }
+    if (!nextItem || nextItem.kind === 'image') return false
 
     const nextUrl = mediaUrlCacheRef.current.get(nextItem.id)
     const media = mediaRef.current
@@ -254,34 +253,124 @@ const playPrevious = useCallback(() => {
     setIsMediaPlaying(false)
   }, [])
 
-  const handleCoverChange = async (event) => {
+  const handleCoverPick = async (file) => {
     if (!selectedItem || selectedItem.kind !== 'audio') return
 
-    const coverId = event.target.value || null
+    const kind = getMediaKind(file.type, file.name)
+    if (kind !== 'image') {
+      setError('画像ファイルを選択してください。')
+      return
+    }
+
+    if (file.size > MAX_FILE_SIZE) {
+      setError(`ファイルは${formatSize(MAX_FILE_SIZE)}以下にしてください。`)
+      return
+    }
+
+    setCoverBusy(true)
+    setError('')
+
+    const previousCoverId = selectedItem.coverId || null
+
+    try {
+      const metadata = createMediaMetadata(file, {
+        inLibrary: false,
+        usage: 'cover',
+      })
+      const coverId = await uploadMediaFile(file, metadata)
+      await updateMediaCover(selectedItem.id, coverId)
+
+      if (previousCoverId && previousCoverId !== coverId) {
+        const previousCover = items.find((item) => item.id === previousCoverId)
+        const stillUsed = items.some(
+          (item) =>
+            item.id !== selectedItem.id &&
+            item.kind === 'audio' &&
+            item.coverId === previousCoverId,
+        )
+        if (previousCover?.inLibrary === false && !stillUsed) {
+          await deleteMediaItem(previousCoverId)
+          mediaUrlCacheRef.current.delete(previousCoverId)
+        }
+      }
+    } catch (coverError) {
+      console.error(coverError)
+      setError(getFirebaseErrorMessage(coverError) || 'カバー画像の設定に失敗しました。')
+    } finally {
+      setCoverBusy(false)
+    }
+  }
+
+  const handleCoverClear = async () => {
+    if (!selectedItem || selectedItem.kind !== 'audio') return
+
+    setCoverBusy(true)
+    setError('')
+
+    const previousCoverId = selectedItem.coverId || null
+
+    try {
+      await updateMediaCover(selectedItem.id, null)
+      setCoverPreviewUrl(null)
+
+      if (previousCoverId) {
+        const previousCover = items.find((item) => item.id === previousCoverId)
+        const stillUsed = items.some(
+          (item) =>
+            item.id !== selectedItem.id &&
+            item.kind === 'audio' &&
+            item.coverId === previousCoverId,
+        )
+        if (previousCover?.inLibrary === false && !stillUsed) {
+          await deleteMediaItem(previousCoverId)
+          mediaUrlCacheRef.current.delete(previousCoverId)
+        }
+      }
+    } catch (coverError) {
+      console.error(coverError)
+      setError('カバー画像の削除に失敗しました。')
+    } finally {
+      setCoverBusy(false)
+    }
+  }
+
+  const handleAssignCoverFromLibrary = async (coverId) => {
+    if (!selectedItem || selectedItem.kind !== 'audio') {
+      setError('先に音声トラックを選択してください。')
+      return
+    }
+
+    setCoverBusy(true)
+    setError('')
 
     try {
       await updateMediaCover(selectedItem.id, coverId)
-      setError('')
     } catch (coverError) {
       console.error(coverError)
       setError('カバー画像の設定に失敗しました。')
+    } finally {
+      setCoverBusy(false)
     }
   }
 
   const startPlaylist = useCallback(() => {
-    if (items.length === 0) return
+    if (playableItems.length === 0) return
     setPlaylistMode(true)
-    selectItem(selectedItem?.id || items[0].id, true)
-  }, [items, selectedItem?.id, selectItem])
+    const startId =
+      selectedItem && selectedItem.kind !== 'image'
+        ? selectedItem.id
+        : playableItems[0].id
+    selectItem(startId, true)
+  }, [playableItems, selectedItem, selectItem])
 
   const handleMediaEnded = useCallback(() => {
     if (!playlistMode) return
-    if (items.length <= 1) return
+    if (playableItems.length <= 1) return
 
     const nextId = getItemIdAtOffset(1)
     if (!nextId) return
 
-    const nextItem = items.find((item) => item.id === nextId)
+    const nextItem = playableItems.find((item) => item.id === nextId)
     if (!nextItem) return
 
     // Gọi play() đồng bộ trong ended — mobile chỉ cho phép trong chuỗi sự kiện này
@@ -290,7 +379,7 @@ const playPrevious = useCallback(() => {
     }
   }, [
     playlistMode,
-    items,
+    playableItems,
     getItemIdAtOffset,
     advancePlaylistToItem,
     playNext,
@@ -313,7 +402,10 @@ const playPrevious = useCallback(() => {
           if (currentId && nextItems.some((item) => item.id === currentId)) {
             return currentId
           }
-          return nextItems[0]?.id || null
+          const firstPlayable = nextItems.find(
+            (item) => item.kind === 'audio' || item.kind === 'video',
+          )
+          return firstPlayable?.id || null
         })
         setLoadingItems(false)
       },
@@ -445,17 +537,18 @@ const playPrevious = useCallback(() => {
 ])
 
   useEffect(() => {
-    if (!playlistMode || !selectedItem) return
+    if (!playlistMode || !selectedItem || selectedItem.kind === 'image') return
 
     const nextId = getItemIdAtOffset(1)
     if (!nextId) return
 
-    const nextItem = items.find((item) => item.id === nextId)
+    const nextItem = playableItems.find((item) => item.id === nextId)
     prefetchMediaUrl(nextItem)
   }, [
     playlistMode,
     selectedItem?.id,
-    items,
+    selectedItem?.kind,
+    playableItems,
     getItemIdAtOffset,
     prefetchMediaUrl,
   ])
@@ -483,51 +576,6 @@ const playPrevious = useCallback(() => {
       selectedItem?.id,
       selectedItem?.kind,
       autoPlayCurrentMedia
-  ])
-
-    useEffect(() => {
-
-      if (!playlistMode) return
-
-      if (!previewUrl) return
-
-      if (loadingPreview) return
-
-      if (selectedItem?.kind !== 'image') return
-
-      const nextId = getItemIdAtOffset(1)
-      const nextItem = items.find((item) => item.id === nextId)
-      prefetchMediaUrl(nextItem)
-
-      if (imageTimerRef.current) {
-          clearTimeout(imageTimerRef.current)
-      }
-
-      imageTimerRef.current = setTimeout(() => {
-        if (nextItem && !advancePlaylistToItem(nextItem, true)) {
-          playNext()
-        }
-      }, 5000)
-
-      return () => {
-
-          if (imageTimerRef.current) {
-              clearTimeout(imageTimerRef.current)
-          }
-
-      }
-
-  }, [
-      playlistMode,
-      previewUrl,
-      loadingPreview,
-      selectedItem?.id,
-      selectedItem?.kind,
-      items,
-      getItemIdAtOffset,
-      prefetchMediaUrl,
-      advancePlaylistToItem,
-      playNext
   ])
 
     useEffect(() => {
@@ -607,9 +655,14 @@ const playPrevious = useCallback(() => {
     setError('')
 
     try {
-      const metadata = createMediaMetadata(file)
+      const metadata = createMediaMetadata(file, {
+        inLibrary: kind === 'image',
+      })
       const id = await uploadMediaFile(file, metadata, setUploadProgress)
-      setSelectedItemId(id)
+      // Ảnh thư viện không nhảy sang preview / playlist
+      if (kind !== 'image') {
+        setSelectedItemId(id)
+      }
       setLoadingItems(false)
     } catch (uploadError) {
       console.error(uploadError)
@@ -623,9 +676,22 @@ const playPrevious = useCallback(() => {
   }
 
   const handleDelete = async (itemId) => {
-    if (!items.find((item) => item.id === itemId)) return
+    const target = items.find((item) => item.id === itemId)
+    if (!target) return
 
     try {
+      if (target.kind === 'image') {
+        const linkedAudios = items.filter(
+          (item) => item.kind === 'audio' && item.coverId === itemId,
+        )
+        await Promise.all(
+          linkedAudios.map((item) => updateMediaCover(item.id, null)),
+        )
+        if (selectedItem?.coverId === itemId) {
+          setCoverPreviewUrl(null)
+        }
+      }
+
       await deleteMediaItem(itemId)
       if (selectedItemId === itemId) {
 
@@ -691,7 +757,7 @@ const playPrevious = useCallback(() => {
             <div>
               <p className="eyebrow">すぐアップロード</p>
               <h3>メディアを共有ボックスへ追加</h3>
-              <p className="hint">1ファイルあたり最大 {formatSize(MAX_FILE_SIZE)}までアップロードできます</p>
+              <p className="hint">1ファイルあたり最大 {formatSize(MAX_FILE_SIZE)}。画像は画像ライブラリへ入ります。</p>
               {uploading ? (
                 <div className="upload-progress-wrap">
                   <p className="upload-progress-label">
@@ -726,26 +792,10 @@ const playPrevious = useCallback(() => {
                       <h3>{selectedItem.name}</h3>
                     </div>
                     <div className="player-actions">
-                      {selectedItem.kind === 'audio' && imageItems.length > 0 ? (
-                        <label className="cover-picker">
-                          <span>カバー画像</span>
-                          <select
-                            value={selectedItem.coverId || ''}
-                            onChange={handleCoverChange}
-                          >
-                            <option value="">デフォルト</option>
-                            {imageItems.map((item) => (
-                              <option key={item.id} value={item.id}>
-                                {item.name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      ) : null}
-                      <button type="button" className="secondary-button" onClick={playPrevious} disabled={items.length < 2}>
+                      <button type="button" className="secondary-button" onClick={playPrevious} disabled={playableItems.length < 2}>
                         前へ
                       </button>
-                      <button type="button" className="secondary-button" onClick={playNext} disabled={items.length < 2}>
+                      <button type="button" className="secondary-button" onClick={playNext} disabled={playableItems.length < 2}>
                         次へ
                       </button>
                       <button
@@ -755,7 +805,7 @@ const playPrevious = useCallback(() => {
                       >
                         {playlistMode ? '連続再生 ON' : '連続再生 OFF'}
                       </button>
-                      <button type="button" className="primary-button" onClick={startPlaylist} disabled={items.length === 0}>
+                      <button type="button" className="primary-button" onClick={startPlaylist} disabled={playableItems.length === 0}>
                         リスト再生
                       </button>
                       <button type="button" className="danger-button" onClick={() => handleDelete(selectedItem.id)}>
@@ -785,6 +835,9 @@ const playPrevious = useCallback(() => {
                               title={selectedItem.name}
                               coverSrc={coverPreviewUrl}
                               isPlaying={isMediaPlaying}
+                              coverBusy={coverBusy}
+                              onCoverPick={handleCoverPick}
+                              onCoverClear={handleCoverClear}
                             >
                               <video
                                 ref={mediaRef}
@@ -829,6 +882,9 @@ const playPrevious = useCallback(() => {
                             title={selectedItem.name}
                             coverSrc={coverPreviewUrl}
                             isPlaying={isMediaPlaying}
+                            coverBusy={coverBusy}
+                            onCoverPick={handleCoverPick}
+                            onCoverClear={handleCoverClear}
                           >
                             <audio
                               ref={mediaRef}
@@ -878,21 +934,21 @@ const playPrevious = useCallback(() => {
 
             <aside className="list-card">
               <div className="list-header">
-                <h3>メディア一覧</h3>
-                <span>{items.length} 件</span>
+                <h3>再生リスト</h3>
+                <span>{playableItems.length} 件</span>
               </div>
 
               {loadingItems ? (
                 <div className="empty-list">
                   <p>読み込み中...</p>
                 </div>
-              ) : items.length === 0 ? (
+              ) : playableItems.length === 0 ? (
                 <div className="empty-list">
-                  <p>アップロードしたファイルがここに表示されます。</p>
+                  <p>音声・動画を追加するとここに表示されます。</p>
                 </div>
               ) : (
                 <ul className="video-list">
-                  {items.map((item) => (
+                  {playableItems.map((item) => (
                     <li key={item.id} className={`video-item ${selectedItem?.id === item.id ? 'active' : ''}`}>
                       <button type="button" className="video-title" onClick={() => selectItem(item.id)}>
                         <strong>{item.name}</strong>
@@ -905,6 +961,42 @@ const playPrevious = useCallback(() => {
                   ))}
                 </ul>
               )}
+
+              {imageItems.length > 0 ? (
+                <div className="cover-library">
+                  <div className="list-header">
+                    <h3>画像ライブラリ</h3>
+                    <span>{imageItems.length} 件</span>
+                  </div>
+                  <p className="cover-library-hint">
+                    クリックで現在の曲のラベルに設定できます
+                  </p>
+                  <ul className="video-list">
+                    {imageItems.map((item) => (
+                      <li
+                        key={item.id}
+                        className={`video-item cover-item ${selectedItem?.coverId === item.id ? 'active' : ''}`}
+                      >
+                        <button
+                          type="button"
+                          className="video-title"
+                          onClick={() => handleAssignCoverFromLibrary(item.id)}
+                          disabled={coverBusy || selectedItem?.kind !== 'audio'}
+                        >
+                          <strong>{item.name}</strong>
+                          <span>
+                            {selectedItem?.coverId === item.id ? '使用中 · ' : ''}
+                            {formatSize(item.size)}
+                          </span>
+                        </button>
+                        <button type="button" className="icon-button danger" onClick={() => handleDelete(item.id)}>
+                          ×
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </aside>
           </main>
         </>

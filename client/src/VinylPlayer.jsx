@@ -1,3 +1,5 @@
+import { useRef } from 'react'
+
 const DEFAULT_COVER = '/vinyl-label-default.svg'
 
 function MusicNoteIcon() {
@@ -12,8 +14,40 @@ function MusicNoteIcon() {
   )
 }
 
-export default function VinylPlayer({ title, coverSrc, isPlaying, children }) {
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <path d="M5 7h14" strokeLinecap="round"/>
+      <path d="M9 7V5.8A1.8 1.8 0 0 1 10.8 4h2.4A1.8 1.8 0 0 1 15 5.8V7"/>
+      <path d="M8 7l.7 11.2A1.8 1.8 0 0 0 10.5 20h3a1.8 1.8 0 0 0 1.8-1.8L16 7"/>
+    </svg>
+  )
+}
+
+export default function VinylPlayer({
+  title,
+  coverSrc,
+  isPlaying,
+  coverBusy = false,
+  onCoverPick,
+  onCoverClear,
+  children,
+}) {
   const useDefaultCover = !coverSrc
+  const coverInputRef = useRef(null)
+
+  const openCoverPicker = () => {
+    if (coverBusy || !onCoverPick) return
+    coverInputRef.current?.click()
+  }
+
+  const handleCoverFile = (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (file && onCoverPick) {
+      onCoverPick(file)
+    }
+  }
 
   return (
     <div className="vinyl-player">
@@ -31,7 +65,14 @@ export default function VinylPlayer({ title, coverSrc, isPlaying, children }) {
         <div className="vinyl-tonearm" aria-hidden="true" />
         <div className="vinyl-disc">
           <div className="vinyl-grooves" aria-hidden="true" />
-          <div className="vinyl-label">
+          <button
+            type="button"
+            className={`vinyl-label ${coverBusy ? 'is-busy' : ''} ${useDefaultCover ? 'is-default' : 'has-cover'}`}
+            onClick={openCoverPicker}
+            disabled={coverBusy || !onCoverPick}
+            title={coverBusy ? '更新中...' : useDefaultCover ? 'ラベルを設定' : 'ラベルを変更'}
+            aria-label={coverBusy ? '更新中...' : useDefaultCover ? 'ラベルを設定' : 'ラベルを変更'}
+          >
             <img
               src={coverSrc || DEFAULT_COVER}
               alt=""
@@ -40,11 +81,31 @@ export default function VinylPlayer({ title, coverSrc, isPlaying, children }) {
                 event.currentTarget.src = DEFAULT_COVER
               }}
             />
-          </div>
+          </button>
           <div className="vinyl-spindle" aria-hidden="true" />
         </div>
+        {!useDefaultCover && onCoverClear ? (
+          <button
+            type="button"
+            className="vinyl-label-icon-btn vinyl-label-icon-btn--danger vinyl-label-reset"
+            onClick={onCoverClear}
+            disabled={coverBusy}
+            title="ラベルを外す"
+            aria-label="ラベルを外す"
+          >
+            <TrashIcon />
+          </button>
+        ) : null}
         <div className="vinyl-shadow" aria-hidden="true" />
       </div>
+
+      <input
+        ref={coverInputRef}
+        type="file"
+        accept="image/*"
+        className="sr-only"
+        onChange={handleCoverFile}
+      />
 
       <p className="vinyl-track-title">{title}</p>
 
