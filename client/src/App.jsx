@@ -6,8 +6,10 @@ import {
   loadMediaBlobUrl,
   MAX_FILE_SIZE,
   subscribeToMediaItems,
+  updateMediaCover,
   uploadMediaFile,
 } from './firebase'
+import VinylPlayer from './VinylPlayer'
 
 const AUTH_KEY = 'media-share-lite-auth'
 const PASSWORD = 'hiro'
@@ -62,6 +64,8 @@ function App() {
   const [previewUrl, setPreviewUrl] = useState(null)
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [playlistMode, setPlaylistMode] = useState(true)
+  const [isMediaPlaying, setIsMediaPlaying] = useState(false)
+  const [coverPreviewUrl, setCoverPreviewUrl] = useState(null)
   const blobUrlsRef = useRef(new Set())
   const mediaUrlCacheRef = useRef(new Map())
 
@@ -96,6 +100,11 @@ function App() {
   const selectedIndex = useMemo(
     () => items.findIndex((item) => item.id === selectedItemId),
     [items, selectedItemId],
+  )
+
+  const imageItems = useMemo(
+    () => items.filter((item) => item.kind === 'image'),
+    [items],
   )
 
   const getItemIdAtOffset = useCallback((offset) => {
@@ -237,6 +246,28 @@ const playPrevious = useCallback(() => {
     autoPlayCurrentMedia()
   }, [autoPlayCurrentMedia])
 
+  const handleMediaPlay = useCallback(() => {
+    setIsMediaPlaying(true)
+  }, [])
+
+  const handleMediaPause = useCallback(() => {
+    setIsMediaPlaying(false)
+  }, [])
+
+  const handleCoverChange = async (event) => {
+    if (!selectedItem || selectedItem.kind !== 'audio') return
+
+    const coverId = event.target.value || null
+
+    try {
+      await updateMediaCover(selectedItem.id, coverId)
+      setError('')
+    } catch (coverError) {
+      console.error(coverError)
+      setError('カバー画像の設定に失敗しました。')
+    }
+  }
+
   const startPlaylist = useCallback(() => {
     if (items.length === 0) return
     setPlaylistMode(true)
@@ -316,6 +347,42 @@ const playPrevious = useCallback(() => {
       lastMediaSrcRef.current = previewUrl
     }
   }, [previewUrl, selectedItem?.kind])
+
+  useEffect(() => {
+    setIsMediaPlaying(false)
+  }, [selectedItem?.id])
+
+  useEffect(() => {
+    if (selectedItem?.kind !== 'audio' || !selectedItem.coverId) {
+      setCoverPreviewUrl(null)
+      return undefined
+    }
+
+    const coverItem = items.find((item) => item.id === selectedItem.coverId)
+    if (!coverItem) {
+      setCoverPreviewUrl(null)
+      return undefined
+    }
+
+    let cancelled = false
+
+    ensureMediaUrl(coverItem.id, coverItem.type)
+      .then((url) => {
+        if (!cancelled) {
+          setCoverPreviewUrl(url)
+        }
+      })
+      .catch((err) => {
+        console.error(err)
+        if (!cancelled) {
+          setCoverPreviewUrl(null)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedItem?.id, selectedItem?.kind, selectedItem?.coverId, items, ensureMediaUrl])
 
   useEffect(() => {
 
@@ -659,6 +726,22 @@ const playPrevious = useCallback(() => {
                       <h3>{selectedItem.name}</h3>
                     </div>
                     <div className="player-actions">
+                      {selectedItem.kind === 'audio' && imageItems.length > 0 ? (
+                        <label className="cover-picker">
+                          <span>カバー画像</span>
+                          <select
+                            value={selectedItem.coverId || ''}
+                            onChange={handleCoverChange}
+                          >
+                            <option value="">デフォルト</option>
+                            {imageItems.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {item.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : null}
                       <button type="button" className="secondary-button" onClick={playPrevious} disabled={items.length < 2}>
                         前へ
                       </button>
@@ -698,23 +781,41 @@ const playPrevious = useCallback(() => {
                             />
                           ) : null}
                           {selectedItem.kind === 'audio' ? (
-                            <div className="audio-card">
-                              <p>{selectedItem.name}</p>
-                            </div>
-                          ) : null}
-                          <video
-                            ref={mediaRef}
-                            className={selectedItem.kind === 'video' ? 'video-player' : 'video-player audio-only'}
-                            controls={selectedItem.kind !== 'image'}
-                            playsInline
-                            preload="auto"
-                            src={selectedItem.kind === 'image' ? lastMediaSrcRef.current || undefined : previewUrl}
-                            style={selectedItem.kind === 'image' ? { position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' } : undefined}
-                            aria-hidden={selectedItem.kind === 'image'}
-                            tabIndex={selectedItem.kind === 'image' ? -1 : undefined}
-                            onCanPlayThrough={handleMediaCanPlay}
-                            onEnded={handleMediaEnded}
-                          />
+                            <VinylPlayer
+                              title={selectedItem.name}
+                              coverSrc={coverPreviewUrl}
+                              isPlaying={isMediaPlaying}
+                            >
+                              <video
+                                ref={mediaRef}
+                                className="video-player audio-only"
+                                controls
+                                playsInline
+                                preload="auto"
+                                src={previewUrl}
+                                onCanPlayThrough={handleMediaCanPlay}
+                                onEnded={handleMediaEnded}
+                                onPlay={handleMediaPlay}
+                                onPause={handleMediaPause}
+                              />
+                            </VinylPlayer>
+                          ) : (
+                            <video
+                              ref={mediaRef}
+                              className="video-player"
+                              controls={selectedItem.kind !== 'image'}
+                              playsInline
+                              preload="auto"
+                              src={selectedItem.kind === 'image' ? lastMediaSrcRef.current || undefined : previewUrl}
+                              style={selectedItem.kind === 'image' ? { position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' } : undefined}
+                              aria-hidden={selectedItem.kind === 'image'}
+                              tabIndex={selectedItem.kind === 'image' ? -1 : undefined}
+                              onCanPlayThrough={handleMediaCanPlay}
+                              onEnded={handleMediaEnded}
+                              onPlay={handleMediaPlay}
+                              onPause={handleMediaPause}
+                            />
+                          )}
                         </>
                       ) : selectedItem.kind === 'image' ? (
                           <img
@@ -724,19 +825,23 @@ const playPrevious = useCallback(() => {
                               alt={selectedItem.name}
                           />
                       ) : selectedItem.kind === 'audio' ? (
-                          <div className="audio-card">
-                              <p>{selectedItem.name}</p>
-
-                              <audio
-                                ref={mediaRef}
-                                controls
-                                playsInline
-                                preload="auto"
-                                src={previewUrl}
-                                onCanPlayThrough={handleMediaCanPlay}
-                                onEnded={handleMediaEnded}
-                              />
-                          </div>
+                          <VinylPlayer
+                            title={selectedItem.name}
+                            coverSrc={coverPreviewUrl}
+                            isPlaying={isMediaPlaying}
+                          >
+                            <audio
+                              ref={mediaRef}
+                              controls
+                              playsInline
+                              preload="auto"
+                              src={previewUrl}
+                              onCanPlayThrough={handleMediaCanPlay}
+                              onEnded={handleMediaEnded}
+                              onPlay={handleMediaPlay}
+                              onPause={handleMediaPause}
+                            />
+                          </VinylPlayer>
                       ) : (
                         <video
                         ref={mediaRef}
@@ -747,6 +852,8 @@ const playPrevious = useCallback(() => {
                         src={previewUrl}
                         onCanPlayThrough={handleMediaCanPlay}
                         onEnded={handleMediaEnded}
+                        onPlay={handleMediaPlay}
+                        onPause={handleMediaPause}
                         />
                       )}
                     </>

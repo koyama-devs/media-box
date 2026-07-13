@@ -131,6 +131,14 @@ export function subscribeToMediaItems(onData, onError) {
   )
 }
 
+export async function updateMediaCover(itemId, coverId) {
+  await setDoc(
+    doc(db, MEDIA_COLLECTION, itemId),
+    { coverId: coverId || null },
+    { merge: true },
+  )
+}
+
 export async function deleteMediaItem(itemId) {
   const chunksSnap = await getDocs(collection(db, MEDIA_COLLECTION, itemId, 'chunks'))
   const batch = writeBatch(db)
