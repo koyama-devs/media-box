@@ -171,6 +171,14 @@ export async function updateMediaName(itemId, name) {
   )
 }
 
+export async function updateMediaLyrics(itemId, lyrics) {
+  await setDoc(
+    doc(db, MEDIA_COLLECTION, itemId),
+    { lyrics: lyrics || null },
+    { merge: true },
+  )
+}
+
 export async function updatePlaylistOrder(orderedIds) {
   if (!Array.isArray(orderedIds) || orderedIds.length === 0) return
 

@@ -9,10 +9,12 @@ import {
   subscribeToMediaItems,
   updateMediaCover,
   updateMediaJacket,
+  updateMediaLyrics,
   updateMediaName,
   updatePlaylistOrder,
   uploadMediaFile,
 } from './firebase'
+import LyricsPanel from './LyricsPanel'
 import VinylPlayer from './VinylPlayer'
 
 const AUTH_KEY = 'media-share-lite-auth'
@@ -216,6 +218,8 @@ function App() {
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [playlistMode, setPlaylistMode] = useState(true)
   const [isMediaPlaying, setIsMediaPlaying] = useState(false)
+  const [playbackTime, setPlaybackTime] = useState(0)
+  const [lyricsBusy, setLyricsBusy] = useState(false)
   const [coverPreviewUrl, setCoverPreviewUrl] = useState(null)
   const [jacketPreviewUrl, setJacketPreviewUrl] = useState(null)
   const [coverBusy, setCoverBusy] = useState(false)
@@ -427,6 +431,40 @@ const playPrevious = useCallback(() => {
   const handleMediaPause = useCallback(() => {
     setIsMediaPlaying(false)
   }, [])
+
+  const handleMediaTimeUpdate = useCallback((event) => {
+    setPlaybackTime(event.currentTarget.currentTime || 0)
+  }, [])
+
+  const handleSaveLyrics = async (lyrics) => {
+    if (!selectedItem || selectedItem.kind !== 'audio') return
+    setLyricsBusy(true)
+    setError('')
+    try {
+      await updateMediaLyrics(selectedItem.id, lyrics)
+    } catch (lyricsError) {
+      console.error(lyricsError)
+      setError(lyricsError?.message || getFirebaseErrorMessage(lyricsError) || '歌詞の保存に失敗しました。')
+      throw lyricsError
+    } finally {
+      setLyricsBusy(false)
+    }
+  }
+
+  const handleClearLyrics = async () => {
+    if (!selectedItem || selectedItem.kind !== 'audio') return
+    setLyricsBusy(true)
+    setError('')
+    try {
+      await updateMediaLyrics(selectedItem.id, null)
+    } catch (lyricsError) {
+      console.error(lyricsError)
+      setError(lyricsError?.message || getFirebaseErrorMessage(lyricsError) || '歌詞の削除に失敗しました。')
+      throw lyricsError
+    } finally {
+      setLyricsBusy(false)
+    }
+  }
 
   const handleTogglePlayback = useCallback(async () => {
     const media = mediaRef.current
@@ -652,6 +690,7 @@ const playPrevious = useCallback(() => {
 
   useEffect(() => {
     setIsMediaPlaying(false)
+    setPlaybackTime(0)
   }, [selectedItem?.id])
 
   useEffect(() => {
@@ -1280,6 +1319,7 @@ const playPrevious = useCallback(() => {
                           alt={selectedItem.name}
                         />
                       ) : selectedItem.kind === 'audio' ? (
+                        <>
                         <VinylPlayer
                           title={getDisplayName(selectedItem.name)}
                           coverSrc={coverPreviewUrl}
@@ -1304,8 +1344,19 @@ const playPrevious = useCallback(() => {
                             onEnded={handleMediaEnded}
                             onPlay={handleMediaPlay}
                             onPause={handleMediaPause}
+                            onTimeUpdate={handleMediaTimeUpdate}
+                            onSeeked={handleMediaTimeUpdate}
                           />
                         </VinylPlayer>
+                        <LyricsPanel
+                          lyrics={selectedItem.lyrics}
+                          currentTime={playbackTime}
+                          isPlaying={isMediaPlaying}
+                          busy={lyricsBusy}
+                          onSave={handleSaveLyrics}
+                          onClear={handleClearLyrics}
+                        />
+                        </>
                       ) : (
                         <video
                           ref={mediaRef}
@@ -1318,6 +1369,8 @@ const playPrevious = useCallback(() => {
                           onEnded={handleMediaEnded}
                           onPlay={handleMediaPlay}
                           onPause={handleMediaPause}
+                          onTimeUpdate={handleMediaTimeUpdate}
+                          onSeeked={handleMediaTimeUpdate}
                         />
                       )}
                     </>
