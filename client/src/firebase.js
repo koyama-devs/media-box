@@ -35,8 +35,19 @@ const MEDIA_COLLECTION = 'media-items'
 const CHUNK_SIZE = 700_000
 export const MAX_FILE_SIZE = 10 * 1024 * 1024
 
-function sortMediaItems(items) {
-  return [...items].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+export function sortMediaItems(items) {
+  return [...items].sort((a, b) => {
+    const aOrder = typeof a.order === 'number' ? a.order : null
+    const bOrder = typeof b.order === 'number' ? b.order : null
+
+    if (aOrder !== null && bOrder !== null && aOrder !== bOrder) {
+      return aOrder - bOrder
+    }
+    if (aOrder !== null && bOrder === null) return -1
+    if (aOrder === null && bOrder !== null) return 1
+
+    return (b.createdAt || '').localeCompare(a.createdAt || '')
+  })
 }
 
 function arrayBufferToBase64(buffer) {
@@ -137,6 +148,33 @@ export async function updateMediaCover(itemId, coverId) {
     { coverId: coverId || null },
     { merge: true },
   )
+}
+
+export async function updateMediaName(itemId, name) {
+  const trimmed = (name || '').trim()
+  if (!trimmed) {
+    throw new Error('名前を入力してください。')
+  }
+
+  await setDoc(
+    doc(db, MEDIA_COLLECTION, itemId),
+    { name: trimmed },
+    { merge: true },
+  )
+}
+
+export async function updatePlaylistOrder(orderedIds) {
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) return
+
+  const batch = writeBatch(db)
+  orderedIds.forEach((itemId, index) => {
+    batch.set(
+      doc(db, MEDIA_COLLECTION, itemId),
+      { order: index },
+      { merge: true },
+    )
+  })
+  await batch.commit()
 }
 
 export async function deleteMediaItem(itemId) {

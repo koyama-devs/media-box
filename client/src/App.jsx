@@ -5,8 +5,11 @@ import {
   getFirebaseErrorMessage,
   loadMediaBlobUrl,
   MAX_FILE_SIZE,
+  sortMediaItems,
   subscribeToMediaItems,
   updateMediaCover,
+  updateMediaName,
+  updatePlaylistOrder,
   uploadMediaFile,
 } from './firebase'
 import VinylPlayer from './VinylPlayer'
@@ -29,9 +32,43 @@ function getMediaKind(fileType, fileName = '') {
   return 'file'
 }
 
+function getFileExtension(fileName = '') {
+  const base = String(fileName).trim()
+  const dot = base.lastIndexOf('.')
+  if (dot <= 0 || dot === base.length - 1) return ''
+  return base.slice(dot + 1).toLowerCase()
+}
+
+function getDisplayName(fileName = '') {
+  const base = String(fileName).trim()
+  if (!base) return '無題'
+  const extension = getFileExtension(base)
+  if (!extension) return base
+  return base.slice(0, -(extension.length + 1)) || base
+}
+
+function withOriginalExtension(displayName, originalName = '') {
+  const trimmed = String(displayName || '').trim()
+  if (!trimmed) return ''
+
+  // User typed an extension themselves — keep as-is
+  if (getFileExtension(trimmed)) return trimmed
+
+  const extension = getFileExtension(originalName)
+  return extension ? `${trimmed}.${extension}` : trimmed
+}
+
+function getKindLabel(kind) {
+  if (kind === 'audio') return '音声'
+  if (kind === 'video') return '動画'
+  if (kind === 'image') return '画像'
+  return 'ファイル'
+}
+
 function createMediaMetadata(file, extras = {}) {
   return {
-    name: file.name,
+    name: getDisplayName(file.name),
+    originalName: file.name,
     type: file.type || 'application/octet-stream',
     kind: getMediaKind(file.type, file.name),
     ...extras,
@@ -68,6 +105,10 @@ function App() {
   const [isMediaPlaying, setIsMediaPlaying] = useState(false)
   const [coverPreviewUrl, setCoverPreviewUrl] = useState(null)
   const [coverBusy, setCoverBusy] = useState(false)
+  const [editingItemId, setEditingItemId] = useState(null)
+  const [editingName, setEditingName] = useState('')
+  const [dragItemId, setDragItemId] = useState(null)
+  const [dragOverItemId, setDragOverItemId] = useState(null)
   const blobUrlsRef = useRef(new Set())
   const mediaUrlCacheRef = useRef(new Map())
 
@@ -672,6 +713,15 @@ const playPrevious = useCallback(() => {
     try {
       const metadata = createMediaMetadata(file, {
         inLibrary: kind === 'image',
+        ...(kind === 'image'
+          ? {}
+          : {
+              order:
+                playableItems.reduce(
+                  (max, item) => Math.max(max, typeof item.order === 'number' ? item.order : -1),
+                  -1,
+                ) + 1,
+            }),
       })
       const id = await uploadMediaFile(file, metadata, setUploadProgress)
       // Ảnh thư viện không nhảy sang preview / playlist
@@ -688,6 +738,83 @@ const playPrevious = useCallback(() => {
       setUploadingFileName('')
       event.target.value = ''
     }
+  }
+
+  const startRename = (item, event) => {
+    event?.stopPropagation()
+    setEditingItemId(item.id)
+    setEditingName(getDisplayName(item.name || ''))
+  }
+
+  const cancelRename = () => {
+    setEditingItemId(null)
+    setEditingName('')
+  }
+
+  const saveRename = async (itemId) => {
+    const current = items.find((item) => item.id === itemId)
+    const nextName = withOriginalExtension(
+      editingName,
+      current?.originalName || current?.name || '',
+    )
+
+    if (!nextName) {
+      setError('名前を入力してください。')
+      return
+    }
+
+    if (current?.name === nextName) {
+      cancelRename()
+      return
+    }
+
+    try {
+      await updateMediaName(itemId, nextName)
+      cancelRename()
+      setError('')
+    } catch (renameError) {
+      console.error(renameError)
+      setError(renameError?.message || '名前の変更に失敗しました。')
+    }
+  }
+
+  const reorderPlayableItems = async (fromId, toId) => {
+    if (!fromId || !toId || fromId === toId) return
+
+    const currentIds = playableItems.map((item) => item.id)
+    const fromIndex = currentIds.indexOf(fromId)
+    const toIndex = currentIds.indexOf(toId)
+    if (fromIndex < 0 || toIndex < 0) return
+
+    const nextIds = [...currentIds]
+    const [moved] = nextIds.splice(fromIndex, 1)
+    nextIds.splice(toIndex, 0, moved)
+
+    // Optimistic local update while Firestore catches up
+    setItems((prev) => {
+      const orderMap = new Map(nextIds.map((id, index) => [id, index]))
+      return sortMediaItems(
+        prev.map((item) =>
+          orderMap.has(item.id) ? { ...item, order: orderMap.get(item.id) } : item,
+        ),
+      )
+    })
+
+    try {
+      await updatePlaylistOrder(nextIds)
+      setError('')
+    } catch (reorderError) {
+      console.error(reorderError)
+      setError('並び替えに失敗しました。')
+    }
+  }
+
+  const movePlayableItem = async (itemId, direction) => {
+    const currentIds = playableItems.map((item) => item.id)
+    const index = currentIds.indexOf(itemId)
+    const targetIndex = index + direction
+    if (index < 0 || targetIndex < 0 || targetIndex >= currentIds.length) return
+    await reorderPlayableItems(itemId, currentIds[targetIndex])
   }
 
   const handleDelete = async (itemId) => {
@@ -708,6 +835,10 @@ const playPrevious = useCallback(() => {
       }
 
       await deleteMediaItem(itemId)
+      if (editingItemId === itemId) {
+        setEditingItemId(null)
+        setEditingName('')
+      }
       if (selectedItemId === itemId) {
 
         if (mediaRef.current) {
@@ -804,7 +935,7 @@ const playPrevious = useCallback(() => {
                   <div className="player-header">
                     <div>
                       <p className="eyebrow">プレビュー</p>
-                      <h3>{selectedItem.name}</h3>
+                      <h3>{getDisplayName(selectedItem.name)}</h3>
                     </div>
                     <div className="player-actions">
                       <button type="button" className="secondary-button" onClick={playPrevious} disabled={playableItems.length < 2}>
@@ -847,7 +978,7 @@ const playPrevious = useCallback(() => {
                           ) : null}
                           {selectedItem.kind === 'audio' ? (
                             <VinylPlayer
-                              title={selectedItem.name}
+                              title={getDisplayName(selectedItem.name)}
                               coverSrc={coverPreviewUrl}
                               isPlaying={isMediaPlaying}
                               coverBusy={coverBusy}
@@ -895,7 +1026,7 @@ const playPrevious = useCallback(() => {
                           />
                       ) : selectedItem.kind === 'audio' ? (
                           <VinylPlayer
-                            title={selectedItem.name}
+                            title={getDisplayName(selectedItem.name)}
                             coverSrc={coverPreviewUrl}
                             isPlaying={isMediaPlaying}
                             coverBusy={coverBusy}
@@ -937,6 +1068,9 @@ const playPrevious = useCallback(() => {
                   )}
 
                   <div className="video-meta">
+                    <span className={`kind-badge kind-${selectedItem.kind}`}>
+                      {getKindLabel(selectedItem.kind)}
+                    </span>
                     <span>{formatSize(selectedItem.size)}</span>
                     <span>{new Date(selectedItem.createdAt).toLocaleString('ja-JP')}</span>
                   </div>
@@ -954,6 +1088,9 @@ const playPrevious = useCallback(() => {
                 <h3>再生リスト</h3>
                 <span>{playableItems.length} 件</span>
               </div>
+              {playableItems.length > 1 ? (
+                <p className="playlist-hint">ドラッグまたは ↑↓ で並び替え、✎ で名前変更</p>
+              ) : null}
 
               {loadingItems ? (
                 <div className="empty-list">
@@ -965,15 +1102,124 @@ const playPrevious = useCallback(() => {
                 </div>
               ) : (
                 <ul className="video-list">
-                  {playableItems.map((item) => (
-                    <li key={item.id} className={`video-item ${selectedItem?.id === item.id ? 'active' : ''}`}>
-                      <button type="button" className="video-title" onClick={() => selectItem(item.id)}>
-                        <strong>{item.name}</strong>
-                        <span>{formatSize(item.size)}</span>
-                      </button>
-                      <button type="button" className="icon-button danger" onClick={() => handleDelete(item.id)}>
-                        ×
-                      </button>
+                  {playableItems.map((item, index) => (
+                    <li
+                      key={item.id}
+                      className={[
+                        'video-item',
+                        selectedItem?.id === item.id ? 'active' : '',
+                        dragItemId === item.id ? 'is-dragging' : '',
+                        dragOverItemId === item.id ? 'is-drag-over' : '',
+                      ].filter(Boolean).join(' ')}
+                      draggable={editingItemId !== item.id}
+                      onDragStart={(event) => {
+                        setDragItemId(item.id)
+                        event.dataTransfer.effectAllowed = 'move'
+                        event.dataTransfer.setData('text/plain', item.id)
+                      }}
+                      onDragOver={(event) => {
+                        event.preventDefault()
+                        event.dataTransfer.dropEffect = 'move'
+                        if (dragOverItemId !== item.id) {
+                          setDragOverItemId(item.id)
+                        }
+                      }}
+                      onDragLeave={() => {
+                        if (dragOverItemId === item.id) {
+                          setDragOverItemId(null)
+                        }
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault()
+                        const fromId = event.dataTransfer.getData('text/plain') || dragItemId
+                        setDragItemId(null)
+                        setDragOverItemId(null)
+                        reorderPlayableItems(fromId, item.id)
+                      }}
+                      onDragEnd={() => {
+                        setDragItemId(null)
+                        setDragOverItemId(null)
+                      }}
+                    >
+                      <span className="drag-handle" title="ドラッグで並び替え" aria-hidden="true">
+                        ⠿
+                      </span>
+
+                      {editingItemId === item.id ? (
+                        <form
+                          className="rename-form"
+                          onSubmit={(event) => {
+                            event.preventDefault()
+                            saveRename(item.id)
+                          }}
+                        >
+                          <input
+                            autoFocus
+                            value={editingName}
+                            placeholder="曲名"
+                            onChange={(event) => setEditingName(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Escape') {
+                                event.preventDefault()
+                                cancelRename()
+                              }
+                            }}
+                            aria-label="曲名"
+                          />
+                          <button type="submit" className="icon-button" title="保存">
+                            ✓
+                          </button>
+                          <button type="button" className="icon-button" title="キャンセル" onClick={cancelRename}>
+                            ×
+                          </button>
+                        </form>
+                      ) : (
+                        <button type="button" className="video-title" onClick={() => selectItem(item.id)}>
+                          <strong>
+                            <span className={`kind-chip kind-${item.kind}`} aria-hidden="true">
+                              {item.kind === 'audio' ? '♪' : '▶'}
+                            </span>
+                            <span className="track-name">{getDisplayName(item.name)}</span>
+                          </strong>
+                          <span>{formatSize(item.size)}</span>
+                        </button>
+                      )}
+
+                      <div className="item-actions">
+                        {editingItemId !== item.id ? (
+                          <>
+                            <button
+                              type="button"
+                              className="icon-button"
+                              title="上へ"
+                              disabled={index === 0}
+                              onClick={() => movePlayableItem(item.id, -1)}
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-button"
+                              title="下へ"
+                              disabled={index === playableItems.length - 1}
+                              onClick={() => movePlayableItem(item.id, 1)}
+                            >
+                              ↓
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-button"
+                              title="名前を変更"
+                              onClick={(event) => startRename(item, event)}
+                            >
+                              ✎
+                            </button>
+                          </>
+                        ) : null}
+                        <button type="button" className="icon-button danger" onClick={() => handleDelete(item.id)}>
+                          ×
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -1000,7 +1246,7 @@ const playPrevious = useCallback(() => {
                           onClick={() => handleAssignCoverFromLibrary(item.id)}
                           disabled={coverBusy || selectedItem?.kind !== 'audio'}
                         >
-                          <strong>{item.name}</strong>
+                          <strong>{getDisplayName(item.name)}</strong>
                           <span>
                             {selectedItem?.coverId === item.id ? '使用中 · ' : ''}
                             {formatSize(item.size)}
