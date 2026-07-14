@@ -437,24 +437,22 @@
   }
 }
 
-@keyframes vinyl-glow {
+@keyframes vinyl-rim-bloom {
   0%,
-  100% {
-    opacity: 0.45;
+  12% {
+    opacity: 0;
+    transform: scale(0.92);
   }
 
   50% {
-    opacity: 0.85;
-  }
-}
-
-@keyframes vinyl-sheen {
-  from {
-    transform: rotate(0deg);
+    opacity: 1;
+    transform: scale(1.02);
   }
 
-  to {
-    transform: rotate(360deg);
+  88%,
+  100% {
+    opacity: 0;
+    transform: scale(0.92);
   }
 }
 
@@ -594,49 +592,6 @@
   transition:
     transform 0.7s cubic-bezier(0.4, 0.05, 0.2, 1),
     opacity 0.45s ease;
-}
-
-.vinyl-stage.is-playing::before {
-  content: '';
-  position: absolute;
-  inset: -4%;
-  border-radius: 50%;
-  pointer-events: none;
-  z-index: 0;
-  background: radial-gradient(
-    circle,
-    rgba(96, 165, 250, 0.1) 0%,
-    rgba(37, 99, 235, 0.05) 42%,
-    transparent 72%
-  );
-  box-shadow: 0 0 36px rgba(59, 130, 246, 0.16);
-  animation: vinyl-glow 3.8s ease-in-out infinite;
-}
-
-/* Subtle fixed-room light sweep over the spinning disc */
-.vinyl-stage.is-playing::after {
-  content: '';
-  position: absolute;
-  inset: 5%;
-  border-radius: 50%;
-  pointer-events: none;
-  z-index: 4;
-  background: conic-gradient(
-    from 210deg,
-    transparent 0deg,
-    transparent 48deg,
-    rgba(255, 255, 255, 0.02) 68deg,
-    rgba(147, 197, 253, 0.14) 86deg,
-    rgba(255, 255, 255, 0.08) 96deg,
-    rgba(147, 197, 253, 0.06) 108deg,
-    transparent 128deg,
-    transparent 360deg
-  );
-  mix-blend-mode: soft-light;
-  opacity: 0.9;
-  mask-image: radial-gradient(circle, transparent 18%, #000 30%, #000 88%, transparent 98%);
-  -webkit-mask-image: radial-gradient(circle, transparent 18%, #000 30%, #000 88%, transparent 98%);
-  animation: vinyl-sheen 14s linear infinite;
 }
 
 .vinyl-sleeve-flap {
@@ -1077,6 +1032,35 @@
   transform: translateX(-50%);
   background: radial-gradient(ellipse, rgba(0, 0, 0, 0.48), transparent 72%);
   z-index: 0;
+  pointer-events: none;
+}
+
+/* Soft under-rim light: starts under the disc edge, blooms out and dissolves */
+.vinyl-stage.is-playing .vinyl-shadow {
+  inset: 0;
+  left: 0;
+  bottom: auto;
+  width: 100%;
+  height: 100%;
+  transform: none;
+  transform-origin: center;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle closest-side at center,
+    transparent 76%,
+    rgba(37, 99, 235, 0.2) 83%,
+    rgba(59, 130, 246, 0.45) 88%,
+    rgba(59, 130, 246, 0.14) 93%,
+    transparent 98%
+  );
+  filter: blur(9px);
+  mix-blend-mode: normal;
+  animation: vinyl-rim-bloom 3.4s ease-in-out infinite;
+}
+
+.vinyl-jacket.is-peeking .vinyl-stage.is-playing .vinyl-shadow {
+  animation: none;
+  opacity: 0;
 }
 
 .vinyl-track-title {
