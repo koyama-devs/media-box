@@ -412,11 +412,15 @@
 }
 
 .video-player.audio-only {
-  aspect-ratio: auto;
-  height: auto;
+  aspect-ratio: unset;
+  width: 100%;
+  height: 40px;
+  max-height: 54px;
+  min-height: 40px;
   background: transparent;
   border: none;
   filter: invert(0.9) hue-rotate(180deg);
+  object-fit: none;
 }
 
 .audio-card + .video-player.audio-only {
@@ -984,6 +988,9 @@
 .vinyl-controls .video-player.audio-only,
 .vinyl-controls audio {
   width: 100%;
+  height: 40px;
+  max-height: 54px;
+  aspect-ratio: unset;
   filter: invert(0.9) hue-rotate(180deg);
 }
 
