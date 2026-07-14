@@ -17,19 +17,9 @@ const JACKET_STYLES = [
   { id: 'paper', label: 'ペーパー', url: jacketPaperUrl },
 ]
 
-const JACKET_STYLE_KEY = 'hana-mediabox-jacket-style'
-
-function readJacketStyleIndex() {
-  try {
-    const raw = localStorage.getItem(JACKET_STYLE_KEY)
-    const index = Number(raw)
-    if (Number.isInteger(index) && index >= 0 && index < JACKET_STYLES.length) {
-      return index
-    }
-  } catch {
-    /* ignore */
-  }
-  return 0
+function resolveJacketStyleIndex(styleId) {
+  const index = JACKET_STYLES.findIndex((style) => style.id === styleId)
+  return index >= 0 ? index : 0
 }
 
 function MusicNoteIcon() {
@@ -100,6 +90,8 @@ export default function VinylPlayer({
   title,
   coverSrc,
   jacketSrc,
+  jacketStyleId = null,
+  trackId = null,
   isPlaying,
   currentTime = 0,
   duration = 0,
@@ -109,6 +101,7 @@ export default function VinylPlayer({
   onCoverClear,
   onJacketPick,
   onJacketClear,
+  onJacketStyleChange,
   onTogglePlayback,
   onSeek,
   children,
@@ -118,7 +111,9 @@ export default function VinylPlayer({
   const coverInputRef = useRef(null)
   const jacketInputRef = useRef(null)
   const [labelSrc, setLabelSrc] = useState(DEFAULT_LABEL)
-  const [jacketStyleIndex, setJacketStyleIndex] = useState(readJacketStyleIndex)
+  const [jacketStyleIndex, setJacketStyleIndex] = useState(() =>
+    resolveJacketStyleIndex(jacketStyleId),
+  )
   const [isPeekingJacket, setIsPeekingJacket] = useState(false)
 
   useEffect(() => {
@@ -126,12 +121,9 @@ export default function VinylPlayer({
   }, [coverSrc])
 
   useEffect(() => {
-    try {
-      localStorage.setItem(JACKET_STYLE_KEY, String(jacketStyleIndex))
-    } catch {
-      /* ignore */
-    }
-  }, [jacketStyleIndex])
+    setJacketStyleIndex(resolveJacketStyleIndex(jacketStyleId))
+    setIsPeekingJacket(false)
+  }, [trackId, jacketStyleId])
 
   useEffect(() => {
     if (!isPeekingJacket) return undefined
@@ -158,7 +150,11 @@ export default function VinylPlayer({
 
   const cycleJacketStyle = (event) => {
     event.stopPropagation()
-    setJacketStyleIndex((current) => (current + 1) % JACKET_STYLES.length)
+    if (jacketBusy) return
+    const nextIndex = (jacketStyleIndex + 1) % JACKET_STYLES.length
+    const nextStyle = JACKET_STYLES[nextIndex]
+    setJacketStyleIndex(nextIndex)
+    onJacketStyleChange?.(nextStyle.id)
   }
 
   const toggleJacketPeek = (event) => {
@@ -225,8 +221,9 @@ export default function VinylPlayer({
               type="button"
               className="vinyl-label-icon-btn vinyl-label-icon-btn--style"
               onClick={cycleJacketStyle}
-              title={`デフォルトジャケット切替（${activeJacketStyle.label} ${jacketStyleIndex + 1}/${JACKET_STYLES.length}）`}
-              aria-label={`デフォルトジャケットを切り替える。現在：${activeJacketStyle.label}`}
+              disabled={jacketBusy || !onJacketStyleChange}
+              title={`この曲のデフォルトジャケット（${activeJacketStyle.label} ${jacketStyleIndex + 1}/${JACKET_STYLES.length}）`}
+              aria-label={`この曲のデフォルトジャケットを切り替える。現在：${activeJacketStyle.label}`}
             >
               <StyleSwapIcon />
               <span className="vinyl-jacket-style-index">{jacketStyleIndex + 1}</span>

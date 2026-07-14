@@ -158,6 +158,15 @@ export async function updateMediaJacket(itemId, jacketId) {
   )
 }
 
+export async function updateMediaJacketStyle(itemId, jacketStyle) {
+  const style = typeof jacketStyle === 'string' && jacketStyle.trim() ? jacketStyle.trim() : null
+  await setDoc(
+    doc(db, MEDIA_COLLECTION, itemId),
+    { jacketStyle: style },
+    { merge: true },
+  )
+}
+
 export async function updateMediaName(itemId, name) {
   const trimmed = (name || '').trim()
   if (!trimmed) {

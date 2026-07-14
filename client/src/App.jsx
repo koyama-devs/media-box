@@ -9,6 +9,7 @@ import {
   subscribeToMediaItems,
   updateMediaCover,
   updateMediaJacket,
+  updateMediaJacketStyle,
   updateMediaLyrics,
   updateMediaName,
   updatePlaylistOrder,
@@ -617,6 +618,22 @@ const playPrevious = useCallback(() => {
     } catch (jacketError) {
       console.error(jacketError)
       setError('ジャケット画像の削除に失敗しました。')
+    } finally {
+      setJacketBusy(false)
+    }
+  }
+
+  const handleJacketStyleChange = async (styleId) => {
+    if (!selectedItem || selectedItem.kind !== 'audio') return
+
+    setJacketBusy(true)
+    setError('')
+
+    try {
+      await updateMediaJacketStyle(selectedItem.id, styleId)
+    } catch (jacketError) {
+      console.error(jacketError)
+      setError(jacketError?.message || getFirebaseErrorMessage(jacketError) || 'ジャケットスタイルの保存に失敗しました。')
     } finally {
       setJacketBusy(false)
     }
@@ -1263,8 +1280,8 @@ const playPrevious = useCallback(() => {
               <h2>メディア共有</h2>
             </div>
             <div className="topbar-stats">
-              <span className="stat-badge">{items.length} 件</span>
-              <span className="stat-badge">{items.reduce((sum, item) => sum + (item.size || 0), 0) ? formatSize(items.reduce((sum, item) => sum + (item.size || 0), 0)) : '0 MB'}</span>
+              <span className="stat-badge">{playableItems.length} 件</span>
+              <span className="stat-badge">{playableItems.reduce((sum, item) => sum + (item.size || 0), 0) ? formatSize(playableItems.reduce((sum, item) => sum + (item.size || 0), 0)) : '0 MB'}</span>
               <button type="button" className="secondary-button" onClick={handleLogout}>
                 ログアウト
               </button>
@@ -1359,6 +1376,8 @@ const playPrevious = useCallback(() => {
                           title={getDisplayName(selectedItem.name)}
                           coverSrc={coverPreviewUrl}
                           jacketSrc={jacketPreviewUrl}
+                          jacketStyleId={selectedItem.jacketStyle || null}
+                          trackId={selectedItem.id}
                           isPlaying={isMediaPlaying}
                           currentTime={playbackTime}
                           duration={playbackDuration}
@@ -1368,6 +1387,7 @@ const playPrevious = useCallback(() => {
                           onCoverClear={handleCoverClear}
                           onJacketPick={handleJacketPick}
                           onJacketClear={handleJacketClear}
+                          onJacketStyleChange={handleJacketStyleChange}
                           onTogglePlayback={handleTogglePlayback}
                           onSeek={handleSeekAudio}
                         >
