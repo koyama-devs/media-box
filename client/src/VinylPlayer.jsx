@@ -29,16 +29,16 @@ const JACKET_STYLES = [
     reveal: { kanji: '煌', quote: ['夏は短し', '恋せよ乙女'] },
   },
   {
-    id: 'record',
-    label: '雪',
-    url: jacketRecordUrl,
-    reveal: { kanji: '静', quote: ['雪月花'] },
-  },
-  {
     id: 'paper',
     label: '紅葉',
     url: jacketPaperUrl,
     reveal: { kanji: '時', quote: ['諸行無常'] },
+  },
+  {
+    id: 'record',
+    label: '雪',
+    url: jacketRecordUrl,
+    reveal: { kanji: '静', quote: ['雪月花'] },
   },
 ]
 
