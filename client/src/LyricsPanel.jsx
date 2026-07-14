@@ -101,7 +101,7 @@ export default function LyricsPanel({
     setEditing(true)
   }
 
-  const handleTimestampClick = (time) => {
+  const handleLyricClick = (time) => {
     if (clickTimerRef.current) window.clearTimeout(clickTimerRef.current)
     clickTimerRef.current = window.setTimeout(() => {
       clickTimerRef.current = null
@@ -109,9 +109,12 @@ export default function LyricsPanel({
     }, 220)
   }
 
-  const handleTimestampDoubleClick = (event, time) => {
+  const handleLyricDoubleClick = (event, time) => {
     event.preventDefault()
-    event.stopPropagation()
+    if (clickTimerRef.current) {
+      window.clearTimeout(clickTimerRef.current)
+      clickTimerRef.current = null
+    }
     openEditor(time)
   }
 
@@ -200,16 +203,11 @@ export default function LyricsPanel({
               className={`lyrics-line${index === activeIndex ? ' is-active' : ''}${
                 index < activeIndex ? ' is-passed' : ''
               }`}
+              title="クリック: 再生 / ダブルクリック: 編集"
+              onClick={() => handleLyricClick(line.t)}
+              onDoubleClick={(event) => handleLyricDoubleClick(event, line.t)}
             >
-              <button
-                type="button"
-                className="lyrics-time"
-                title="クリック: 再生 / ダブルクリック: 編集"
-                onClick={() => handleTimestampClick(line.t)}
-                onDoubleClick={(event) => handleTimestampDoubleClick(event, line.t)}
-              >
-                {formatShortTime(line.t)}
-              </button>
+              <span className="lyrics-time">{formatShortTime(line.t)}</span>
               <div className="lyrics-text">
                 <p className="lyrics-ja">{line.ja || '—'}</p>
                 <p className="lyrics-en">{line.en || '—'}</p>

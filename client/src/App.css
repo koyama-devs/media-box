@@ -1056,6 +1056,7 @@
   border-radius: 10px;
   border: 1px solid transparent;
   opacity: 0.42;
+  cursor: pointer;
   transition:
     opacity 0.25s ease,
     background 0.25s ease,
@@ -1063,8 +1064,17 @@
     transform 0.25s ease;
 }
 
+.lyrics-line:hover {
+  opacity: 0.85;
+  background: rgba(37, 99, 235, 0.08);
+}
+
 .lyrics-line.is-passed {
   opacity: 0.55;
+}
+
+.lyrics-line.is-passed:hover {
+  opacity: 0.85;
 }
 
 .lyrics-line.is-active {
@@ -1075,32 +1085,21 @@
   box-shadow: inset 3px 0 0 var(--blue-500);
 }
 
+.lyrics-line.is-active:hover {
+  opacity: 1;
+  background: rgba(37, 99, 235, 0.2);
+}
+
 .lyrics-time {
-  appearance: none;
-  border: none;
-  background: transparent;
   padding: 3px 0 0;
   margin: 0;
-  font: inherit;
   font-size: 0.72rem;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   text-align: left;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: color 0.15s ease, background 0.15s ease;
 }
 
-.lyrics-time:hover {
-  color: var(--blue-400);
-  background: rgba(37, 99, 235, 0.12);
-}
-
-.lyrics-time:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.45);
-}
-
+.lyrics-line:hover .lyrics-time,
 .lyrics-line.is-active .lyrics-time {
   color: var(--blue-400);
 }
