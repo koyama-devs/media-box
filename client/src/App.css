@@ -638,11 +638,6 @@
   transform: rotate(52deg) translateY(2px);
 }
 
-.vinyl-jacket.is-peeking .vinyl-cover-actions--jacket {
-  opacity: 1;
-  pointer-events: auto;
-}
-
 .vinyl-jacket.is-peeking .vinyl-label-icon-btn.is-active {
   background: rgba(37, 99, 235, 0.95);
   border-color: rgba(147, 197, 253, 0.55);
