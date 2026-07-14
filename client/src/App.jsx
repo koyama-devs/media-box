@@ -481,6 +481,19 @@ const playPrevious = useCallback(() => {
     }
   }, [])
 
+  const handleSeekToLyric = useCallback(async (time) => {
+    const media = mediaRef.current
+    if (!media || !Number.isFinite(time)) return
+
+    try {
+      media.currentTime = Math.max(0, time)
+      setPlaybackTime(media.currentTime || time)
+      await media.play()
+    } catch (err) {
+      console.log('Seek lyric failed:', err.name, err.message)
+    }
+  }, [])
+
   const uploadPrivateImage = async (file, usage) => {
     const kind = getMediaKind(file.type, file.name)
     if (kind !== 'image') {
@@ -1355,6 +1368,7 @@ const playPrevious = useCallback(() => {
                           busy={lyricsBusy}
                           onSave={handleSaveLyrics}
                           onClear={handleClearLyrics}
+                          onSeek={handleSeekToLyric}
                         />
                         </>
                       ) : (

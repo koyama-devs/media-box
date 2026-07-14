@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  formatTimestamp,
   getActiveLyricIndex,
   normalizeStoredLyrics,
   parseLyricsText,
@@ -13,30 +14,105 @@ export default function LyricsPanel({
   busy = false,
   onSave,
   onClear,
+  onSeek,
 }) {
   const normalized = normalizeStoredLyrics(lyrics)
   const lines = normalized?.lines || []
   const activeIndex = getActiveLyricIndex(lines, currentTime)
   const listRef = useRef(null)
+  const editorRef = useRef(null)
+  const clickTimerRef = useRef(null)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [localError, setLocalError] = useState('')
+  const [focusStamp, setFocusStamp] = useState(null)
 
   useEffect(() => {
     if (editing || activeIndex < 0 || !listRef.current) return
-    const activeNode = listRef.current.querySelector(`[data-lyric-index="${activeIndex}"]`)
+    const list = listRef.current
+    const activeNode = list.querySelector(`[data-lyric-index="${activeIndex}"]`)
     if (!activeNode) return
-    activeNode.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+
+    const listRect = list.getBoundingClientRect()
+    const nodeRect = activeNode.getBoundingClientRect()
+    const nextTop =
+      list.scrollTop +
+      (nodeRect.top - listRect.top) -
+      list.clientHeight / 2 +
+      nodeRect.height / 2
+
+    list.scrollTo({
+      top: Math.max(0, nextTop),
+      behavior: 'smooth',
+    })
   }, [activeIndex, editing])
 
   useEffect(() => {
     if (!editing) setLocalError('')
   }, [editing])
 
-  const openEditor = () => {
+  useEffect(() => {
+    return () => {
+      if (clickTimerRef.current) window.clearTimeout(clickTimerRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!editing || focusStamp == null || !editorRef.current) return
+    const textarea = editorRef.current
+    const stamp = `[${formatTimestamp(focusStamp)}]`
+    const start = draft.indexOf(stamp)
+
+    const focusEditor = () => {
+      textarea.focus()
+      if (start < 0) {
+        setFocusStamp(null)
+        return
+      }
+
+      const end = start + stamp.length
+      textarea.setSelectionRange(start, end)
+
+      const style = window.getComputedStyle(textarea)
+      const lineHeight = Number.parseFloat(style.lineHeight) || 22
+      const paddingTop = Number.parseFloat(style.paddingTop) || 0
+      const before = draft.slice(0, start)
+      const lineIndex = before.split('\n').length - 1
+      const target =
+        paddingTop + lineIndex * lineHeight - textarea.clientHeight / 2 + lineHeight
+
+      textarea.scrollTop = Math.max(0, target)
+      setFocusStamp(null)
+    }
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(focusEditor)
+    })
+  }, [editing, focusStamp, draft])
+
+  const openEditor = (stampSeconds = null) => {
+    if (clickTimerRef.current) {
+      window.clearTimeout(clickTimerRef.current)
+      clickTimerRef.current = null
+    }
     setDraft(serializeLyrics(normalized || { lines: [] }))
     setLocalError('')
+    setFocusStamp(typeof stampSeconds === 'number' ? stampSeconds : null)
     setEditing(true)
+  }
+
+  const handleTimestampClick = (time) => {
+    if (clickTimerRef.current) window.clearTimeout(clickTimerRef.current)
+    clickTimerRef.current = window.setTimeout(() => {
+      clickTimerRef.current = null
+      onSeek?.(time)
+    }, 220)
+  }
+
+  const handleTimestampDoubleClick = (event, time) => {
+    event.preventDefault()
+    event.stopPropagation()
+    openEditor(time)
   }
 
   const handleSave = async () => {
@@ -70,7 +146,7 @@ export default function LyricsPanel({
       <div className="lyrics-panel-header">
         <div>
           <h4>歌詞 · Lyrics</h4>
-          <p>日本語 / English · 再生に合わせてハイライト</p>
+          <p>クリックでその位置から再生 · ダブルクリックで編集</p>
         </div>
         <div className="lyrics-panel-actions">
           {editing ? (
@@ -88,7 +164,7 @@ export default function LyricsPanel({
               </button>
             </>
           ) : (
-            <button type="button" className="secondary-button" onClick={openEditor} disabled={busy}>
+            <button type="button" className="secondary-button" onClick={() => openEditor()} disabled={busy}>
               {lines.length > 0 ? '歌詞を編集' : '歌詞を追加'}
             </button>
           )}
@@ -98,6 +174,7 @@ export default function LyricsPanel({
       {editing ? (
         <div className="lyrics-editor">
           <textarea
+            ref={editorRef}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder={'[00:12.00] さくらさくら\nCherry blossoms, cherry blossoms\n\n[00:18.00] 野山も里も\nHills and villages too'}
@@ -124,9 +201,15 @@ export default function LyricsPanel({
                 index < activeIndex ? ' is-passed' : ''
               }`}
             >
-              <span className="lyrics-time" aria-hidden="true">
+              <button
+                type="button"
+                className="lyrics-time"
+                title="クリック: 再生 / ダブルクリック: 編集"
+                onClick={() => handleTimestampClick(line.t)}
+                onDoubleClick={(event) => handleTimestampDoubleClick(event, line.t)}
+              >
                 {formatShortTime(line.t)}
-              </span>
+              </button>
               <div className="lyrics-text">
                 <p className="lyrics-ja">{line.ja || '—'}</p>
                 <p className="lyrics-en">{line.en || '—'}</p>
