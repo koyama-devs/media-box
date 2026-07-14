@@ -1346,11 +1346,11 @@ const playPrevious = useCallback(() => {
                           onJacketClear={handleJacketClear}
                           onTogglePlayback={handleTogglePlayback}
                         >
-                          <video
+                          <audio
                             ref={mediaRef}
                             className="video-player audio-only"
                             controls
-                            playsInline
+                            controlsList="nofullscreen nodownload noremoteplayback noplaybackrate"
                             preload="auto"
                             src={previewUrl}
                             onCanPlayThrough={handleMediaCanPlay}
