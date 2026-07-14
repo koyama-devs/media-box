@@ -10,12 +10,39 @@ import AudioTransport from './AudioTransport'
 const DEFAULT_LABEL = defaultLabelUrl
 
 const JACKET_STYLES = [
-  { id: 'petal', label: 'ペタル', url: jacketPetalUrl },
-  { id: 'sakura', label: 'サクラ', url: jacketSakuraUrl },
-  { id: 'poster', label: '花火', url: jacketPosterUrl },
-  { id: 'record', label: '雪', url: jacketRecordUrl },
-  { id: 'paper', label: '紅葉', url: jacketPaperUrl },
+  {
+    id: 'petal',
+    label: 'ペタル',
+    url: jacketPetalUrl,
+    reveal: { kanji: '愛', quote: ['好きこそものの', '上手なれ'] },
+  },
+  {
+    id: 'sakura',
+    label: 'サクラ',
+    url: jacketSakuraUrl,
+    reveal: { kanji: '縁', quote: ['一期一会'] },
+  },
+  {
+    id: 'poster',
+    label: '花火',
+    url: jacketPosterUrl,
+    reveal: { kanji: '煌', quote: ['夏は短し', '恋せよ乙女'] },
+  },
+  {
+    id: 'record',
+    label: '雪',
+    url: jacketRecordUrl,
+    reveal: { kanji: '静', quote: ['雪月花'] },
+  },
+  {
+    id: 'paper',
+    label: '紅葉',
+    url: jacketPaperUrl,
+    reveal: { kanji: '時', quote: ['諸行無常'] },
+  },
 ]
+
+const CUSTOM_JACKET_REVEAL = { kanji: '音', quote: ['音楽は', '心の言葉'] }
 
 function resolveJacketStyleIndex(styleId) {
   const index = JACKET_STYLES.findIndex((style) => style.id === styleId)
@@ -140,6 +167,9 @@ export default function VinylPlayer({
   const activeJacketStyle = JACKET_STYLES[jacketStyleIndex] || JACKET_STYLES[0]
   const defaultJacketUrl = activeJacketStyle.url
   const jacketBackgroundUrl = jacketSrc || defaultJacketUrl
+  const jacketReveal = useDefaultJacket
+    ? activeJacketStyle.reveal
+    : CUSTOM_JACKET_REVEAL
 
   const openCoverPicker = () => {
     if (coverBusy || !onCoverPick) return
@@ -196,6 +226,20 @@ export default function VinylPlayer({
         />
         <div className="vinyl-jacket-shade" aria-hidden="true" />
         <div className="vinyl-jacket-spine" aria-hidden="true" />
+
+        <div
+          className={`vinyl-jacket-reveal${isPeekingJacket ? ' is-visible' : ''}`}
+          aria-hidden={!isPeekingJacket}
+        >
+          <span className="vinyl-jacket-reveal-kanji">{jacketReveal.kanji}</span>
+          <p className="vinyl-jacket-reveal-quote">
+            {jacketReveal.quote.map((line, index) => (
+              <span key={`${line}-${index}`} className="vinyl-jacket-reveal-line">
+                {line}
+              </span>
+            ))}
+          </p>
+        </div>
 
         {useDefaultJacket ? (
           <div className="vinyl-deco-group" aria-hidden="true">
