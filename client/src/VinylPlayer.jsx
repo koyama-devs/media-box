@@ -122,8 +122,11 @@ export default function VinylPlayer({
 
   useEffect(() => {
     setJacketStyleIndex(resolveJacketStyleIndex(jacketStyleId))
+  }, [jacketStyleId])
+
+  useEffect(() => {
     setIsPeekingJacket(false)
-  }, [trackId, jacketStyleId])
+  }, [trackId])
 
   useEffect(() => {
     if (!isPeekingJacket) return undefined
