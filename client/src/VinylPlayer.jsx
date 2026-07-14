@@ -6,6 +6,7 @@ import jacketPaperUrl from './assets/vinyl-jacket-3-paper.svg?url'
 import jacketPetalUrl from './assets/vinyl-jacket-4-petal.svg?url'
 import defaultLabelUrl from './assets/vinyl-label-default.svg?url'
 import AudioTransport from './AudioTransport'
+import VinylDiscCanvas from './VinylDiscCanvas'
 
 const DEFAULT_LABEL = defaultLabelUrl
 
@@ -302,6 +303,8 @@ export default function VinylPlayer({
           ) : null}
         </div>
 
+        <div className="vinyl-rim-glow" aria-hidden="true" />
+
         <div className={`vinyl-stage ${isPlaying ? 'is-playing' : ''}`}>
           <button
             type="button"
@@ -317,7 +320,7 @@ export default function VinylPlayer({
           </button>
 
           <div
-            className="vinyl-record"
+            className="vinyl-record-shell"
             role="button"
             tabIndex={onTogglePlayback ? 0 : -1}
             onClick={handlePlaybackClick}
@@ -330,16 +333,10 @@ export default function VinylPlayer({
             title={isPlaying ? '一時停止' : '再生'}
             aria-label={isPlaying ? '一時停止' : '再生'}
           >
-            <div className="vinyl-grooves" aria-hidden="true" />
-            <div className={`vinyl-label ${coverBusy ? 'is-busy' : ''} ${useDefaultLabel ? 'is-default' : 'has-cover'}`}>
-              <img
-                src={labelSrc}
-                alt=""
-                draggable={false}
-                onError={() => setLabelSrc(DEFAULT_LABEL)}
-              />
-            </div>
-            <div className="vinyl-spindle" aria-hidden="true" />
+            <VinylDiscCanvas
+              labelSrc={labelSrc}
+              isSpinning={Boolean(isPlaying && !isPeekingJacket)}
+            />
           </div>
 
           <div className="vinyl-cover-actions vinyl-cover-actions--label">

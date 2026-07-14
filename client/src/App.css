@@ -427,16 +427,6 @@
   margin-top: -8px;
 }
 
-@keyframes vinyl-spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 @keyframes vinyl-rim-bloom {
   0%,
   12% {
@@ -638,10 +628,6 @@
   opacity: 0.2;
 }
 
-.vinyl-jacket.is-peeking .vinyl-record {
-  animation-play-state: paused !important;
-}
-
 .vinyl-jacket.is-peeking .vinyl-tonearm {
   transform: rotate(52deg) translateY(2px);
 }
@@ -690,89 +676,38 @@
   transform: rotate(-10deg);
 }
 
-.vinyl-record {
+.vinyl-record-shell {
   position: relative;
   width: 86%;
-  height: 86%;
+  aspect-ratio: 1;
+  height: auto;
   border-radius: 50%;
-  background:
-    radial-gradient(circle at center, #101010 0 16%, transparent 16.5%),
-    repeating-radial-gradient(circle at center, #1f1f1f 0 1.5px, #0a0a0a 1.5px 3px);
-  box-shadow:
-    inset 0 0 0 2px rgba(255, 255, 255, 0.05),
-    inset 0 0 48px rgba(0, 0, 0, 0.75),
-    0 10px 28px rgba(0, 0, 0, 0.45);
-  animation: vinyl-spin 5.2s linear infinite;
-  animation-play-state: paused;
   z-index: 1;
   cursor: pointer;
+  flex-shrink: 0;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
 }
 
-.vinyl-record:focus-visible {
+.vinyl-record-shell:focus-visible {
   outline: none;
   box-shadow:
-    inset 0 0 0 2px rgba(255, 255, 255, 0.05),
-    inset 0 0 48px rgba(0, 0, 0, 0.75),
+    0 10px 28px rgba(0, 0, 0, 0.45),
     0 0 0 2px rgba(96, 165, 250, 0.45);
 }
 
-.vinyl-stage.is-playing .vinyl-record {
-  animation-play-state: running;
-}
-
-.vinyl-grooves {
-  position: absolute;
-  inset: 8%;
-  border-radius: 50%;
-  background: repeating-radial-gradient(
-    circle at center,
-    transparent 0 3px,
-    rgba(255, 255, 255, 0.018) 3px 4px
-  );
-  pointer-events: none;
-}
-
-.vinyl-label {
-  position: absolute;
-  inset: 24%;
-  border-radius: 50%;
-  overflow: hidden;
-  border: none;
-  box-shadow: none;
-  padding: 0;
-  margin: 0;
-  background: transparent;
-  z-index: 2;
-  pointer-events: none;
-  transform: translateZ(0);
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-}
-
-.vinyl-label img {
+.vinyl-record-shell-inner {
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  display: block;
-  pointer-events: none;
   border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.12);
-  box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.28);
-  transform: translateZ(0);
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-  transition:
-    box-shadow 0.25s ease,
-    border-color 0.25s ease;
+  overflow: hidden;
+  line-height: 0;
 }
 
-.vinyl-record:hover .vinyl-label img,
-.vinyl-record:focus-visible .vinyl-label img {
-  border-color: rgba(147, 197, 253, 0.55);
-  box-shadow:
-    inset 0 0 16px rgba(0, 0, 0, 0.35),
-    0 0 0 2px rgba(96, 165, 250, 0.28),
-    0 0 14px rgba(59, 130, 246, 0.35);
+.vinyl-disc-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
 }
 
 .vinyl-cover-actions {
@@ -788,28 +723,35 @@
   top: calc(50% - 18%);
   left: calc(50% + 12%);
   right: auto;
+  visibility: hidden;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.18s ease;
+  /* Own layer so showing buttons doesn't re-rasterize the disc/label */
+  isolation: isolate;
+  transform: translateZ(0);
 }
 
 .vinyl-cover-actions--jacket {
   top: 12px;
   left: 16px;
   z-index: 7;
+  visibility: hidden;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.18s ease;
+  isolation: isolate;
+  transform: translateZ(0);
 }
 
 .vinyl-jacket:hover .vinyl-cover-actions--jacket,
 .vinyl-cover-actions--jacket:has(:focus-visible) {
+  visibility: visible;
   opacity: 1;
   pointer-events: auto;
 }
 
 .vinyl-stage:hover .vinyl-cover-actions--label,
 .vinyl-cover-actions--label:has(:focus-visible) {
+  visibility: visible;
   opacity: 1;
   pointer-events: auto;
 }
@@ -1035,16 +977,16 @@
   pointer-events: none;
 }
 
-/* Soft under-rim light: starts under the disc edge, blooms out and dissolves */
-.vinyl-stage.is-playing .vinyl-shadow {
-  inset: 0;
-  left: 0;
-  bottom: auto;
-  width: 100%;
-  height: 100%;
-  transform: none;
-  transform-origin: center;
+/* Same bloom as 47afc8b — kept behind the stage so canvas label stays sharp */
+.vinyl-rim-glow {
+  display: none;
+  position: absolute;
+  inset: 8%;
+  z-index: 2;
   border-radius: 50%;
+  pointer-events: none;
+  isolation: isolate;
+  transform-origin: center;
   background: radial-gradient(
     circle closest-side at center,
     transparent 76%,
@@ -1054,11 +996,14 @@
     transparent 98%
   );
   filter: blur(9px);
-  mix-blend-mode: normal;
+}
+
+.vinyl-player.is-playing .vinyl-rim-glow {
+  display: block;
   animation: vinyl-rim-bloom 3.4s ease-in-out infinite;
 }
 
-.vinyl-jacket.is-peeking .vinyl-stage.is-playing .vinyl-shadow {
+.vinyl-jacket.is-peeking .vinyl-rim-glow {
   animation: none;
   opacity: 0;
 }
