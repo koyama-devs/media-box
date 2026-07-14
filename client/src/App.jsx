@@ -343,8 +343,12 @@ function App() {
     isPlaylistAdvancingRef.current = true
     shouldAutoPlayRef.current = true
     mediaReadyRef.current = false
+    playRequestRef.current++
 
     setSelectedItemId(nextItem.id)
+    syncTrackQuery(nextItem.id)
+    setPlaybackTime(0)
+    setPlaybackDuration(0)
     setPreviewUrl(nextUrl)
     setLoadingPreview(false)
 
@@ -1383,6 +1387,8 @@ const playPrevious = useCallback(() => {
                           />
                         </VinylPlayer>
                         <LyricsPanel
+                          key={selectedItem.id}
+                          trackId={selectedItem.id}
                           lyrics={selectedItem.lyrics}
                           currentTime={playbackTime}
                           isPlaying={isMediaPlaying}

@@ -8,6 +8,7 @@ import {
 } from './lyrics'
 
 export default function LyricsPanel({
+  trackId = null,
   lyrics,
   currentTime = 0,
   isPlaying = false,
@@ -28,6 +29,18 @@ export default function LyricsPanel({
   const [focusStamp, setFocusStamp] = useState(null)
 
   useEffect(() => {
+    if (clickTimerRef.current) {
+      window.clearTimeout(clickTimerRef.current)
+      clickTimerRef.current = null
+    }
+    setEditing(false)
+    setDraft('')
+    setLocalError('')
+    setFocusStamp(null)
+    if (listRef.current) listRef.current.scrollTop = 0
+  }, [trackId])
+
+  useEffect(() => {
     if (editing || activeIndex < 0 || !listRef.current) return
     const list = listRef.current
     const activeNode = list.querySelector(`[data-lyric-index="${activeIndex}"]`)
@@ -45,7 +58,7 @@ export default function LyricsPanel({
       top: Math.max(0, nextTop),
       behavior: 'smooth',
     })
-  }, [activeIndex, editing])
+  }, [activeIndex, editing, trackId])
 
   useEffect(() => {
     if (!editing) setLocalError('')
