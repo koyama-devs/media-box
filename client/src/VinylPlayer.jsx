@@ -5,6 +5,7 @@ import jacketRecordUrl from './assets/vinyl-jacket-2-record.svg?url'
 import jacketPaperUrl from './assets/vinyl-jacket-3-paper.svg?url'
 import jacketPetalUrl from './assets/vinyl-jacket-4-petal.svg?url'
 import defaultLabelUrl from './assets/vinyl-label-default.svg?url'
+import AudioTransport from './AudioTransport'
 
 const DEFAULT_LABEL = defaultLabelUrl
 
@@ -100,6 +101,8 @@ export default function VinylPlayer({
   coverSrc,
   jacketSrc,
   isPlaying,
+  currentTime = 0,
+  duration = 0,
   coverBusy = false,
   jacketBusy = false,
   onCoverPick,
@@ -107,6 +110,7 @@ export default function VinylPlayer({
   onJacketPick,
   onJacketClear,
   onTogglePlayback,
+  onSeek,
   children,
 }) {
   const useDefaultLabel = !coverSrc
@@ -348,7 +352,16 @@ export default function VinylPlayer({
 
       <p className="vinyl-track-title">{title}</p>
 
-      {children ? <div className="vinyl-controls">{children}</div> : null}
+      <div className="vinyl-controls">
+        {children}
+        <AudioTransport
+          currentTime={currentTime}
+          duration={duration}
+          isPlaying={isPlaying}
+          onToggle={onTogglePlayback}
+          onSeek={onSeek}
+        />
+      </div>
     </div>
   )
 }

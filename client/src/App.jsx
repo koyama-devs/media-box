@@ -219,6 +219,7 @@ function App() {
   const [playlistMode, setPlaylistMode] = useState(true)
   const [isMediaPlaying, setIsMediaPlaying] = useState(false)
   const [playbackTime, setPlaybackTime] = useState(0)
+  const [playbackDuration, setPlaybackDuration] = useState(0)
   const [lyricsBusy, setLyricsBusy] = useState(false)
   const [coverPreviewUrl, setCoverPreviewUrl] = useState(null)
   const [jacketPreviewUrl, setJacketPreviewUrl] = useState(null)
@@ -434,6 +435,22 @@ const playPrevious = useCallback(() => {
 
   const handleMediaTimeUpdate = useCallback((event) => {
     setPlaybackTime(event.currentTarget.currentTime || 0)
+    const nextDuration = event.currentTarget.duration
+    if (Number.isFinite(nextDuration) && nextDuration > 0) {
+      setPlaybackDuration(nextDuration)
+    }
+  }, [])
+
+  const handleMediaDuration = useCallback((event) => {
+    const nextDuration = event.currentTarget.duration
+    setPlaybackDuration(Number.isFinite(nextDuration) && nextDuration > 0 ? nextDuration : 0)
+  }, [])
+
+  const handleSeekAudio = useCallback((time) => {
+    const media = mediaRef.current
+    if (!media || !Number.isFinite(time)) return
+    media.currentTime = Math.max(0, time)
+    setPlaybackTime(media.currentTime || time)
   }, [])
 
   const handleSaveLyrics = async (lyrics) => {
@@ -704,6 +721,7 @@ const playPrevious = useCallback(() => {
   useEffect(() => {
     setIsMediaPlaying(false)
     setPlaybackTime(0)
+    setPlaybackDuration(0)
   }, [selectedItem?.id])
 
   useEffect(() => {
@@ -1338,6 +1356,8 @@ const playPrevious = useCallback(() => {
                           coverSrc={coverPreviewUrl}
                           jacketSrc={jacketPreviewUrl}
                           isPlaying={isMediaPlaying}
+                          currentTime={playbackTime}
+                          duration={playbackDuration}
                           coverBusy={coverBusy}
                           jacketBusy={jacketBusy}
                           onCoverPick={handleCoverPick}
@@ -1345,15 +1365,16 @@ const playPrevious = useCallback(() => {
                           onJacketPick={handleJacketPick}
                           onJacketClear={handleJacketClear}
                           onTogglePlayback={handleTogglePlayback}
+                          onSeek={handleSeekAudio}
                         >
                           <audio
                             ref={mediaRef}
-                            className="video-player audio-only"
-                            controls
-                            controlsList="nofullscreen nodownload noremoteplayback noplaybackrate"
+                            className="sr-only"
                             preload="auto"
                             src={previewUrl}
                             onCanPlayThrough={handleMediaCanPlay}
+                            onLoadedMetadata={handleMediaDuration}
+                            onDurationChange={handleMediaDuration}
                             onEnded={handleMediaEnded}
                             onPlay={handleMediaPlay}
                             onPause={handleMediaPause}
