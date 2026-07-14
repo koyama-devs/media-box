@@ -1,20 +1,81 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img" aria-label="Jacket style paper">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img" aria-label="Jacket style autumn maple">
   <defs>
-    <linearGradient id="paper" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1a2332"/>
-      <stop offset="100%" stop-color="#243044"/>
+    <linearGradient id="autumn" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a1210"/>
+      <stop offset="42%" stop-color="#241814"/>
+      <stop offset="100%" stop-color="#3b1f18"/>
     </linearGradient>
-    <pattern id="grain" width="4" height="4" patternUnits="userSpaceOnUse">
-      <circle cx="1" cy="1.5" r="0.45" fill="rgba(255,255,255,0.05)"/>
-      <circle cx="3" cy="3" r="0.35" fill="rgba(0,0,0,0.08)"/>
-    </pattern>
+    <radialGradient id="emberGlow" cx="26%" cy="76%" r="50%">
+      <stop offset="0%" stop-color="rgba(239,68,68,0.28)"/>
+      <stop offset="40%" stop-color="rgba(249,115,22,0.14)"/>
+      <stop offset="100%" stop-color="rgba(239,68,68,0)"/>
+    </radialGradient>
+    <linearGradient id="mapleFill" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#fda4af"/>
+      <stop offset="45%" stop-color="#f87171"/>
+      <stop offset="100%" stop-color="#c2410c"/>
+    </linearGradient>
+    <linearGradient id="mapleSoft" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="rgba(254,202,202,0.55)"/>
+      <stop offset="100%" stop-color="rgba(234,88,12,0.28)"/>
+    </linearGradient>
+    <linearGradient id="hanaFill" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffedd5"/>
+      <stop offset="55%" stop-color="#fdba74"/>
+      <stop offset="100%" stop-color="#fecaca"/>
+    </linearGradient>
   </defs>
-  <rect width="400" height="400" fill="url(#paper)"/>
-  <rect width="400" height="400" fill="url(#grain)"/>
-  <rect x="0" y="0" width="14" height="400" fill="rgba(0,0,0,0.35)"/>
-  <rect x="36" y="36" width="328" height="328" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
-  <rect x="48" y="48" width="304" height="304" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-  <text x="120" y="368" text-anchor="middle" fill="rgba(255,255,255,0.72)" font-size="18" font-family="'Hiragino Sans','Yu Gothic UI',Meiryo,sans-serif" letter-spacing="0.36em">&#12399;&#12394;</text>
-  <text x="120" y="388" text-anchor="middle" fill="rgba(255,255,255,0.36)" font-size="10" font-family="'Hiragino Sans','Yu Gothic UI',Meiryo,sans-serif" letter-spacing="0.28em">MEDIA BOX</text>
-  <line x1="80" y1="348" x2="160" y2="348" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+
+  <rect width="400" height="400" fill="url(#autumn)"/>
+  <rect width="400" height="400" fill="url(#emberGlow)"/>
+  <rect x="0" y="0" width="14" height="400" fill="rgba(0,0,0,0.4)"/>
+  <rect x="28" y="28" width="344" height="344" fill="none" stroke="rgba(253,186,116,0.14)" stroke-width="1"/>
+  <rect x="40" y="40" width="320" height="320" fill="none" stroke="rgba(254,202,202,0.06)" stroke-width="1"/>
+
+  <!-- maple leaf, bottom-left -->
+  <g transform="translate(78 286) rotate(-18) scale(1.15)" opacity="0.72">
+    <path d="M0 -28
+      C6 -18 10 -8 8 0
+      C18 -10 30 -8 34 2
+      C28 4 22 10 18 18
+      C28 16 36 22 38 32
+      C28 30 18 30 10 28
+      C12 36 8 44 0 48
+      C-8 44 -12 36 -10 28
+      C-18 30 -28 30 -38 32
+      C-36 22 -28 16 -18 18
+      C-22 10 -28 4 -34 2
+      C-30 -8 -18 -10 -8 0
+      C-10 -8 -6 -18 0 -28Z" fill="url(#mapleFill)"/>
+    <path d="M0 -24 L0 42" fill="none" stroke="rgba(255,237,213,0.35)" stroke-width="1.2" stroke-linecap="round"/>
+    <path d="M0 -4 L14 -14 M0 8 L18 0 M0 20 L14 18 M0 -4 L-14 -14 M0 8 L-18 0 M0 20 L-14 18"
+      fill="none" stroke="rgba(255,237,213,0.22)" stroke-width="0.9" stroke-linecap="round"/>
+  </g>
+
+  <!-- softer secondary leaf -->
+  <g transform="translate(158 332) rotate(22) scale(0.72)" opacity="0.45">
+    <path d="M0 -28
+      C6 -18 10 -8 8 0
+      C18 -10 30 -8 34 2
+      C28 4 22 10 18 18
+      C28 16 36 22 38 32
+      C28 30 18 30 10 28
+      C12 36 8 44 0 48
+      C-8 44 -12 36 -10 28
+      C-18 30 -28 30 -38 32
+      C-36 22 -28 16 -18 18
+      C-22 10 -28 4 -34 2
+      C-30 -8 -18 -10 -8 0
+      C-10 -8 -6 -18 0 -28Z" fill="url(#mapleSoft)"/>
+  </g>
+
+  <!-- drifting leaf accents -->
+  <g fill="#f87171" opacity="0.32">
+    <ellipse cx="48" cy="238" rx="5" ry="9" transform="rotate(-36 48 238)"/>
+    <ellipse cx="196" cy="348" rx="4" ry="7" transform="rotate(24 196 348)"/>
+    <ellipse cx="134" cy="304" rx="3.2" ry="5.8" transform="rotate(-8 134 304)"/>
+  </g>
+
+  <line x1="40" y1="356" x2="160" y2="356" stroke="rgba(253,186,116,0.25)" stroke-width="1"/>
+  <text x="40" y="378" fill="url(#hanaFill)" font-size="24" font-family="'Hiragino Mincho ProN','Yu Mincho',Georgia,serif" letter-spacing="0.16em">&#12399;&#12394;</text>
 </svg>

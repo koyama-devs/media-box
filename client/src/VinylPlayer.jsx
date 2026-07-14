@@ -12,9 +12,9 @@ const DEFAULT_LABEL = defaultLabelUrl
 const JACKET_STYLES = [
   { id: 'petal', label: 'ペタル', url: jacketPetalUrl },
   { id: 'sakura', label: 'サクラ', url: jacketSakuraUrl },
-  { id: 'poster', label: 'ポスター', url: jacketPosterUrl },
-  { id: 'record', label: 'スリーブ', url: jacketRecordUrl },
-  { id: 'paper', label: 'ペーパー', url: jacketPaperUrl },
+  { id: 'poster', label: '花火', url: jacketPosterUrl },
+  { id: 'record', label: '雪', url: jacketRecordUrl },
+  { id: 'paper', label: '紅葉', url: jacketPaperUrl },
 ]
 
 function resolveJacketStyleIndex(styleId) {
