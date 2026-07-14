@@ -248,10 +248,51 @@
   font-size: 0.88rem;
 }
 
+.admin-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-ghost--small {
+  padding: 8px 12px;
+  font-size: 0.82rem;
+}
+
+.admin-ghost:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.admin-filters {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
 .admin-filter {
   display: grid;
   gap: 6px;
-  min-width: 160px;
+  min-width: 0;
+}
+
+.admin-filter input[type='date'] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(8, 12, 20, 0.85);
+  color: #f8fafc;
+  font: inherit;
+  color-scheme: dark;
+}
+
+.admin-filter input[type='date']:focus {
+  outline: none;
+  border-color: rgba(96, 165, 250, 0.7);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
 }
 
 .admin-table-wrap {
@@ -323,5 +364,9 @@
   .admin-logs-header {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .admin-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

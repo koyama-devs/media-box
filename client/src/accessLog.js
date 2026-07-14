@@ -20,50 +20,170 @@ function detectOs(ua = '') {
   if (/android/i.test(ua)) return 'Android'
   if (/iphone|ipad|ipod/i.test(ua)) return 'iOS'
   if (/mac os x/i.test(ua)) return 'macOS'
+  if (/cros/i.test(ua)) return 'ChromeOS'
   if (/linux/i.test(ua)) return 'Linux'
   return 'Other'
 }
 
-async function fetchGeoHint() {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 4000)
+function detectDeviceName(ua = '', hints = null) {
+  const hintModel = String(hints?.model || '').trim()
+  if (hintModel) return hintModel.slice(0, 80)
+
+  if (/iphone/i.test(ua)) return 'iPhone'
+  if (/ipad/i.test(ua)) return 'iPad'
+  if (/ipod/i.test(ua)) return 'iPod'
+
+  const samsung = ua.match(/\b(SM-[A-Z0-9]+)\b/i)
+  if (samsung) return samsung[1]
+
+  const pixel = ua.match(/\b(Pixel[^;)/\s]*)/i)
+  if (pixel) return pixel[1].trim()
+
+  const androidDevice = ua.match(/\((?:Linux;\s*)?Android [^;]+;\s*([^);]+)\)/i)
+  if (androidDevice?.[1]) {
+    const raw = androidDevice[1]
+      .replace(/\s+Build\/.*$/i, '')
+      .replace(/wv$/i, '')
+      .trim()
+    if (raw && !/^Android$/i.test(raw) && raw.length < 60) return raw
+  }
+
+  if (/cros/i.test(ua)) return 'Chromebook'
+  if (/windows nt/i.test(ua)) return 'Windows PC'
+  if (/macintosh|mac os x/i.test(ua)) return 'Mac'
+  if (/android/i.test(ua)) return 'Android device'
+  if (/linux/i.test(ua)) return 'Linux PC'
+  return 'Unknown device'
+}
+
+async function readClientHints() {
+  const uaData = navigator.userAgentData
+  if (!uaData?.getHighEntropyValues) return null
   try {
-    const response = await fetch('https://ipapi.co/json/', { signal: controller.signal })
-    if (!response.ok) throw new Error('geo failed')
-    const data = await response.json()
+    const values = await uaData.getHighEntropyValues(['model', 'platform', 'platformVersion'])
     return {
-      ip: data.ip || null,
-      city: data.city || null,
-      region: data.region || null,
-      country: data.country_name || data.country || null,
-      countryCode: data.country_code || null,
-      latitude: typeof data.latitude === 'number' ? data.latitude : null,
-      longitude: typeof data.longitude === 'number' ? data.longitude : null,
-      org: data.org || null,
+      model: values.model || '',
+      platform: values.platform || '',
+      platformVersion: values.platformVersion || '',
     }
   } catch {
-    return {
-      ip: null,
-      city: null,
-      region: null,
-      country: null,
-      countryCode: null,
-      latitude: null,
-      longitude: null,
-      org: null,
-    }
+    return null
+  }
+}
+
+function emptyGeo() {
+  return {
+    ip: null,
+    city: null,
+    region: null,
+    country: null,
+    countryCode: null,
+    latitude: null,
+    longitude: null,
+    org: null,
+  }
+}
+
+async function fetchJson(url, timeoutMs = 4000) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    })
+    if (!response.ok) throw new Error(`geo http ${response.status}`)
+    return await response.json()
   } finally {
     clearTimeout(timer)
   }
 }
 
-export function buildClientAccessContext() {
+function normalizeGeo(partial = {}) {
+  const country = partial.country || null
+  const countryCode = partial.countryCode || null
+  if (!country && !countryCode && !partial.ip) return null
+  return {
+    ip: partial.ip || null,
+    city: partial.city || null,
+    region: partial.region || null,
+    country,
+    countryCode,
+    latitude: typeof partial.latitude === 'number' ? partial.latitude : null,
+    longitude: typeof partial.longitude === 'number' ? partial.longitude : null,
+    org: partial.org || null,
+  }
+}
+
+async function fetchGeoFromIpwho() {
+  const data = await fetchJson('https://ipwho.is/')
+  if (data?.success === false) throw new Error('ipwho failed')
+  return normalizeGeo({
+    ip: data.ip,
+    city: data.city,
+    region: data.region,
+    country: data.country,
+    countryCode: data.country_code,
+    latitude: data.latitude,
+    longitude: data.longitude,
+    org: data.connection?.isp || data.connection?.org || null,
+  })
+}
+
+async function fetchGeoFromGeoJs() {
+  const data = await fetchJson('https://get.geojs.io/v1/ip/geo.json')
+  return normalizeGeo({
+    ip: data.ip,
+    city: data.city,
+    region: data.region,
+    country: data.country,
+    countryCode: data.country_code,
+    latitude: data.latitude != null ? Number(data.latitude) : null,
+    longitude: data.longitude != null ? Number(data.longitude) : null,
+    org: data.organization || null,
+  })
+}
+
+async function fetchGeoFromIpApiCo() {
+  const data = await fetchJson('https://ipapi.co/json/')
+  if (data?.error) throw new Error(data.reason || 'ipapi error')
+  return normalizeGeo({
+    ip: data.ip,
+    city: data.city,
+    region: data.region,
+    country: data.country_name || data.country,
+    countryCode: data.country_code,
+    latitude: data.latitude,
+    longitude: data.longitude,
+    org: data.org || null,
+  })
+}
+
+async function fetchGeoHint() {
+  const providers = [fetchGeoFromIpwho, fetchGeoFromGeoJs, fetchGeoFromIpApiCo]
+  for (const provider of providers) {
+    try {
+      const geo = await provider()
+      if (geo?.country || geo?.countryCode || geo?.ip) return geo
+    } catch {
+      /* try next provider */
+    }
+  }
+  return emptyGeo()
+}
+
+export async function buildClientAccessContext() {
   const ua = navigator.userAgent || ''
+  const hints = await readClientHints()
+  const deviceType = detectDeviceType(ua)
+  const os = hints?.platform || detectOs(ua)
+
   return {
     userAgent: ua.slice(0, 500),
-    deviceType: detectDeviceType(ua),
+    deviceType,
+    deviceName: detectDeviceName(ua, hints),
     browser: detectBrowser(ua),
-    os: detectOs(ua),
+    os,
     language: navigator.language || null,
     languages: Array.isArray(navigator.languages) ? navigator.languages.slice(0, 5) : [],
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
@@ -74,9 +194,38 @@ export function buildClientAccessContext() {
   }
 }
 
+function countryHintFromTimezone(timezone) {
+  const map = {
+    'Asia/Saigon': { country: 'Vietnam', countryCode: 'VN' },
+    'Asia/Ho_Chi_Minh': { country: 'Vietnam', countryCode: 'VN' },
+    'Asia/Bangkok': { country: 'Thailand', countryCode: 'TH' },
+    'Asia/Tokyo': { country: 'Japan', countryCode: 'JP' },
+    'Asia/Seoul': { country: 'South Korea', countryCode: 'KR' },
+    'Asia/Shanghai': { country: 'China', countryCode: 'CN' },
+    'Asia/Hong_Kong': { country: 'Hong Kong', countryCode: 'HK' },
+    'Asia/Singapore': { country: 'Singapore', countryCode: 'SG' },
+    'America/New_York': { country: 'United States', countryCode: 'US' },
+    'America/Los_Angeles': { country: 'United States', countryCode: 'US' },
+    'Europe/London': { country: 'United Kingdom', countryCode: 'GB' },
+  }
+  return map[timezone] || null
+}
+
 export async function collectAccessLogPayload() {
-  const client = buildClientAccessContext()
-  const geo = await fetchGeoHint()
+  const client = await buildClientAccessContext()
+  let geo = await fetchGeoHint()
+
+  if (!geo.country && !geo.countryCode) {
+    const tzHint = countryHintFromTimezone(client.timezone)
+    if (tzHint) {
+      geo = {
+        ...geo,
+        country: tzHint.country,
+        countryCode: tzHint.countryCode,
+      }
+    }
+  }
+
   return {
     ...client,
     ...geo,

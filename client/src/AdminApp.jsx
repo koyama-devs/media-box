@@ -30,8 +30,14 @@ function formatVisitTime(value) {
 }
 
 function formatPlace(log) {
-  const parts = [log.city, log.region, log.country].filter(Boolean)
-  return parts.length ? parts.join(', ') : '不明'
+  const parts = [log.city, log.region].filter(Boolean)
+  return parts.length ? parts.join(', ') : ''
+}
+
+function formatCountry(log) {
+  if (log.country) return log.country
+  if (log.countryCode) return log.countryCode
+  return '不明'
 }
 
 function deviceLabel(type) {
@@ -41,10 +47,40 @@ function deviceLabel(type) {
   return type || '—'
 }
 
+function formatDeviceName(log) {
+  if (log.deviceName) return log.deviceName
+  if (log.os === 'iOS' || /iphone/i.test(log.userAgent || '')) return 'iPhone'
+  if (/ipad/i.test(log.userAgent || '')) return 'iPad'
+  if (log.os === 'Windows') return 'Windows PC'
+  if (log.os === 'macOS') return 'Mac'
+  if (log.os === 'Android') return 'Android device'
+  return deviceLabel(log.deviceType)
+}
+
 function startOfTodayIso() {
   const now = new Date()
   now.setHours(0, 0, 0, 0)
   return now.toISOString()
+}
+
+function toDateInputValue(date = new Date()) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function localDayBounds(dateValue) {
+  if (!dateValue) return null
+  const [year, month, day] = dateValue.split('-').map(Number)
+  if (!year || !month || !day) return null
+  const start = new Date(year, month - 1, day, 0, 0, 0, 0)
+  const end = new Date(year, month - 1, day, 23, 59, 59, 999)
+  return { start: start.toISOString(), end: end.toISOString() }
+}
+
+function countryKey(log) {
+  return log.country || log.countryCode || '不明'
 }
 
 function GoogleIcon() {
@@ -165,6 +201,10 @@ function AdminDashboard({ user }) {
   const [logs, setLogs] = useState([])
   const [error, setError] = useState('')
   const [deviceFilter, setDeviceFilter] = useState('all')
+  const [deviceNameFilter, setDeviceNameFilter] = useState('all')
+  const [countryFilter, setCountryFilter] = useState('all')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [loggingOut, setLoggingOut] = useState(false)
 
   useEffect(() => {
@@ -181,25 +221,88 @@ function AdminDashboard({ user }) {
     return unsubscribe
   }, [])
 
+  const countryOptions = useMemo(() => {
+    const counts = new Map()
+    logs.forEach((log) => {
+      const key = countryKey(log)
+      counts.set(key, (counts.get(key) || 0) + 1)
+    })
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name, count]) => ({ name, count }))
+  }, [logs])
+
+  const deviceNameOptions = useMemo(() => {
+    const counts = new Map()
+    logs.forEach((log) => {
+      const key = formatDeviceName(log)
+      counts.set(key, (counts.get(key) || 0) + 1)
+    })
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name, count]) => ({ name, count }))
+  }, [logs])
+
   const filteredLogs = useMemo(() => {
-    if (deviceFilter === 'all') return logs
-    return logs.filter((log) => log.deviceType === deviceFilter)
-  }, [logs, deviceFilter])
+    const fromBounds = localDayBounds(dateFrom)
+    const toBounds = localDayBounds(dateTo)
+
+    return logs.filter((log) => {
+      if (deviceFilter !== 'all' && log.deviceType !== deviceFilter) return false
+      if (deviceNameFilter !== 'all' && formatDeviceName(log) !== deviceNameFilter) return false
+      if (countryFilter !== 'all' && countryKey(log) !== countryFilter) return false
+
+      const visitedAt = log.visitedAt || ''
+      if (fromBounds && visitedAt < fromBounds.start) return false
+      if (toBounds && visitedAt > toBounds.end) return false
+      return true
+    })
+  }, [logs, deviceFilter, deviceNameFilter, countryFilter, dateFrom, dateTo])
 
   const stats = useMemo(() => {
     const todayStart = startOfTodayIso()
     const today = logs.filter((log) => (log.visitedAt || '') >= todayStart).length
     const mobile = logs.filter((log) => log.deviceType === 'mobile').length
     const desktop = logs.filter((log) => log.deviceType === 'desktop').length
-    const countries = new Set(logs.map((log) => log.country).filter(Boolean)).size
+    const countries = new Set(logs.map((log) => log.country || log.countryCode).filter(Boolean)).size
     return {
       total: logs.length,
       today,
       mobile,
       desktop,
       countries,
+      filtered: filteredLogs.length,
     }
-  }, [logs])
+  }, [logs, filteredLogs])
+
+  const hasActiveFilters =
+    deviceFilter !== 'all' ||
+    deviceNameFilter !== 'all' ||
+    countryFilter !== 'all' ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo)
+
+  const resetFilters = () => {
+    setDeviceFilter('all')
+    setDeviceNameFilter('all')
+    setCountryFilter('all')
+    setDateFrom('')
+    setDateTo('')
+  }
+
+  const setTodayRange = () => {
+    const today = toDateInputValue()
+    setDateFrom(today)
+    setDateTo(today)
+  }
+
+  const setLast7DaysRange = () => {
+    const end = new Date()
+    const start = new Date()
+    start.setDate(end.getDate() - 6)
+    setDateFrom(toDateInputValue(start))
+    setDateTo(toDateInputValue(end))
+  }
 
   const handleLogout = async () => {
     setLoggingOut(true)
@@ -253,15 +356,67 @@ function AdminDashboard({ user }) {
         <div className="admin-logs-header">
           <div>
             <h2>アクセスログ</h2>
-            <p>直近の訪問（デバイス・場所・時刻）</p>
+            <p>
+              表示中 {stats.filtered} / {stats.total} 件
+              {hasActiveFilters ? '（フィルタ適用中）' : ''}
+            </p>
           </div>
+          <div className="admin-filter-actions">
+            <button type="button" className="admin-ghost admin-ghost--small" onClick={setTodayRange}>
+              今日
+            </button>
+            <button type="button" className="admin-ghost admin-ghost--small" onClick={setLast7DaysRange}>
+              直近7日
+            </button>
+            <button
+              type="button"
+              className="admin-ghost admin-ghost--small"
+              onClick={resetFilters}
+              disabled={!hasActiveFilters}
+            >
+              クリア
+            </button>
+          </div>
+        </div>
+
+        <div className="admin-filters">
           <label className="admin-filter">
-            <span>デバイス</span>
+            <span>開始日</span>
+            <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+          </label>
+          <label className="admin-filter">
+            <span>終了日</span>
+            <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+          </label>
+          <label className="admin-filter">
+            <span>国</span>
+            <select value={countryFilter} onChange={(event) => setCountryFilter(event.target.value)}>
+              <option value="all">すべて</option>
+              {countryOptions.map((item) => (
+                <option key={item.name} value={item.name}>
+                  {item.name} ({item.count})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="admin-filter">
+            <span>デバイス種別</span>
             <select value={deviceFilter} onChange={(event) => setDeviceFilter(event.target.value)}>
               <option value="all">すべて</option>
               <option value="desktop">デスクトップ</option>
               <option value="mobile">モバイル</option>
               <option value="tablet">タブレット</option>
+            </select>
+          </label>
+          <label className="admin-filter">
+            <span>デバイス名</span>
+            <select value={deviceNameFilter} onChange={(event) => setDeviceNameFilter(event.target.value)}>
+              <option value="all">すべて</option>
+              {deviceNameOptions.map((item) => (
+                <option key={item.name} value={item.name}>
+                  {item.name} ({item.count})
+                </option>
+              ))}
             </select>
           </label>
         </div>
@@ -273,8 +428,8 @@ function AdminDashboard({ user }) {
             <thead>
               <tr>
                 <th>時刻</th>
-                <th>場所</th>
-                <th>デバイス</th>
+                <th>国</th>
+                <th>デバイス名</th>
                 <th>環境</th>
                 <th>IP</th>
                 <th>参照元</th>
@@ -284,7 +439,9 @@ function AdminDashboard({ user }) {
               {filteredLogs.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="admin-empty">
-                    まだアクセスログがありません。
+                    {logs.length === 0
+                      ? 'まだアクセスログがありません。'
+                      : '条件に一致するログがありません。'}
                   </td>
                 </tr>
               ) : (
@@ -295,12 +452,16 @@ function AdminDashboard({ user }) {
                       <div className="admin-cell-sub">{log.timezone || '—'}</div>
                     </td>
                     <td>
-                      <div className="admin-cell-main">{formatPlace(log)}</div>
-                      <div className="admin-cell-sub">{log.countryCode || ''}</div>
+                      <div className="admin-cell-main">{formatCountry(log)}</div>
+                      <div className="admin-cell-sub">
+                        {[log.countryCode, formatPlace(log)].filter(Boolean).join(' · ') || '—'}
+                      </div>
                     </td>
                     <td>
-                      <div className="admin-cell-main">{deviceLabel(log.deviceType)}</div>
-                      <div className="admin-cell-sub">{log.screen || '—'}</div>
+                      <div className="admin-cell-main">{formatDeviceName(log)}</div>
+                      <div className="admin-cell-sub">
+                        {[deviceLabel(log.deviceType), log.screen].filter(Boolean).join(' · ') || '—'}
+                      </div>
                     </td>
                     <td>
                       <div className="admin-cell-main">
