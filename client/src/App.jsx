@@ -1664,7 +1664,7 @@ const playPrevious = useCallback(() => {
                               setSwipeReveal(null)
                               return
                             }
-                            selectItem(item.id)
+                            selectItem(item.id, true)
                           }}
                         >
                           <strong>
