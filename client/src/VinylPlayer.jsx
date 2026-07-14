@@ -9,6 +9,24 @@ import AudioTransport from './AudioTransport'
 import VinylDiscCanvas from './VinylDiscCanvas'
 
 const DEFAULT_LABEL = defaultLabelUrl
+const MOBILE_VINYL_QUERY = '(max-width: 768px)'
+
+function useMobileVinylDom() {
+  const [useDom, setUseDom] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.matchMedia(MOBILE_VINYL_QUERY).matches
+  })
+
+  useEffect(() => {
+    const media = window.matchMedia(MOBILE_VINYL_QUERY)
+    const onChange = () => setUseDom(media.matches)
+    onChange()
+    media.addEventListener('change', onChange)
+    return () => media.removeEventListener('change', onChange)
+  }, [])
+
+  return useDom
+}
 
 const JACKET_STYLES = [
   {
@@ -143,6 +161,7 @@ export default function VinylPlayer({
     resolveJacketStyleIndex(jacketStyleId),
   )
   const [isPeekingJacket, setIsPeekingJacket] = useState(false)
+  const useMobileDomVinyl = useMobileVinylDom()
 
   useEffect(() => {
     setLabelSrc(coverSrc || DEFAULT_LABEL)
@@ -319,25 +338,53 @@ export default function VinylPlayer({
             <span className="vinyl-tonearm-head" aria-hidden="true" />
           </button>
 
-          <div
-            className="vinyl-record-shell"
-            role="button"
-            tabIndex={onTogglePlayback ? 0 : -1}
-            onClick={handlePlaybackClick}
-            onKeyDown={(event) => {
-              if (!onTogglePlayback) return
-              if (event.key !== 'Enter' && event.key !== ' ') return
-              event.preventDefault()
-              handlePlaybackClick()
-            }}
-            title={isPlaying ? '一時停止' : '再生'}
-            aria-label={isPlaying ? '一時停止' : '再生'}
-          >
-            <VinylDiscCanvas
-              labelSrc={labelSrc}
-              isSpinning={Boolean(isPlaying && !isPeekingJacket)}
-            />
-          </div>
+          {useMobileDomVinyl ? (
+            <div
+              className="vinyl-record vinyl-record--dom"
+              role="button"
+              tabIndex={onTogglePlayback ? 0 : -1}
+              onClick={handlePlaybackClick}
+              onKeyDown={(event) => {
+                if (!onTogglePlayback) return
+                if (event.key !== 'Enter' && event.key !== ' ') return
+                event.preventDefault()
+                handlePlaybackClick()
+              }}
+              title={isPlaying ? '一時停止' : '再生'}
+              aria-label={isPlaying ? '一時停止' : '再生'}
+            >
+              <div className="vinyl-grooves" aria-hidden="true" />
+              <div className={`vinyl-label ${coverBusy ? 'is-busy' : ''} ${useDefaultLabel ? 'is-default' : 'has-cover'}`}>
+                <img
+                  src={labelSrc}
+                  alt=""
+                  draggable={false}
+                  onError={() => setLabelSrc(DEFAULT_LABEL)}
+                />
+              </div>
+              <div className="vinyl-spindle" aria-hidden="true" />
+            </div>
+          ) : (
+            <div
+              className="vinyl-record-shell"
+              role="button"
+              tabIndex={onTogglePlayback ? 0 : -1}
+              onClick={handlePlaybackClick}
+              onKeyDown={(event) => {
+                if (!onTogglePlayback) return
+                if (event.key !== 'Enter' && event.key !== ' ') return
+                event.preventDefault()
+                handlePlaybackClick()
+              }}
+              title={isPlaying ? '一時停止' : '再生'}
+              aria-label={isPlaying ? '一時停止' : '再生'}
+            >
+              <VinylDiscCanvas
+                labelSrc={labelSrc}
+                isSpinning={Boolean(isPlaying && !isPeekingJacket)}
+              />
+            </div>
+          )}
 
           <div className="vinyl-cover-actions vinyl-cover-actions--label">
             {onCoverPick ? (
