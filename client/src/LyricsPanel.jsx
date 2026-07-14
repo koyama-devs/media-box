@@ -192,7 +192,6 @@ export default function LyricsPanel({
       ) : lines.length === 0 ? (
         <div className="lyrics-empty">
           <p>まだ歌詞がありません。</p>
-          <p>英日対訳を追加すると、再生中に現在の行がハイライトされます。</p>
         </div>
       ) : (
         <ul className="lyrics-list" ref={listRef}>
