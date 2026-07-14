@@ -5,6 +5,7 @@ import {
   getFirebaseErrorMessage,
   loadMediaBlobUrl,
   MAX_FILE_SIZE,
+  recordAccessVisit,
   sortMediaItems,
   subscribeToMediaItems,
   updateMediaCover,
@@ -316,6 +317,12 @@ function App() {
     syncTrackQuery(itemId)
 
 }, [])
+
+  useEffect(() => {
+    recordAccessVisit().catch((accessError) => {
+      console.warn('Access log skipped:', accessError)
+    })
+  }, [])
 
   useEffect(() => {
     if (urlTrackAppliedRef.current || playableItems.length === 0) return

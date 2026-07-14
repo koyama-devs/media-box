@@ -10,6 +10,25 @@ service cloud.firestore {
       }
     }
 
+    // Visitors can create access logs; only signed-in admins can read/manage them.
+    match /access-logs/{logId} {
+      allow create: if true
+        && request.resource.data.keys().hasAll([
+          'visitedAt',
+          'userAgent',
+          'deviceType',
+          'browser',
+          'os'
+        ])
+        && request.resource.data.visitedAt is string
+        && request.resource.data.userAgent is string
+        && request.resource.data.userAgent.size() <= 500
+        && request.resource.data.deviceType in ['mobile', 'tablet', 'desktop']
+        && request.resource.data.browser is string
+        && request.resource.data.os is string;
+      allow read, update, delete: if request.auth != null;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

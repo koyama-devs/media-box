@@ -1,16 +1,31 @@
-// Firebase initialization — Firestore only (no Storage needed)
+// Firebase initialization — Firestore + Auth (admin); no Storage
 import { getAnalytics } from 'firebase/analytics'
 import { initializeApp } from 'firebase/app'
+import {
+  getAuth,
+  getRedirectResult,
+  GoogleAuthProvider,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signInWithRedirect,
+  signOut,
+} from 'firebase/auth'
 import {
   collection,
   doc,
   getDoc,
   getDocs,
   getFirestore,
+  limit,
   onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
   setDoc,
   writeBatch,
 } from 'firebase/firestore'
+import { collectAccessLogPayload } from './accessLog'
 
 const firebaseConfig = {
   apiKey: 'AIzaSyBrzxY4sc2BC_5y1ymax08DkHbVoEKDo-8',
@@ -31,9 +46,37 @@ try {
 }
 
 const db = getFirestore(app)
+const auth = getAuth(app)
+const googleProvider = new GoogleAuthProvider()
+googleProvider.setCustomParameters({ prompt: 'select_account' })
+
 const MEDIA_COLLECTION = 'media-items'
+const ACCESS_LOGS_COLLECTION = 'access-logs'
 const CHUNK_SIZE = 700_000
 export const MAX_FILE_SIZE = 10 * 1024 * 1024
+const ACCESS_LOG_SESSION_KEY = 'hana-mediabox-access-logged'
+
+/** Optional: only these emails may use /admin. Leave empty to allow any signed-in Firebase user. */
+export const ADMIN_EMAIL_ALLOWLIST = [
+  'hihig9@gmail.com',
+  'koyamamika.me@gmail.com',
+  // 'your.google.account@gmail.com',
+]
+
+export function isAdminEmailAllowed(email) {
+  if (!ADMIN_EMAIL_ALLOWLIST.length) return true
+  const normalized = String(email || '').trim().toLowerCase()
+  return ADMIN_EMAIL_ALLOWLIST.some((item) => item.trim().toLowerCase() === normalized)
+}
+
+async function assertAdminUser(user) {
+  if (!user) return null
+  if (isAdminEmailAllowed(user.email)) return user
+  await signOut(auth)
+  const error = new Error('この Google アカウントには管理権限がありません。')
+  error.code = 'auth/admin-email-denied'
+  throw error
+}
 
 export function sortMediaItems(items) {
   return [...items].sort((a, b) => {
@@ -79,8 +122,108 @@ export function getFirebaseErrorMessage(error) {
   if (code === 'permission-denied') {
     return 'Firestoreの権限がありません。Firestore Rulesを確認してください。'
   }
+  if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
+    return 'メールアドレスまたはパスワードが正しくありません。'
+  }
+  if (code === 'auth/too-many-requests') {
+    return '試行回数が多すぎます。しばらくしてから再試行してください。'
+  }
+  if (code === 'auth/invalid-email') {
+    return 'メールアドレスの形式が正しくありません。'
+  }
+  if (code === 'auth/popup-closed-by-user') {
+    return 'Googleログインがキャンセルされました。'
+  }
+  if (code === 'auth/popup-blocked') {
+    return 'ポップアップがブロックされました。ブラウザの設定を確認してください。'
+  }
+  if (code === 'auth/admin-email-denied') {
+    return error?.message || 'このアカウントには管理権限がありません。'
+  }
 
   return error?.message || 'アップロードに失敗しました。'
+}
+
+export function subscribeToAdminAuth(onChange) {
+  return onAuthStateChanged(auth, (user) => {
+    if (user && !isAdminEmailAllowed(user.email)) {
+      signOut(auth).finally(() => onChange(null))
+      return
+    }
+    onChange(user)
+  })
+}
+
+export async function completeAdminRedirectLogin() {
+  const result = await getRedirectResult(auth)
+  if (!result?.user) return null
+  return assertAdminUser(result.user)
+}
+
+export async function loginAdmin(email, password) {
+  const credential = await signInWithEmailAndPassword(auth, email.trim(), password)
+  return assertAdminUser(credential.user)
+}
+
+export async function loginAdminWithGoogle() {
+  try {
+    const credential = await signInWithPopup(auth, googleProvider)
+    return assertAdminUser(credential.user)
+  } catch (error) {
+    if (error?.code === 'auth/popup-blocked') {
+      await signInWithRedirect(auth, googleProvider)
+      return null
+    }
+    throw error
+  }
+}
+
+export async function logoutAdmin() {
+  await signOut(auth)
+}
+
+export function getAdminUser() {
+  return auth.currentUser
+}
+
+/** Record one access log per browser tab session (best-effort). */
+export async function recordAccessVisit() {
+  try {
+    if (sessionStorage.getItem(ACCESS_LOG_SESSION_KEY) === '1') return null
+    sessionStorage.setItem(ACCESS_LOG_SESSION_KEY, '1')
+  } catch {
+    /* private mode may block sessionStorage — still try to log */
+  }
+
+  const payload = await collectAccessLogPayload()
+  const id = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`
+
+  await setDoc(doc(db, ACCESS_LOGS_COLLECTION, id), {
+    ...payload,
+    createdAt: serverTimestamp(),
+  })
+
+  return id
+}
+
+export function subscribeToAccessLogs(onData, onError, maxItems = 200) {
+  const logsQuery = query(
+    collection(db, ACCESS_LOGS_COLLECTION),
+    orderBy('visitedAt', 'desc'),
+    limit(maxItems),
+  )
+
+  return onSnapshot(
+    logsQuery,
+    (snapshot) => {
+      const logs = snapshot.docs.map((document) => ({
+        id: document.id,
+        ...document.data(),
+      }))
+      onData(logs)
+    },
+    onError,
+  )
 }
 
 export async function uploadMediaFile(file, metadata, onProgress) {
@@ -90,7 +233,7 @@ export async function uploadMediaFile(file, metadata, onProgress) {
 
   for (let index = 0; index < totalChunks; index += 1) {
     const start = index * CHUNK_SIZE
-    const end = Math.min(start + CHUNK_SIZE, buffer.byteLength)
+    const end = Math.min(buffer.byteLength, start + CHUNK_SIZE)
     const data = arrayBufferToBase64(buffer.slice(start, end))
 
     await setDoc(doc(db, MEDIA_COLLECTION, id, 'chunks', String(index)), { index, data })
@@ -214,4 +357,5 @@ export async function deleteMediaItem(itemId) {
   await batch.commit()
 }
 
-export { analytics, app, db }
+export { analytics, app, auth, db }
+
