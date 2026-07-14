@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import './App.css'
 import {
   deleteMediaItem,
@@ -18,6 +19,15 @@ import {
 } from './firebase'
 import LyricsPanel from './LyricsPanel'
 import VinylPlayer from './VinylPlayer'
+import {
+  createPlaylistId,
+  loadCustomPlaylists,
+  loadFavoriteIds,
+  loadListFilter,
+  saveCustomPlaylists,
+  saveFavoriteIds,
+  saveListFilter,
+} from './userPlaylists'
 
 const AUTH_KEY = 'media-share-lite-auth'
 const PASSWORD = 'hiro'
@@ -107,6 +117,28 @@ function formatSize(bytes) {
   const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
   const value = bytes / 1024 ** index
   return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`
+}
+
+function HeartIcon({ filled = false }) {
+  return (
+    <svg className="action-icon" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} aria-hidden="true">
+      <path
+        d="M12 20s-6.4-3.9-8.6-7.2C1.7 10.3 2.5 6.8 5.4 5.6c1.7-.7 3.6-.2 4.8 1.1L12 8.5l1.8-1.8c1.2-1.3 3.1-1.8 4.8-1.1 2.9 1.2 3.7 4.7 2 7.2C18.4 16.1 12 20 12 20z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function PlaylistAddIcon() {
+  return (
+    <svg className="action-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M4 7h11M4 12h8M4 17h8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M16 14v6M13 17h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  )
 }
 
 function ShareIcon() {
@@ -219,6 +251,15 @@ function App() {
   const [previewUrl, setPreviewUrl] = useState(null)
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [playlistMode, setPlaylistMode] = useState(true)
+  const [favoriteIds, setFavoriteIds] = useState(() => loadFavoriteIds())
+  const [customPlaylists, setCustomPlaylists] = useState(() => loadCustomPlaylists())
+  const [listFilter, setListFilter] = useState(() => loadListFilter())
+  const [playlistMenuItemId, setPlaylistMenuItemId] = useState(null)
+  const [playlistMenuPos, setPlaylistMenuPos] = useState(null)
+  const [creatingPlaylist, setCreatingPlaylist] = useState(false)
+  const [playlistNameDraft, setPlaylistNameDraft] = useState('')
+  const [renamingPlaylistId, setRenamingPlaylistId] = useState(null)
+  const [pendingPlaylistTrackId, setPendingPlaylistTrackId] = useState(null)
   const [isMediaPlaying, setIsMediaPlaying] = useState(false)
   const [playbackTime, setPlaybackTime] = useState(0)
   const [playbackDuration, setPlaybackDuration] = useState(0)
@@ -264,27 +305,134 @@ function App() {
     [items],
   )
 
+  const favoriteIdSet = useMemo(() => new Set(favoriteIds), [favoriteIds])
+
+  const visiblePlayableItems = useMemo(() => {
+    if (listFilter === 'all') return playableItems
+    if (listFilter === 'favorites') {
+      return playableItems.filter((item) => favoriteIdSet.has(item.id))
+    }
+    const playlist = customPlaylists.find((entry) => entry.id === listFilter)
+    if (!playlist) return playableItems
+    const order = new Map(playlist.trackIds.map((id, index) => [id, index]))
+    return playableItems
+      .filter((item) => order.has(item.id))
+      .sort((a, b) => order.get(a.id) - order.get(b.id))
+  }, [playableItems, listFilter, favoriteIdSet, customPlaylists])
+
   const imageItems = useMemo(
     () => items.filter((item) => item.kind === 'image' && item.inLibrary !== false),
     [items],
   )
 
   const selectedItem = useMemo(
-    () => items.find((item) => item.id === selectedItemId) || playableItems[0] || null,
-    [items, selectedItemId, playableItems],
+    () => items.find((item) => item.id === selectedItemId) || visiblePlayableItems[0] || playableItems[0] || null,
+    [items, selectedItemId, visiblePlayableItems, playableItems],
   )
 
   const selectedPlayableIndex = useMemo(
-    () => playableItems.findIndex((item) => item.id === selectedItemId),
-    [playableItems, selectedItemId],
+    () => visiblePlayableItems.findIndex((item) => item.id === selectedItemId),
+    [visiblePlayableItems, selectedItemId],
   )
 
   const getItemIdAtOffset = useCallback((offset) => {
-    if (playableItems.length === 0) return null
+    if (visiblePlayableItems.length === 0) return null
     const baseIndex = selectedPlayableIndex >= 0 ? selectedPlayableIndex : 0
-    const nextIndex = (baseIndex + offset + playableItems.length) % playableItems.length
-    return playableItems[nextIndex]?.id || null
-  }, [playableItems, selectedPlayableIndex])
+    const nextIndex = (baseIndex + offset + visiblePlayableItems.length) % visiblePlayableItems.length
+    return visiblePlayableItems[nextIndex]?.id || null
+  }, [visiblePlayableItems, selectedPlayableIndex])
+
+  useEffect(() => {
+    saveFavoriteIds(favoriteIds)
+  }, [favoriteIds])
+
+  useEffect(() => {
+    saveCustomPlaylists(customPlaylists)
+  }, [customPlaylists])
+
+  useEffect(() => {
+    saveListFilter(listFilter)
+  }, [listFilter])
+
+  useEffect(() => {
+    if (listFilter === 'all' || listFilter === 'favorites') return
+    if (!customPlaylists.some((playlist) => playlist.id === listFilter)) {
+      setListFilter('all')
+    }
+  }, [listFilter, customPlaylists])
+
+  useEffect(() => {
+    if (!playlistMenuItemId) return undefined
+    const onPointerDown = (event) => {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      if (target.closest('.playlist-add-wrap') || target.closest('.playlist-add-menu')) return
+      setPlaylistMenuItemId(null)
+      setPlaylistMenuPos(null)
+    }
+    const onRepositionClose = () => {
+      setPlaylistMenuItemId(null)
+      setPlaylistMenuPos(null)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    window.addEventListener('resize', onRepositionClose)
+    window.addEventListener('scroll', onRepositionClose, true)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('resize', onRepositionClose)
+      window.removeEventListener('scroll', onRepositionClose, true)
+    }
+  }, [playlistMenuItemId])
+
+  const toggleFavorite = useCallback((itemId) => {
+    setFavoriteIds((current) => (
+      current.includes(itemId)
+        ? current.filter((id) => id !== itemId)
+        : [...current, itemId]
+    ))
+  }, [])
+
+  const createCustomPlaylist = useCallback((name, initialTrackId = null) => {
+    const trimmed = String(name || '').trim().slice(0, 40)
+    if (!trimmed) return null
+    const playlist = {
+      id: createPlaylistId(),
+      name: trimmed,
+      trackIds: initialTrackId ? [initialTrackId] : [],
+    }
+    setCustomPlaylists((current) => [...current, playlist])
+    return playlist.id
+  }, [])
+
+  const renameCustomPlaylist = useCallback((playlistId, name) => {
+    const trimmed = String(name || '').trim().slice(0, 40)
+    if (!trimmed) return
+    setCustomPlaylists((current) =>
+      current.map((playlist) => (
+        playlist.id === playlistId ? { ...playlist, name: trimmed } : playlist
+      )),
+    )
+  }, [])
+
+  const deleteCustomPlaylist = useCallback((playlistId) => {
+    setCustomPlaylists((current) => current.filter((playlist) => playlist.id !== playlistId))
+    setListFilter((current) => (current === playlistId ? 'all' : current))
+  }, [])
+
+  const toggleTrackInPlaylist = useCallback((playlistId, trackId) => {
+    setCustomPlaylists((current) =>
+      current.map((playlist) => {
+        if (playlist.id !== playlistId) return playlist
+        const exists = playlist.trackIds.includes(trackId)
+        return {
+          ...playlist,
+          trackIds: exists
+            ? playlist.trackIds.filter((id) => id !== trackId)
+            : [...playlist.trackIds, trackId],
+        }
+      }),
+    )
+  }, [])
 
   const ensureMediaUrl = useCallback(async (itemId, mimeType) => {
     const cached = mediaUrlCacheRef.current.get(itemId)
@@ -666,23 +814,25 @@ const playPrevious = useCallback(() => {
   }
 
   const startPlaylist = useCallback(() => {
-    if (playableItems.length === 0) return
+    const queue = visiblePlayableItems.length > 0 ? visiblePlayableItems : playableItems
+    if (queue.length === 0) return
     setPlaylistMode(true)
-    const startId =
-      selectedItem && selectedItem.kind !== 'image'
-        ? selectedItem.id
-        : playableItems[0].id
+    const inQueue =
+      selectedItem &&
+      selectedItem.kind !== 'image' &&
+      queue.some((item) => item.id === selectedItem.id)
+    const startId = inQueue ? selectedItem.id : queue[0].id
     selectItem(startId, true)
-  }, [playableItems, selectedItem, selectItem])
+  }, [visiblePlayableItems, playableItems, selectedItem, selectItem])
 
   const handleMediaEnded = useCallback(() => {
     if (!playlistMode) return
-    if (playableItems.length <= 1) return
+    if (visiblePlayableItems.length <= 1) return
 
     const nextId = getItemIdAtOffset(1)
     if (!nextId) return
 
-    const nextItem = playableItems.find((item) => item.id === nextId)
+    const nextItem = visiblePlayableItems.find((item) => item.id === nextId)
     if (!nextItem) return
 
     // Gọi play() đồng bộ trong ended — mobile chỉ cho phép trong chuỗi sự kiện này
@@ -691,7 +841,7 @@ const playPrevious = useCallback(() => {
     }
   }, [
     playlistMode,
-    playableItems,
+    visiblePlayableItems,
     getItemIdAtOffset,
     advancePlaylistToItem,
     playNext,
@@ -882,13 +1032,13 @@ const playPrevious = useCallback(() => {
     const nextId = getItemIdAtOffset(1)
     if (!nextId) return
 
-    const nextItem = playableItems.find((item) => item.id === nextId)
+    const nextItem = visiblePlayableItems.find((item) => item.id === nextId)
     prefetchMediaUrl(nextItem)
   }, [
     playlistMode,
     selectedItem?.id,
     selectedItem?.kind,
-    playableItems,
+    visiblePlayableItems,
     getItemIdAtOffset,
     prefetchMediaUrl,
   ])
@@ -1065,6 +1215,25 @@ const playPrevious = useCallback(() => {
   const reorderPlayableItems = async (fromId, toId) => {
     if (!fromId || !toId || fromId === toId) return
 
+    // Custom playlist order stays on this device only
+    if (listFilter !== 'all' && listFilter !== 'favorites') {
+      setCustomPlaylists((current) =>
+        current.map((playlist) => {
+          if (playlist.id !== listFilter) return playlist
+          const ids = [...playlist.trackIds]
+          const fromIndex = ids.indexOf(fromId)
+          const toIndex = ids.indexOf(toId)
+          if (fromIndex < 0 || toIndex < 0) return playlist
+          const [moved] = ids.splice(fromIndex, 1)
+          ids.splice(toIndex, 0, moved)
+          return { ...playlist, trackIds: ids }
+        }),
+      )
+      return
+    }
+
+    if (listFilter !== 'all') return
+
     const currentIds = playableItems.map((item) => item.id)
     const fromIndex = currentIds.indexOf(fromId)
     const toIndex = currentIds.indexOf(toId)
@@ -1091,6 +1260,17 @@ const playPrevious = useCallback(() => {
       console.error(reorderError)
       setError('並び替えに失敗しました。')
     }
+  }
+
+  const canReorderList = listFilter === 'all' || (listFilter !== 'favorites' && customPlaylists.some((p) => p.id === listFilter))
+
+  const submitCreatePlaylist = () => {
+    const id = createCustomPlaylist(playlistNameDraft, pendingPlaylistTrackId)
+    if (!id) return
+    setPlaylistNameDraft('')
+    setCreatingPlaylist(false)
+    setPendingPlaylistTrackId(null)
+    setListFilter(id)
   }
 
   const copyTrackLink = async (itemId) => {
@@ -1334,10 +1514,10 @@ const playPrevious = useCallback(() => {
                       <h3>{getDisplayName(selectedItem.name)}</h3>
                     </div>
                     <div className="player-actions">
-                      <button type="button" className="secondary-button" onClick={playPrevious} disabled={playableItems.length < 2}>
+                      <button type="button" className="secondary-button" onClick={playPrevious} disabled={visiblePlayableItems.length < 2}>
                         前へ
                       </button>
-                      <button type="button" className="secondary-button" onClick={playNext} disabled={playableItems.length < 2}>
+                      <button type="button" className="secondary-button" onClick={playNext} disabled={visiblePlayableItems.length < 2}>
                         次へ
                       </button>
                       <button
@@ -1355,7 +1535,7 @@ const playPrevious = useCallback(() => {
                           </span>
                         </span>
                       </button>
-                      <button type="button" className="primary-button" onClick={startPlaylist} disabled={playableItems.length === 0}>
+                      <button type="button" className="primary-button" onClick={startPlaylist} disabled={visiblePlayableItems.length === 0 && playableItems.length === 0}>
                         リスト再生
                       </button>
                       <button type="button" className="danger-button" onClick={() => requestDelete(selectedItem.id)}>
@@ -1467,9 +1647,153 @@ const playPrevious = useCallback(() => {
             <aside className="list-card">
               <div className="list-header">
                 <h3>再生リスト</h3>
-                <span>{playableItems.length} 件</span>
+                <span>{visiblePlayableItems.length} 件</span>
               </div>
-              {playableItems.length > 1 ? (
+
+              <div className="list-filter-tabs" role="tablist" aria-label="リストフィルター">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={listFilter === 'all'}
+                  className={`list-filter-tab${listFilter === 'all' ? ' is-active' : ''}`}
+                  onClick={() => setListFilter('all')}
+                >
+                  すべて
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={listFilter === 'favorites'}
+                  className={`list-filter-tab${listFilter === 'favorites' ? ' is-active' : ''}`}
+                  onClick={() => setListFilter('favorites')}
+                >
+                  お気に入り
+                  {favoriteIds.length > 0 ? (
+                    <span className="list-filter-count">{favoriteIds.length}</span>
+                  ) : null}
+                </button>
+                {customPlaylists.map((playlist) => (
+                  <button
+                    key={playlist.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={listFilter === playlist.id}
+                    className={`list-filter-tab${listFilter === playlist.id ? ' is-active' : ''}`}
+                    onClick={() => setListFilter(playlist.id)}
+                    onDoubleClick={() => {
+                      setRenamingPlaylistId(playlist.id)
+                      setPlaylistNameDraft(playlist.name)
+                    }}
+                    title="ダブルクリックで名前変更"
+                  >
+                    {playlist.name}
+                    {playlist.trackIds.length > 0 ? (
+                      <span className="list-filter-count">{playlist.trackIds.length}</span>
+                    ) : null}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="list-filter-tab list-filter-tab--add"
+                  onClick={() => {
+                    setCreatingPlaylist(true)
+                    setRenamingPlaylistId(null)
+                    setPendingPlaylistTrackId(null)
+                    setPlaylistNameDraft('')
+                  }}
+                  title="プレイリストを作成"
+                  aria-label="プレイリストを作成"
+                >
+                  ＋
+                </button>
+              </div>
+
+              {creatingPlaylist || renamingPlaylistId ? (
+                <form
+                  className="playlist-name-form"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    if (renamingPlaylistId) {
+                      renameCustomPlaylist(renamingPlaylistId, playlistNameDraft)
+                      setRenamingPlaylistId(null)
+                      setPlaylistNameDraft('')
+                    } else {
+                      submitCreatePlaylist()
+                    }
+                  }}
+                >
+                  <input
+                    autoFocus
+                    value={playlistNameDraft}
+                    placeholder="例: 英語学習"
+                    maxLength={40}
+                    onChange={(event) => setPlaylistNameDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') {
+                        event.preventDefault()
+                        setCreatingPlaylist(false)
+                        setRenamingPlaylistId(null)
+                        setPlaylistNameDraft('')
+                        setPendingPlaylistTrackId(null)
+                      }
+                    }}
+                    aria-label="プレイリスト名"
+                  />
+                  <button type="submit" className="icon-button" title="保存">✓</button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    title="キャンセル"
+                    onClick={() => {
+                      setCreatingPlaylist(false)
+                      setRenamingPlaylistId(null)
+                      setPlaylistNameDraft('')
+                      setPendingPlaylistTrackId(null)
+                    }}
+                  >
+                    ×
+                  </button>
+                  {renamingPlaylistId ? (
+                    <button
+                      type="button"
+                      className="icon-button danger"
+                      title="このプレイリストを削除"
+                      onClick={() => {
+                        deleteCustomPlaylist(renamingPlaylistId)
+                        setRenamingPlaylistId(null)
+                        setPlaylistNameDraft('')
+                      }}
+                    >
+                      削除
+                    </button>
+                  ) : null}
+                </form>
+              ) : null}
+
+              {listFilter === 'favorites' ? (
+                <p className="playlist-hint">この端末のお気に入りです。ハートで追加・解除できます。</p>
+              ) : listFilter !== 'all' ? (
+                <p className="playlist-hint">
+                  この端末だけのプレイリストです。＋で曲を追加、ドラッグで並び替え。
+                  {listFilter !== 'favorites' ? (
+                    <>
+                      {' '}
+                      <button
+                        type="button"
+                        className="playlist-inline-action"
+                        onClick={() => {
+                          const playlist = customPlaylists.find((entry) => entry.id === listFilter)
+                          if (!playlist) return
+                          setRenamingPlaylistId(playlist.id)
+                          setPlaylistNameDraft(playlist.name)
+                        }}
+                      >
+                        名前変更 / 削除
+                      </button>
+                    </>
+                  ) : null}
+                </p>
+              ) : playableItems.length > 1 ? (
                 <p className="playlist-hint">
                   ドラッグで並び替え、リンク共有・ファイル共有
                   <span className="playlist-hint-desktop">
@@ -1496,11 +1820,21 @@ const playPrevious = useCallback(() => {
                 <div className="empty-list">
                   <p>音声・動画を追加するとここに表示されます。</p>
                 </div>
+              ) : visiblePlayableItems.length === 0 ? (
+                <div className="empty-list">
+                  <p>
+                    {listFilter === 'favorites'
+                      ? 'お気に入りはまだありません。ハートを押して追加できます。'
+                      : 'このプレイリストは空です。曲の＋から追加してください。'}
+                  </p>
+                </div>
               ) : (
                 <ul className="video-list">
-                  {playableItems.map((item) => {
+                  {visiblePlayableItems.map((item) => {
                     const swipeMode = swipeReveal?.id === item.id ? swipeReveal.mode : null
                     const baseOffset = swipeMode === 'delete' ? -72 : swipeMode === 'rename' ? 72 : 0
+                    const isFavorite = favoriteIdSet.has(item.id)
+                    const allowDrag = canReorderList && editingItemId !== item.id && !swipeMode
                     return (
                     <li
                       key={item.id}
@@ -1512,14 +1846,19 @@ const playPrevious = useCallback(() => {
                         swipeMode === 'delete' ? 'is-swiped-delete' : '',
                         swipeMode === 'rename' ? 'is-swiped-rename' : '',
                       ].filter(Boolean).join(' ')}
-                      draggable={editingItemId !== item.id && !swipeMode}
+                      draggable={allowDrag}
                       onDragStart={(event) => {
+                        if (!allowDrag) {
+                          event.preventDefault()
+                          return
+                        }
                         if (swipeReveal) setSwipeReveal(null)
                         setDragItemId(item.id)
                         event.dataTransfer.effectAllowed = 'move'
                         event.dataTransfer.setData('text/plain', item.id)
                       }}
                       onDragOver={(event) => {
+                        if (!canReorderList) return
                         event.preventDefault()
                         event.dataTransfer.dropEffect = 'move'
                         if (dragOverItemId !== item.id) {
@@ -1532,6 +1871,7 @@ const playPrevious = useCallback(() => {
                         }
                       }}
                       onDrop={(event) => {
+                        if (!canReorderList) return
                         event.preventDefault()
                         const fromId = event.dataTransfer.getData('text/plain') || dragItemId
                         setDragItemId(null)
@@ -1630,9 +1970,13 @@ const playPrevious = useCallback(() => {
                           swipeOffsetRef.current = 0
                         }}
                       >
-                      <span className="drag-handle" title="ドラッグで並び替え" aria-hidden="true">
-                        ⠿
-                      </span>
+                      {canReorderList ? (
+                        <span className="drag-handle" title="ドラッグで並び替え" aria-hidden="true">
+                          ⠿
+                        </span>
+                      ) : (
+                        <span className="drag-handle drag-handle--disabled" aria-hidden="true" />
+                      )}
 
                       {editingItemId === item.id ? (
                         <form
@@ -1687,6 +2031,52 @@ const playPrevious = useCallback(() => {
                       <div className="item-actions">
                         {editingItemId !== item.id ? (
                           <>
+                            <button
+                              type="button"
+                              className={`icon-button icon-button--favorite${isFavorite ? ' is-favorite' : ''}`}
+                              title={isFavorite ? 'お気に入り解除' : 'お気に入りに追加'}
+                              aria-label={isFavorite ? 'お気に入り解除' : 'お気に入りに追加'}
+                              aria-pressed={isFavorite}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                toggleFavorite(item.id)
+                              }}
+                            >
+                              <HeartIcon filled={isFavorite} />
+                            </button>
+                            <div className="playlist-add-wrap">
+                              <button
+                                type="button"
+                                className={`icon-button icon-button--playlist${playlistMenuItemId === item.id ? ' is-open' : ''}`}
+                                title="プレイリストに追加"
+                                aria-label="プレイリストに追加"
+                                aria-expanded={playlistMenuItemId === item.id}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  if (playlistMenuItemId === item.id) {
+                                    setPlaylistMenuItemId(null)
+                                    setPlaylistMenuPos(null)
+                                    return
+                                  }
+                                  const rect = event.currentTarget.getBoundingClientRect()
+                                  const menuWidth = 200
+                                  const left = Math.min(
+                                    Math.max(8, rect.right - menuWidth),
+                                    window.innerWidth - menuWidth - 8,
+                                  )
+                                  const spaceBelow = window.innerHeight - rect.bottom
+                                  const openUp = spaceBelow < 180 && rect.top > spaceBelow
+                                  setPlaylistMenuPos({
+                                    left,
+                                    top: openUp ? undefined : rect.bottom + 6,
+                                    bottom: openUp ? window.innerHeight - rect.top + 6 : undefined,
+                                  })
+                                  setPlaylistMenuItemId(item.id)
+                                }}
+                              >
+                                <PlaylistAddIcon />
+                              </button>
+                            </div>
                             <button
                               type="button"
                               className={`icon-button icon-button--link${copiedItemId === item.id ? ' is-copied' : ''}`}
@@ -1827,6 +2217,58 @@ const playPrevious = useCallback(() => {
           </div>
         </div>
       ) : null}
+
+      {playlistMenuItemId && playlistMenuPos
+        ? createPortal(
+            <div
+              className="playlist-add-menu playlist-add-menu--portal"
+              role="menu"
+              style={{
+                left: playlistMenuPos.left,
+                top: playlistMenuPos.top,
+                bottom: playlistMenuPos.bottom,
+              }}
+            >
+              {customPlaylists.length === 0 ? (
+                <p className="playlist-add-empty">まだプレイリストがありません</p>
+              ) : (
+                customPlaylists.map((playlist) => {
+                  const inPlaylist = playlist.trackIds.includes(playlistMenuItemId)
+                  return (
+                    <button
+                      key={playlist.id}
+                      type="button"
+                      role="menuitemcheckbox"
+                      aria-checked={inPlaylist}
+                      className={`playlist-add-option${inPlaylist ? ' is-in' : ''}`}
+                      onClick={() => {
+                        toggleTrackInPlaylist(playlist.id, playlistMenuItemId)
+                      }}
+                    >
+                      <span>{playlist.name}</span>
+                      <span aria-hidden="true">{inPlaylist ? '✓' : '+'}</span>
+                    </button>
+                  )
+                })
+              )}
+              <button
+                type="button"
+                className="playlist-add-option playlist-add-option--new"
+                onClick={() => {
+                  setPendingPlaylistTrackId(playlistMenuItemId)
+                  setPlaylistMenuItemId(null)
+                  setPlaylistMenuPos(null)
+                  setCreatingPlaylist(true)
+                  setRenamingPlaylistId(null)
+                  setPlaylistNameDraft('')
+                }}
+              >
+                新しいプレイリスト…
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   )
 }
