@@ -440,13 +440,21 @@
 @keyframes vinyl-glow {
   0%,
   100% {
-    opacity: 0.55;
-    transform: scale(0.98);
+    opacity: 0.45;
   }
 
   50% {
-    opacity: 1;
-    transform: scale(1.02);
+    opacity: 0.85;
+  }
+}
+
+@keyframes vinyl-sheen {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
   }
 }
 
@@ -591,13 +599,44 @@
 .vinyl-stage.is-playing::before {
   content: '';
   position: absolute;
-  inset: -6%;
+  inset: -4%;
   border-radius: 50%;
   pointer-events: none;
   z-index: 0;
-  background: radial-gradient(circle, rgba(37, 99, 235, 0.18), transparent 68%);
-  box-shadow: 0 16px 28px rgba(0, 0, 0, 0.35);
-  animation: vinyl-glow 2.6s ease-in-out infinite;
+  background: radial-gradient(
+    circle,
+    rgba(96, 165, 250, 0.1) 0%,
+    rgba(37, 99, 235, 0.05) 42%,
+    transparent 72%
+  );
+  box-shadow: 0 0 36px rgba(59, 130, 246, 0.16);
+  animation: vinyl-glow 3.8s ease-in-out infinite;
+}
+
+/* Subtle fixed-room light sweep over the spinning disc */
+.vinyl-stage.is-playing::after {
+  content: '';
+  position: absolute;
+  inset: 5%;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 4;
+  background: conic-gradient(
+    from 210deg,
+    transparent 0deg,
+    transparent 48deg,
+    rgba(255, 255, 255, 0.02) 68deg,
+    rgba(147, 197, 253, 0.14) 86deg,
+    rgba(255, 255, 255, 0.08) 96deg,
+    rgba(147, 197, 253, 0.06) 108deg,
+    transparent 128deg,
+    transparent 360deg
+  );
+  mix-blend-mode: soft-light;
+  opacity: 0.9;
+  mask-image: radial-gradient(circle, transparent 18%, #000 30%, #000 88%, transparent 98%);
+  -webkit-mask-image: radial-gradient(circle, transparent 18%, #000 30%, #000 88%, transparent 98%);
+  animation: vinyl-sheen 14s linear infinite;
 }
 
 .vinyl-sleeve-flap {
@@ -733,7 +772,7 @@
   background: repeating-radial-gradient(
     circle at center,
     transparent 0 3px,
-    rgba(255, 255, 255, 0.03) 3px 4px
+    rgba(255, 255, 255, 0.018) 3px 4px
   );
   pointer-events: none;
 }
