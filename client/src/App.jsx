@@ -2,32 +2,32 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
 import {
-  deleteMediaItem,
-  getFirebaseErrorMessage,
-  loadMediaBlobUrl,
-  MAX_FILE_SIZE,
-  recordAccessVisit,
-  sortMediaItems,
-  subscribeToMediaItems,
-  updateMediaCover,
-  updateMediaJacket,
-  updateMediaJacketStyle,
-  updateMediaLyrics,
-  updateMediaName,
-  updatePlaylistOrder,
-  uploadMediaFile,
+    deleteMediaItem,
+    getFirebaseErrorMessage,
+    loadMediaBlobUrl,
+    MAX_FILE_SIZE,
+    recordAccessVisit,
+    sortMediaItems,
+    subscribeToMediaItems,
+    updateMediaCover,
+    updateMediaJacket,
+    updateMediaJacketStyle,
+    updateMediaLyrics,
+    updateMediaName,
+    updatePlaylistOrder,
+    uploadMediaFile,
 } from './firebase'
 import LyricsPanel from './LyricsPanel'
-import VinylPlayer from './VinylPlayer'
 import {
-  createPlaylistId,
-  loadCustomPlaylists,
-  loadFavoriteIds,
-  loadListFilter,
-  saveCustomPlaylists,
-  saveFavoriteIds,
-  saveListFilter,
+    createPlaylistId,
+    loadCustomPlaylists,
+    loadFavoriteIds,
+    loadListFilter,
+    saveCustomPlaylists,
+    saveFavoriteIds,
+    saveListFilter,
 } from './userPlaylists'
+import VinylPlayer from './VinylPlayer'
 
 const AUTH_KEY = 'media-share-lite-auth'
 const PASSWORD = 'hiro'
@@ -250,6 +250,8 @@ function App() {
   const [uploadingFileIndex, setUploadingFileIndex] = useState(0)
   const [uploadingFileTotal, setUploadingFileTotal] = useState(0)
   const [uploadTargetPlaylistId, setUploadTargetPlaylistId] = useState('all')
+  const [uploadCreatingPlaylist, setUploadCreatingPlaylist] = useState(false)
+  const [uploadPlaylistNameDraft, setUploadPlaylistNameDraft] = useState('')
   const [loadingItems, setLoadingItems] = useState(false)
   const [previewUrl, setPreviewUrl] = useState(null)
   const [loadingPreview, setLoadingPreview] = useState(false)
@@ -413,6 +415,15 @@ function App() {
     setCustomPlaylists((current) => [...current, playlist])
     return playlist.id
   }, [])
+
+  const submitCreatePlaylistForUpload = () => {
+    const id = createCustomPlaylist(uploadPlaylistNameDraft)
+    if (!id) return
+    setUploadPlaylistNameDraft('')
+    setUploadCreatingPlaylist(false)
+    setUploadTargetPlaylistId(id)
+    setListFilter(id)
+  }
 
   const renameCustomPlaylist = useCallback((playlistId, name) => {
     const trimmed = String(name || '').trim().slice(0, 40)
@@ -1609,13 +1620,27 @@ const playPrevious = useCallback(() => {
                   id="upload-playlist-target"
                   className="upload-playlist-select"
                   value={
+                    uploadCreatingPlaylist
+                      ? '__new__'
+                      : (
                     uploadTargetPlaylistId === 'all' ||
                     customPlaylists.some((playlist) => playlist.id === uploadTargetPlaylistId)
                       ? uploadTargetPlaylistId
                       : 'all'
+                      )
                   }
                   disabled={uploading}
-                  onChange={(event) => setUploadTargetPlaylistId(event.target.value)}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    if (value === '__new__') {
+                      setUploadCreatingPlaylist(true)
+                      setUploadPlaylistNameDraft('')
+                      return
+                    }
+                    setUploadCreatingPlaylist(false)
+                    setUploadPlaylistNameDraft('')
+                    setUploadTargetPlaylistId(value)
+                  }}
                 >
                   <option value="all">すべて（再生リスト）</option>
                   {customPlaylists.map((playlist) => (
@@ -1623,9 +1648,49 @@ const playPrevious = useCallback(() => {
                       {playlist.name}
                     </option>
                   ))}
+                  <option value="__new__">新しいプレイリスト…</option>
                 </select>
               </label>
-              <label className={`upload-button ${uploading ? 'disabled' : ''}`} htmlFor="video-upload">
+              {uploadCreatingPlaylist ? (
+                <form
+                  className="upload-playlist-new-form"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    submitCreatePlaylistForUpload()
+                  }}
+                >
+                  <input
+                    autoFocus
+                    value={uploadPlaylistNameDraft}
+                    placeholder="プレイリスト名（例: 英語学習）"
+                    maxLength={40}
+                    onChange={(event) => setUploadPlaylistNameDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') {
+                        event.preventDefault()
+                        setUploadCreatingPlaylist(false)
+                        setUploadPlaylistNameDraft('')
+                        setUploadTargetPlaylistId('all')
+                      }
+                    }}
+                    aria-label="新しいプレイリスト名"
+                  />
+                  <button type="submit" className="icon-button" title="作成">✓</button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    title="キャンセル"
+                    onClick={() => {
+                      setUploadCreatingPlaylist(false)
+                      setUploadPlaylistNameDraft('')
+                      setUploadTargetPlaylistId('all')
+                    }}
+                  >
+                    ✕
+                  </button>
+                </form>
+              ) : null}
+              <label className={`upload-button ${(uploading || uploadCreatingPlaylist) ? 'disabled' : ''}`} htmlFor="video-upload">
                 {uploading
                   ? uploadingFileTotal > 1
                     ? `アップロード中... (${uploadingFileIndex}/${uploadingFileTotal})`
@@ -1637,7 +1702,7 @@ const playPrevious = useCallback(() => {
                 type="file"
                 accept="video/*,audio/*,image/*"
                 multiple
-                disabled={uploading}
+                disabled={uploading || uploadCreatingPlaylist}
                 onChange={handleUpload}
               />
             </div>
