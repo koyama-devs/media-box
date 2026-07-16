@@ -7,8 +7,10 @@ import {
     loadMediaBlobUrl,
     MAX_FILE_SIZE,
     recordAccessVisit,
+    saveSharedPlaylists,
     sortMediaItems,
     subscribeToMediaItems,
+    subscribeToSharedPlaylists,
     updateMediaCover,
     updateMediaJacket,
     updateMediaJacketStyle,
@@ -258,6 +260,7 @@ function App() {
   const [playlistMode, setPlaylistMode] = useState(true)
   const [favoriteIds, setFavoriteIds] = useState(() => loadFavoriteIds())
   const [customPlaylists, setCustomPlaylists] = useState(() => loadCustomPlaylists())
+  const [playlistSyncReady, setPlaylistSyncReady] = useState(false)
   const [listFilter, setListFilter] = useState(() => loadListFilter())
   const [playlistMenuItemId, setPlaylistMenuItemId] = useState(null)
   const [playlistMenuPos, setPlaylistMenuPos] = useState(null)
@@ -290,6 +293,8 @@ function App() {
 
   // Ref tới player hiện tại (audio hoặc video)
   const mediaRef = useRef(null)
+  const initialLocalPlaylistsRef = useRef(loadCustomPlaylists())
+  const remotePlaylistsHashRef = useRef('')
   
   // Có cần autoplay sau khi đổi bài không
   const shouldAutoPlayRef = useRef(false)
@@ -352,12 +357,12 @@ function App() {
   }, [favoriteIds])
 
   useEffect(() => {
-    saveCustomPlaylists(customPlaylists)
-  }, [customPlaylists])
-
-  useEffect(() => {
     saveListFilter(listFilter)
   }, [listFilter])
+
+  useEffect(() => {
+    saveCustomPlaylists(customPlaylists)
+  }, [customPlaylists])
 
   useEffect(() => {
     if (listFilter === 'all' || listFilter === 'favorites') return
@@ -922,6 +927,7 @@ const playPrevious = useCallback(() => {
       setItems([])
       setSelectedItemId(null)
       setLoadingItems(false)
+      setPlaylistSyncReady(false)
       return undefined
     }
 
@@ -950,6 +956,55 @@ const playPrevious = useCallback(() => {
 
     return unsubscribe
   }, [isLoggedIn])
+
+  useEffect(() => {
+    if (!isLoggedIn) return undefined
+
+    const unsubscribe = subscribeToSharedPlaylists(
+      async (remotePlaylists, exists) => {
+        if (!exists && initialLocalPlaylistsRef.current.length > 0) {
+          const localPlaylists = initialLocalPlaylistsRef.current
+          const localHash = JSON.stringify(localPlaylists)
+          remotePlaylistsHashRef.current = localHash
+          setCustomPlaylists(localPlaylists)
+          setPlaylistSyncReady(true)
+          try {
+            await saveSharedPlaylists(localPlaylists)
+          } catch (syncError) {
+            console.error(syncError)
+            setError(getFirebaseErrorMessage(syncError))
+          }
+          return
+        }
+
+        const remoteHash = JSON.stringify(remotePlaylists)
+        remotePlaylistsHashRef.current = remoteHash
+        setCustomPlaylists(remotePlaylists)
+        setPlaylistSyncReady(true)
+      },
+      (loadError) => {
+        console.error(loadError)
+        setError(getFirebaseErrorMessage(loadError))
+      },
+    )
+
+    return unsubscribe
+  }, [isLoggedIn])
+
+  useEffect(() => {
+    if (!isLoggedIn || !playlistSyncReady) return
+    const localHash = JSON.stringify(customPlaylists)
+    if (localHash === remotePlaylistsHashRef.current) return
+
+    saveSharedPlaylists(customPlaylists)
+      .then(() => {
+        remotePlaylistsHashRef.current = localHash
+      })
+      .catch((syncError) => {
+        console.error(syncError)
+        setError(getFirebaseErrorMessage(syncError))
+      })
+  }, [customPlaylists, isLoggedIn, playlistSyncReady])
 
   useEffect(() => {
     const currentUrls = new Set([

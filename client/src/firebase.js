@@ -2,28 +2,28 @@
 import { getAnalytics } from 'firebase/analytics'
 import { initializeApp } from 'firebase/app'
 import {
-  getAuth,
-  getRedirectResult,
-  GoogleAuthProvider,
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  signInWithPopup,
-  signInWithRedirect,
-  signOut,
+    getAuth,
+    getRedirectResult,
+    GoogleAuthProvider,
+    onAuthStateChanged,
+    signInWithEmailAndPassword,
+    signInWithPopup,
+    signInWithRedirect,
+    signOut,
 } from 'firebase/auth'
 import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  getFirestore,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  setDoc,
-  writeBatch,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    getFirestore,
+    limit,
+    onSnapshot,
+    orderBy,
+    query,
+    serverTimestamp,
+    setDoc,
+    writeBatch,
 } from 'firebase/firestore'
 import { collectAccessLogPayload } from './accessLog'
 
@@ -52,6 +52,8 @@ googleProvider.setCustomParameters({ prompt: 'select_account' })
 
 const MEDIA_COLLECTION = 'media-items'
 const ACCESS_LOGS_COLLECTION = 'access-logs'
+const SHARED_STATE_COLLECTION = 'shared-state'
+const SHARED_PLAYLISTS_DOC = 'playlists'
 const CHUNK_SIZE = 700_000
 export const MAX_FILE_SIZE = 10 * 1024 * 1024
 const ACCESS_LOG_SESSION_KEY = 'hana-mediabox-access-logged'
@@ -282,6 +284,43 @@ export function subscribeToMediaItems(onData, onError) {
       onData(sortMediaItems(items))
     },
     onError,
+  )
+}
+
+function normalizeSharedPlaylists(playlists) {
+  if (!Array.isArray(playlists)) return []
+  return playlists
+    .filter((item) => item && typeof item === 'object')
+    .map((item) => ({
+      id: String(item.id || ''),
+      name: String(item.name || 'Untitled').slice(0, 40),
+      trackIds: Array.isArray(item.trackIds)
+        ? item.trackIds.filter((id) => typeof id === 'string')
+        : [],
+    }))
+    .filter((item) => item.id)
+}
+
+export function subscribeToSharedPlaylists(onData, onError) {
+  return onSnapshot(
+    doc(db, SHARED_STATE_COLLECTION, SHARED_PLAYLISTS_DOC),
+    (snapshot) => {
+      const data = snapshot.data() || {}
+      const playlists = normalizeSharedPlaylists(data.playlists)
+      onData(playlists, snapshot.exists())
+    },
+    onError,
+  )
+}
+
+export async function saveSharedPlaylists(playlists) {
+  await setDoc(
+    doc(db, SHARED_STATE_COLLECTION, SHARED_PLAYLISTS_DOC),
+    {
+      playlists: normalizeSharedPlaylists(playlists),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
   )
 }
 
