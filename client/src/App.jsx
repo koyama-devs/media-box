@@ -268,6 +268,8 @@ function App() {
   const [playlistNameDraft, setPlaylistNameDraft] = useState('')
   const [renamingPlaylistId, setRenamingPlaylistId] = useState(null)
   const [pendingPlaylistTrackId, setPendingPlaylistTrackId] = useState(null)
+  const [dragPlaylistId, setDragPlaylistId] = useState(null)
+  const [dragOverPlaylistId, setDragOverPlaylistId] = useState(null)
   const [isMediaPlaying, setIsMediaPlaying] = useState(false)
   const [playbackTime, setPlaybackTime] = useState(0)
   const [playbackDuration, setPlaybackDuration] = useState(0)
@@ -443,6 +445,19 @@ function App() {
   const deleteCustomPlaylist = useCallback((playlistId) => {
     setCustomPlaylists((current) => current.filter((playlist) => playlist.id !== playlistId))
     setListFilter((current) => (current === playlistId ? 'all' : current))
+  }, [])
+
+  const reorderCustomPlaylists = useCallback((fromId, toId) => {
+    if (!fromId || !toId || fromId === toId) return
+    setCustomPlaylists((current) => {
+      const fromIndex = current.findIndex((playlist) => playlist.id === fromId)
+      const toIndex = current.findIndex((playlist) => playlist.id === toId)
+      if (fromIndex < 0 || toIndex < 0) return current
+      const next = [...current]
+      const [moved] = next.splice(fromIndex, 1)
+      next.splice(toIndex, 0, moved)
+      return next
+    })
   }, [])
 
   const toggleTrackInPlaylist = useCallback((playlistId, trackId) => {
@@ -1943,12 +1958,42 @@ const playPrevious = useCallback(() => {
                     key={playlist.id}
                     type="button"
                     role="tab"
+                    draggable
                     aria-selected={listFilter === playlist.id}
-                    className={`list-filter-tab${listFilter === playlist.id ? ' is-active' : ''}`}
+                    className={[
+                      'list-filter-tab',
+                      listFilter === playlist.id ? ' is-active' : '',
+                      dragPlaylistId === playlist.id ? ' is-dragging' : '',
+                      dragOverPlaylistId === playlist.id ? ' is-drag-over' : '',
+                    ].join('')}
                     onClick={() => setListFilter(playlist.id)}
                     onDoubleClick={() => {
                       setRenamingPlaylistId(playlist.id)
                       setPlaylistNameDraft(playlist.name)
+                    }}
+                    onDragStart={(event) => {
+                      setDragPlaylistId(playlist.id)
+                      setDragOverPlaylistId(playlist.id)
+                      event.dataTransfer.effectAllowed = 'move'
+                      event.dataTransfer.setData('text/plain', playlist.id)
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault()
+                      event.dataTransfer.dropEffect = 'move'
+                      if (dragOverPlaylistId !== playlist.id) {
+                        setDragOverPlaylistId(playlist.id)
+                      }
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault()
+                      const fromId = event.dataTransfer.getData('text/plain') || dragPlaylistId
+                      reorderCustomPlaylists(fromId, playlist.id)
+                      setDragPlaylistId(null)
+                      setDragOverPlaylistId(null)
+                    }}
+                    onDragEnd={() => {
+                      setDragPlaylistId(null)
+                      setDragOverPlaylistId(null)
                     }}
                     title="ダブルクリックで名前変更"
                   >
