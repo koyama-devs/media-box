@@ -247,6 +247,9 @@ function App() {
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadingFileName, setUploadingFileName] = useState('')
+  const [uploadingFileIndex, setUploadingFileIndex] = useState(0)
+  const [uploadingFileTotal, setUploadingFileTotal] = useState(0)
+  const [uploadTargetPlaylistId, setUploadTargetPlaylistId] = useState('all')
   const [loadingItems, setLoadingItems] = useState(false)
   const [previewUrl, setPreviewUrl] = useState(null)
   const [loadingPreview, setLoadingPreview] = useState(false)
@@ -362,6 +365,13 @@ function App() {
   }, [listFilter, customPlaylists])
 
   useEffect(() => {
+    if (uploadTargetPlaylistId === 'all') return
+    if (!customPlaylists.some((playlist) => playlist.id === uploadTargetPlaylistId)) {
+      setUploadTargetPlaylistId('all')
+    }
+  }, [uploadTargetPlaylistId, customPlaylists])
+
+  useEffect(() => {
     if (!playlistMenuItemId) return undefined
     const onPointerDown = (event) => {
       const target = event.target
@@ -430,6 +440,20 @@ function App() {
             ? playlist.trackIds.filter((id) => id !== trackId)
             : [...playlist.trackIds, trackId],
         }
+      }),
+    )
+  }, [])
+
+  const addTracksToPlaylist = useCallback((playlistId, trackIds) => {
+    if (!playlistId || playlistId === 'all' || !Array.isArray(trackIds) || trackIds.length === 0) return
+    setCustomPlaylists((current) =>
+      current.map((playlist) => {
+        if (playlist.id !== playlistId) return playlist
+        const next = [...playlist.trackIds]
+        for (const id of trackIds) {
+          if (id && !next.includes(id)) next.push(id)
+        }
+        return { ...playlist, trackIds: next }
       }),
     )
   }, [])
@@ -816,14 +840,49 @@ const playPrevious = useCallback(() => {
   const startPlaylist = useCallback(() => {
     const queue = visiblePlayableItems.length > 0 ? visiblePlayableItems : playableItems
     if (queue.length === 0) return
+
     setPlaylistMode(true)
+
     const inQueue =
       selectedItem &&
       selectedItem.kind !== 'image' &&
       queue.some((item) => item.id === selectedItem.id)
-    const startId = inQueue ? selectedItem.id : queue[0].id
-    selectItem(startId, true)
-  }, [visiblePlayableItems, playableItems, selectedItem, selectItem])
+    const startItem = inQueue ? selectedItem : queue[0]
+    if (!startItem) return
+
+    // Cùng bài đang chọn: selectItem không đổi state → effect không chạy → phải play() ngay trong click
+    if (selectedItem?.id === startItem.id) {
+      shouldAutoPlayRef.current = true
+      const media = mediaRef.current
+      if (media && previewUrl && !loadingPreview) {
+        if (media.ended) {
+          media.currentTime = 0
+        }
+        const playPromise = media.play()
+        if (playPromise) {
+          playPromise
+            .then(() => {
+              shouldAutoPlayRef.current = false
+            })
+            .catch(() => {
+              // Mobile có thể chờ canplay — giữ shouldAutoPlayRef
+            })
+        }
+        return
+      }
+      selectItem(startItem.id, true)
+      return
+    }
+
+    selectItem(startItem.id, true)
+  }, [
+    visiblePlayableItems,
+    playableItems,
+    selectedItem,
+    selectItem,
+    previewUrl,
+    loadingPreview,
+  ])
 
   const handleMediaEnded = useCallback(() => {
     if (!playlistMode) return
@@ -1123,44 +1182,89 @@ const playPrevious = useCallback(() => {
   }
 
   const handleUpload = async (event) => {
-    const file = event.target.files?.[0]
-    if (!file) return
+    const files = Array.from(event.target.files || [])
+    if (files.length === 0) return
 
-    const kind = getMediaKind(file.type, file.name)
-    if (kind === 'file') {
-      setError('動画・音声・画像ファイルのみ対応しています。')
+    const validFiles = []
+    const skipped = []
+
+    for (const file of files) {
+      const kind = getMediaKind(file.type, file.name)
+      if (kind === 'file') {
+        skipped.push(`${file.name}（形式非対応）`)
+        continue
+      }
+      if (file.size > MAX_FILE_SIZE) {
+        skipped.push(`${file.name}（${formatSize(MAX_FILE_SIZE)}超）`)
+        continue
+      }
+      validFiles.push(file)
+    }
+
+    if (validFiles.length === 0) {
+      setError(
+        skipped.length > 0
+          ? `アップロードできませんでした: ${skipped.join('、')}`
+          : '動画・音声・画像ファイルのみ対応しています。',
+      )
       event.target.value = ''
       return
     }
 
-    if (file.size > MAX_FILE_SIZE) {
-      setError(`ファイルは${formatSize(MAX_FILE_SIZE)}以下にしてください。`)
-      event.target.value = ''
-      return
-    }
+    const targetPlaylistId = uploadTargetPlaylistId
+    const targetExists =
+      targetPlaylistId === 'all' ||
+      customPlaylists.some((playlist) => playlist.id === targetPlaylistId)
+    const playlistForUpload = targetExists ? targetPlaylistId : 'all'
 
     setUploading(true)
     setUploadProgress(0)
-    setUploadingFileName(file.name)
-    setError('')
+    setUploadingFileIndex(0)
+    setUploadingFileTotal(validFiles.length)
+    setError(skipped.length > 0 ? `一部スキップ: ${skipped.join('、')}` : '')
+
+    const uploadedPlayableIds = []
+    let nextOrder =
+      playableItems.reduce(
+        (max, item) => Math.max(max, typeof item.order === 'number' ? item.order : -1),
+        -1,
+      ) + 1
+    let lastPlayableId = null
 
     try {
-      const metadata = createMediaMetadata(file, {
-        inLibrary: kind === 'image',
-        ...(kind === 'image'
-          ? {}
-          : {
-              order:
-                playableItems.reduce(
-                  (max, item) => Math.max(max, typeof item.order === 'number' ? item.order : -1),
-                  -1,
-                ) + 1,
-            }),
-      })
-      const id = await uploadMediaFile(file, metadata, setUploadProgress)
-      // Ảnh thư viện không nhảy sang preview / playlist
-      if (kind !== 'image') {
-        setSelectedItemId(id)
+      for (let index = 0; index < validFiles.length; index += 1) {
+        const file = validFiles[index]
+        const kind = getMediaKind(file.type, file.name)
+        setUploadingFileIndex(index + 1)
+        setUploadingFileName(file.name)
+        setUploadProgress(0)
+
+        const metadata = createMediaMetadata(file, {
+          inLibrary: kind === 'image',
+          ...(kind === 'image'
+            ? {}
+            : {
+                order: nextOrder,
+              }),
+        })
+        if (kind !== 'image') {
+          nextOrder += 1
+        }
+
+        const id = await uploadMediaFile(file, metadata, setUploadProgress)
+        if (kind !== 'image') {
+          uploadedPlayableIds.push(id)
+          lastPlayableId = id
+        }
+      }
+
+      if (playlistForUpload !== 'all' && uploadedPlayableIds.length > 0) {
+        addTracksToPlaylist(playlistForUpload, uploadedPlayableIds)
+        setListFilter(playlistForUpload)
+      }
+
+      if (lastPlayableId) {
+        setSelectedItemId(lastPlayableId)
       }
       setLoadingItems(false)
     } catch (uploadError) {
@@ -1170,6 +1274,8 @@ const playPrevious = useCallback(() => {
       setUploading(false)
       setUploadProgress(0)
       setUploadingFileName('')
+      setUploadingFileIndex(0)
+      setUploadingFileTotal(0)
       event.target.value = ''
     }
   }
@@ -1479,11 +1585,16 @@ const playPrevious = useCallback(() => {
             <div>
               <p className="eyebrow">すぐアップロード</p>
               <h3>メディアを共有ボックスへ追加</h3>
-              <p className="hint">1ファイルあたり最大 {formatSize(MAX_FILE_SIZE)}。画像は画像ライブラリへ入ります。</p>
+              <p className="hint">
+                複数選択可・1ファイル最大 {formatSize(MAX_FILE_SIZE)}。画像は画像ライブラリへ。
+                プレイリスト未選択時は再生リスト（すべて）へ入ります。
+              </p>
               {uploading ? (
                 <div className="upload-progress-wrap">
                   <p className="upload-progress-label">
-                    {uploadingFileName} — {uploadProgress}%
+                    {uploadingFileTotal > 1
+                      ? `${uploadingFileIndex}/${uploadingFileTotal} — ${uploadingFileName} — ${uploadProgress}%`
+                      : `${uploadingFileName} — ${uploadProgress}%`}
                   </p>
                   <div className="upload-progress-track" aria-hidden="true">
                     <div className="upload-progress-bar" style={{ width: `${uploadProgress}%` }} />
@@ -1491,10 +1602,45 @@ const playPrevious = useCallback(() => {
                 </div>
               ) : null}
             </div>
-            <label className={`upload-button ${uploading ? 'disabled' : ''}`} htmlFor="video-upload">
-              {uploading ? 'アップロード中...' : 'ファイルを追加'}
-            </label>
-            <input id="video-upload" type="file" accept="video/*,audio/*,image/*" disabled={uploading} onChange={handleUpload} />
+            <div className="upload-actions">
+              <label className="upload-playlist-label" htmlFor="upload-playlist-target">
+                <span className="upload-playlist-caption">追加先</span>
+                <select
+                  id="upload-playlist-target"
+                  className="upload-playlist-select"
+                  value={
+                    uploadTargetPlaylistId === 'all' ||
+                    customPlaylists.some((playlist) => playlist.id === uploadTargetPlaylistId)
+                      ? uploadTargetPlaylistId
+                      : 'all'
+                  }
+                  disabled={uploading}
+                  onChange={(event) => setUploadTargetPlaylistId(event.target.value)}
+                >
+                  <option value="all">すべて（再生リスト）</option>
+                  {customPlaylists.map((playlist) => (
+                    <option key={playlist.id} value={playlist.id}>
+                      {playlist.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className={`upload-button ${uploading ? 'disabled' : ''}`} htmlFor="video-upload">
+                {uploading
+                  ? uploadingFileTotal > 1
+                    ? `アップロード中... (${uploadingFileIndex}/${uploadingFileTotal})`
+                    : 'アップロード中...'
+                  : 'ファイルを追加'}
+              </label>
+              <input
+                id="video-upload"
+                type="file"
+                accept="video/*,audio/*,image/*"
+                multiple
+                disabled={uploading}
+                onChange={handleUpload}
+              />
+            </div>
           </section>
 
           {error ? <p className="message error">{error}</p> : null}
