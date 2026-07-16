@@ -29,6 +29,11 @@ service cloud.firestore {
       allow read, update, delete: if request.auth != null;
     }
 
+    // Shared playlist state used by all clients on the same app account/password.
+    match /shared-state/{docId} {
+      allow read, write: if true;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
