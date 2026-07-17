@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+﻿import { useEffect, useMemo, useRef, useState } from 'react'
 import jacketSakuraUrl from './assets/vinyl-jacket-0-sakura.svg?url'
 import jacketPosterUrl from './assets/vinyl-jacket-1-poster.svg?url'
 import jacketRecordUrl from './assets/vinyl-jacket-2-record.svg?url'
@@ -13,6 +13,27 @@ const JACKET_FALLBACKS = {
   paper: jacketPaperUrl,
   record: jacketRecordUrl,
 }
+
+const POSTCARD_THEMES = [
+  {
+    id: 'night',
+    label: 'Night',
+    gradient: ['#1a2338', '#0c121c', '#05070d'],
+    glow: 'rgba(96, 165, 250, 0.28)',
+  },
+  {
+    id: 'sakura',
+    label: 'Sakura',
+    gradient: ['#3b1f35', '#23162a', '#12101e'],
+    glow: 'rgba(244, 114, 182, 0.26)',
+  },
+  {
+    id: 'retro',
+    label: 'Retro',
+    gradient: ['#2a2e4f', '#1e1d34', '#10101f'],
+    glow: 'rgba(251, 191, 36, 0.24)',
+  },
+]
 
 function resolveJacketUrl(jacketSrc, jacketStyleId) {
   if (jacketSrc) return jacketSrc
@@ -78,6 +99,7 @@ async function renderPostcardCanvas({
   jacketUrl,
   coverUrl,
   shareUrl,
+  themeId = 'night',
 }) {
   if (document.fonts?.ready) {
     try {
@@ -95,16 +117,17 @@ async function renderPostcardCanvas({
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('canvas unavailable')
 
+  const theme = POSTCARD_THEMES.find((entry) => entry.id === themeId) || POSTCARD_THEMES[0]
   const gradient = ctx.createLinearGradient(0, 0, width, height)
-  gradient.addColorStop(0, '#1a2338')
-  gradient.addColorStop(0.45, '#0c121c')
-  gradient.addColorStop(1, '#05070d')
+  gradient.addColorStop(0, theme.gradient[0])
+  gradient.addColorStop(0.45, theme.gradient[1])
+  gradient.addColorStop(1, theme.gradient[2])
   ctx.fillStyle = gradient
   ctx.fillRect(0, 0, width, height)
 
   // Soft glow
   const glow = ctx.createRadialGradient(width * 0.7, height * 0.22, 20, width * 0.7, height * 0.22, 360)
-  glow.addColorStop(0, 'rgba(96, 165, 250, 0.28)')
+  glow.addColorStop(0, theme.glow)
   glow.addColorStop(1, 'rgba(96, 165, 250, 0)')
   ctx.fillStyle = glow
   ctx.fillRect(0, 0, width, height)
@@ -245,6 +268,7 @@ export default function ListeningPostcard({
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
   const [localError, setLocalError] = useState('')
+  const [themeId, setThemeId] = useState('night')
   const cardRef = useRef(null)
 
   const jacketUrl = useMemo(
@@ -257,6 +281,7 @@ export default function ListeningPostcard({
     setBusy(false)
     setStatus('')
     setLocalError('')
+    setThemeId('night')
     const onKey = (event) => {
       if (event.key === 'Escape') onClose?.()
     }
@@ -266,6 +291,8 @@ export default function ListeningPostcard({
 
   if (!open) return null
 
+  const activeTheme = POSTCARD_THEMES.find((entry) => entry.id === themeId) || POSTCARD_THEMES[0]
+
   const buildCanvas = () =>
     renderPostcardCanvas({
       title,
@@ -274,6 +301,7 @@ export default function ListeningPostcard({
       jacketUrl,
       coverUrl: coverSrc,
       shareUrl,
+      themeId,
     })
 
   const handleCopyLink = async () => {
@@ -373,7 +401,16 @@ export default function ListeningPostcard({
           </button>
         </div>
 
-        <article className="postcard-card" ref={cardRef}>
+        <article
+          className="postcard-card"
+          ref={cardRef}
+          style={{
+            '--postcard-gradient-0': activeTheme.gradient[0],
+            '--postcard-gradient-1': activeTheme.gradient[1],
+            '--postcard-gradient-2': activeTheme.gradient[2],
+            '--postcard-glow': activeTheme.glow,
+          }}
+        >
           <div className="postcard-card-top">
             <span>Hana Media Box</span>
             <span>この曲への招待</span>
@@ -399,6 +436,21 @@ export default function ListeningPostcard({
           )}
           <p className="postcard-url">{shareUrl}</p>
         </article>
+
+        {mode === 'share' ? (
+          <div className="postcard-theme-picker" role="group" aria-label="カードテーマ">
+            {POSTCARD_THEMES.map((theme) => (
+              <button
+                key={theme.id}
+                type="button"
+                className={`postcard-theme-chip${theme.id === themeId ? ' is-active' : ''}`}
+                onClick={() => setThemeId(theme.id)}
+              >
+                {theme.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         {status ? <p className="postcard-status">{status}</p> : null}
         {localError ? <p className="postcard-error">{localError}</p> : null}

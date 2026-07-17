@@ -2344,6 +2344,7 @@
 }
 
 .today-play,
+.today-shuffle,
 .today-skip {
   min-width: 148px;
 }
@@ -2354,6 +2355,48 @@
   color: rgba(148, 163, 184, 0.95);
   opacity: 0;
   animation: today-rise 0.6s ease 0.4s forwards;
+}
+
+.today-history {
+  margin-top: 12px;
+  opacity: 0;
+  animation: today-rise 0.6s ease 0.5s forwards;
+}
+
+.today-history-label {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.92);
+}
+
+.today-history-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.today-history-item {
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.5);
+  color: #e2e8f0;
+  border-radius: 999px;
+  padding: 6px 10px;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  max-width: min(100%, 280px);
+}
+
+.today-history-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today-history-item small {
+  color: rgba(148, 163, 184, 0.9);
 }
 
 @keyframes today-drift {
@@ -2447,9 +2490,21 @@
   padding: 18px 16px 16px;
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background:
-    linear-gradient(160deg, rgba(26, 35, 56, 0.95), rgba(12, 18, 28, 0.98));
+  background: linear-gradient(
+    160deg,
+    var(--postcard-gradient-0, rgba(26, 35, 56, 0.95)),
+    var(--postcard-gradient-1, rgba(12, 18, 28, 0.98)),
+    var(--postcard-gradient-2, rgba(5, 7, 13, 1))
+  );
   overflow: hidden;
+}
+
+.postcard-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 72% 18%, var(--postcard-glow, rgba(96, 165, 250, 0.22)), transparent 38%);
+  pointer-events: none;
 }
 
 .postcard-card-top {
@@ -2547,6 +2602,27 @@
   margin: 10px 0 0;
   font-size: 0.82rem;
   color: #93c5fd;
+}
+
+.postcard-theme-picker {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.postcard-theme-chip {
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.45);
+  color: #cbd5e1;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+}
+
+.postcard-theme-chip.is-active {
+  border-color: rgba(96, 165, 250, 0.8);
+  color: #dbeafe;
+  background: rgba(37, 99, 235, 0.28);
 }
 
 .postcard-error {

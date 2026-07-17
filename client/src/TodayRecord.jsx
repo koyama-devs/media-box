@@ -7,7 +7,11 @@ export default function TodayRecord({
   quoteLines = [],
   jacketUrl = '',
   onPlay,
+  onShuffle,
   onSkip,
+  shuffleRemaining = 0,
+  history = [],
+  onPickFromHistory,
 }) {
   const [visible, setVisible] = useState(false)
 
@@ -50,6 +54,15 @@ export default function TodayRecord({
           <button type="button" className="primary-button today-play" onClick={onPlay}>
             この曲を再生
           </button>
+          <button
+            type="button"
+            className="secondary-button today-shuffle"
+            onClick={onShuffle}
+            disabled={!onShuffle || shuffleRemaining <= 0}
+            title={shuffleRemaining > 0 ? `あと${shuffleRemaining}回` : '本日の変更回数を使い切りました'}
+          >
+            別のおすすめ（あと{shuffleRemaining}回）
+          </button>
           <button type="button" className="secondary-button today-skip" onClick={onSkip}>
             とばす
           </button>
@@ -60,6 +73,25 @@ export default function TodayRecord({
           {dateLabel ? <span aria-hidden="true"> · </span> : null}
           <span>{title || '無題'}</span>
         </p>
+
+        {history.length > 0 ? (
+          <div className="today-history" aria-label="最近の今日の一曲">
+            <p className="today-history-label">最近のおすすめ</p>
+            <div className="today-history-list">
+              {history.map((item) => (
+                <button
+                  key={`${item.id}-${item.dateKey}`}
+                  type="button"
+                  className="today-history-item"
+                  onClick={() => onPickFromHistory?.(item.id)}
+                >
+                  <span>{item.title || '無題'}</span>
+                  <small>{item.dateKey}</small>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
     </section>
   )

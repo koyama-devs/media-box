@@ -23,12 +23,16 @@ import ListeningPostcard from './ListeningPostcard'
 import { pickPostcardLyric } from './lyrics'
 import LyricsPanel from './LyricsPanel'
 import {
+    appendTodayRecordHistory,
     formatTodayDateLabel,
+    getTodayShuffleRemaining,
     isTodayRecordShown,
+    loadTodayRecordHistory,
     markTodayRecordShown,
     pickTodayAudioItem,
     resolveJacketUrl,
     resolveTodayReveal,
+    useTodayShuffle,
 } from './todayPick'
 import TodayRecord from './TodayRecord'
 import {
@@ -302,6 +306,10 @@ function App() {
   const [postcardCoverUrl, setPostcardCoverUrl] = useState(null)
   const [todayOpen, setTodayOpen] = useState(() => !isTodayRecordShown())
   const [todayJacketUrl, setTodayJacketUrl] = useState(null)
+  const [todayOverrideId, setTodayOverrideId] = useState(null)
+  const [todayPickedIds, setTodayPickedIds] = useState([])
+  const [todayHistory, setTodayHistory] = useState(() => loadTodayRecordHistory())
+  const [todayShuffleRemaining, setTodayShuffleRemaining] = useState(() => getTodayShuffleRemaining())
   const [pendingDeleteId, setPendingDeleteId] = useState(null)
   const [swipeReveal, setSwipeReveal] = useState(null)
   const urlTrackAppliedRef = useRef(false)
@@ -335,11 +343,16 @@ function App() {
     [items],
   )
 
-  const todayItem = useMemo(() => {
+  const todayBaseItem = useMemo(() => {
     if (!isLoggedIn || !todayOpen || skipTodayFromDeepLinkRef.current) return null
     if (!playlistSyncReady) return null
     return pickTodayAudioItem(playableItems, customPlaylists)
   }, [isLoggedIn, todayOpen, playableItems, customPlaylists, playlistSyncReady])
+
+  const todayItem = useMemo(() => {
+    if (!todayOverrideId) return todayBaseItem
+    return playableItems.find((item) => item.id === todayOverrideId) || todayBaseItem
+  }, [todayOverrideId, playableItems, todayBaseItem])
 
   const todayReveal = useMemo(
     () => resolveTodayReveal(todayItem),
@@ -353,6 +366,18 @@ function App() {
       && !loadingItems
       && playlistSyncReady
       && !skipTodayFromDeepLinkRef.current,
+  )
+
+  const todayHistoryView = useMemo(
+    () =>
+      todayHistory
+        .filter((entry) => entry?.id && entry.id !== todayItem?.id)
+        .map((entry) => ({
+          ...entry,
+          title: entry.title || getDisplayName(items.find((item) => item.id === entry.id)?.name || ''),
+        }))
+        .slice(0, 8),
+    [todayHistory, todayItem?.id, items],
   )
 
   const favoriteIdSet = useMemo(() => new Set(favoriteIds), [favoriteIds])
@@ -545,6 +570,8 @@ function App() {
 
     // One show per device per day — mark as soon as the hero is displayed.
     markTodayRecordShown()
+    appendTodayRecordHistory({ id: todayItem.id, title: getDisplayName(todayItem.name) })
+    setTodayHistory(loadTodayRecordHistory())
 
     let cancelled = false
     const loadJacket = async () => {
@@ -570,6 +597,14 @@ function App() {
       cancelled = true
     }
   }, [todayItem, showTodayHero, items, ensureMediaUrl])
+
+  useEffect(() => {
+    if (!showTodayHero) return
+    setTodayShuffleRemaining(getTodayShuffleRemaining())
+    if (todayBaseItem?.id) {
+      setTodayPickedIds((current) => Array.from(new Set([...current, todayBaseItem.id])))
+    }
+  }, [showTodayHero, todayBaseItem?.id])
 
   const prefetchMediaUrl = useCallback((item) => {
     if (!item || item.kind === 'image') return
@@ -597,6 +632,9 @@ function App() {
     markTodayRecordShown()
     setTodayOpen(false)
     setTodayJacketUrl(null)
+    setTodayOverrideId(null)
+    setTodayPickedIds([])
+    setTodayShuffleRemaining(getTodayShuffleRemaining())
   }, [])
 
   const playTodayRecord = useCallback(() => {
@@ -605,6 +643,29 @@ function App() {
     setPlaylistMode(true)
     selectItem(todayItem.id, true)
   }, [todayItem, skipTodayHero, selectItem])
+
+  const shuffleTodayRecord = useCallback(() => {
+    if (!todayItem || todayShuffleRemaining <= 0) return
+    const excludeIds = Array.from(new Set([...todayPickedIds, todayItem.id]))
+    const next = pickTodayAudioItem(playableItems, customPlaylists, { excludeIds })
+    if (!next || next.id === todayItem.id) return
+    if (!useTodayShuffle()) return
+    setTodayShuffleRemaining(getTodayShuffleRemaining())
+    setTodayOverrideId(next.id)
+    setTodayPickedIds((current) => Array.from(new Set([...current, next.id])))
+  }, [todayItem, todayShuffleRemaining, todayPickedIds, playableItems, customPlaylists])
+
+  const pickFromTodayHistory = useCallback(
+    (itemId) => {
+      if (!itemId) return
+      const item = playableItems.find((entry) => entry.id === itemId)
+      if (!item || item.kind !== 'audio') return
+      skipTodayHero()
+      setPlaylistMode(true)
+      selectItem(item.id, true)
+    },
+    [playableItems, skipTodayHero, selectItem],
+  )
 
   useEffect(() => {
     recordAccessVisit().catch((accessError) => {
@@ -1845,7 +1906,11 @@ const playPrevious = useCallback(() => {
           quoteLines={todayReveal.quote}
           jacketUrl={todayJacketUrl || resolveJacketUrl(null, todayItem.jacketStyle || null)}
           onPlay={playTodayRecord}
+          onShuffle={shuffleTodayRecord}
+          shuffleRemaining={todayShuffleRemaining}
           onSkip={skipTodayHero}
+          history={todayHistoryView}
+          onPickFromHistory={pickFromTodayHistory}
         />
       ) : (
         <>

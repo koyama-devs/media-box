@@ -5,6 +5,9 @@ import jacketPaperUrl from './assets/vinyl-jacket-3-paper.svg?url'
 import jacketPetalUrl from './assets/vinyl-jacket-4-petal.svg?url'
 
 const SHOWN_KEY = 'hana-today-ichimai-shown-date'
+const HISTORY_KEY = 'hana-today-record-history'
+const SHUFFLE_KEY = 'hana-today-record-shuffle'
+const DEFAULT_DAILY_SHUFFLE_LIMIT = 3
 const LEGACY_SHOWN_KEYS = [
   'hana-tonight-dismissed-date',
   'hana-today-record-shown-date',
@@ -60,6 +63,17 @@ export function formatTodayDateLabel(date = new Date()) {
   })
 }
 
+function readLocalJson(key, fallback) {
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (!raw) return fallback
+    const parsed = JSON.parse(raw)
+    return parsed ?? fallback
+  } catch {
+    return fallback
+  }
+}
+
 function clearLegacyShownKeys() {
   try {
     for (const key of LEGACY_SHOWN_KEYS) {
@@ -96,6 +110,61 @@ export function resetTodayRecordShown() {
   } catch {
     /* ignore */
   }
+}
+
+export function loadTodayRecordHistory() {
+  const data = readLocalJson(HISTORY_KEY, [])
+  return Array.isArray(data) ? data : []
+}
+
+export function appendTodayRecordHistory(entry, date = new Date()) {
+  if (!entry?.id) return
+  const dateKey = getLocalDateKey(date)
+  const nextEntry = {
+    id: entry.id,
+    title: String(entry.title || ''),
+    dateKey,
+    timestamp: Date.now(),
+  }
+  const history = loadTodayRecordHistory()
+  const filtered = history.filter((item) => !(item.id === nextEntry.id && item.dateKey === dateKey))
+  const next = [nextEntry, ...filtered].slice(0, 20)
+  try {
+    window.localStorage.setItem(HISTORY_KEY, JSON.stringify(next))
+  } catch {
+    /* ignore */
+  }
+}
+
+function ensureShuffleState(date = new Date()) {
+  const dateKey = getLocalDateKey(date)
+  const state = readLocalJson(SHUFFLE_KEY, null)
+  if (!state || state.dateKey !== dateKey) {
+    return { dateKey, used: 0, limit: DEFAULT_DAILY_SHUFFLE_LIMIT }
+  }
+  const used = Number.isFinite(state.used) ? Math.max(0, state.used) : 0
+  const limit = Number.isFinite(state.limit) ? Math.max(0, state.limit) : DEFAULT_DAILY_SHUFFLE_LIMIT
+  return { dateKey, used, limit }
+}
+
+function saveShuffleState(state) {
+  try {
+    window.localStorage.setItem(SHUFFLE_KEY, JSON.stringify(state))
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getTodayShuffleRemaining(date = new Date()) {
+  const state = ensureShuffleState(date)
+  return Math.max(0, state.limit - state.used)
+}
+
+export function useTodayShuffle(date = new Date()) {
+  const state = ensureShuffleState(date)
+  if (state.used >= state.limit) return false
+  saveShuffleState({ ...state, used: state.used + 1 })
+  return true
 }
 
 function hashString(value) {
@@ -147,9 +216,12 @@ function newestAudio(pool) {
  * Newest audio for Today's record.
  * Prefer music playlists; never prefer English-study playlists.
  */
-export function pickTodayAudioItem(items, customPlaylists = []) {
+export function pickTodayAudioItem(items, customPlaylists = [], options = {}) {
   const audioItems = (Array.isArray(items) ? items : []).filter((item) => item?.kind === 'audio')
   if (audioItems.length === 0) return null
+  const excludeSet = new Set(Array.isArray(options.excludeIds) ? options.excludeIds : [])
+  const availableAudioItems = audioItems.filter((item) => !excludeSet.has(item.id))
+  const source = availableAudioItems.length > 0 ? availableAudioItems : audioItems
 
   const playlists = Array.isArray(customPlaylists) ? customPlaylists : []
   const studyPlaylists = playlists.filter(isStudyPlaylistName)
@@ -158,7 +230,7 @@ export function pickTodayAudioItem(items, customPlaylists = []) {
     (playlist) => !isStudyPlaylistName(playlist) && !isMusicPlaylistName(playlist),
   )
 
-  const fromIds = (ids) => audioItems.filter((item) => ids.has(item.id))
+  const fromIds = (ids) => source.filter((item) => ids.has(item.id))
 
   if (musicPlaylists.length > 0) {
     const fromMusic = fromIds(trackIdsFrom(musicPlaylists))
@@ -172,11 +244,11 @@ export function pickTodayAudioItem(items, customPlaylists = []) {
 
   if (studyPlaylists.length > 0) {
     const studyIds = trackIdsFrom(studyPlaylists)
-    const outsideStudy = audioItems.filter((item) => !studyIds.has(item.id))
+    const outsideStudy = source.filter((item) => !studyIds.has(item.id))
     if (outsideStudy.length > 0) return newestAudio(outsideStudy)
   }
 
-  return newestAudio(audioItems)
+  return newestAudio(source)
 }
 
 function normalizePlaylistName(name) {
