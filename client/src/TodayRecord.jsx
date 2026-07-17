@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { listeningSpaceStyleVars, resolveListeningSpace } from './listeningSpaces'
+import SpaceScenery from './SpaceScenery'
 
 export default function TodayRecord({
   brand = 'Hana Media Box',
@@ -6,6 +8,8 @@ export default function TodayRecord({
   title = '',
   quoteLines = [],
   jacketUrl = '',
+  spaceId = 'ocean-night',
+  backgroundUrl = null,
   onPlay,
   onShuffle,
   onSkip,
@@ -21,22 +25,25 @@ export default function TodayRecord({
   }, [])
 
   const quoteLinesFiltered = Array.isArray(quoteLines) ? quoteLines.filter(Boolean) : []
+  const space = resolveListeningSpace(spaceId)
 
   return (
     <section
-      className={`today-record${visible ? ' is-visible' : ''}`}
+      className={`today-record today-record--space${visible ? ' is-visible' : ''}`}
       aria-label="今日の一曲"
-      style={
-        jacketUrl
-          ? { '--today-jacket': `url("${jacketUrl}")` }
-          : undefined
-      }
+      style={{
+        ...listeningSpaceStyleVars(spaceId),
+        ...(jacketUrl ? { '--today-jacket': `url("${jacketUrl}")` } : {}),
+      }}
     >
       <div className="today-record-plane" aria-hidden="true" />
+      <div className="today-record-space-veil" aria-hidden="true" />
+      <SpaceScenery spaceId={spaceId} className="today-record-scenery" variant="hero" backgroundUrl={backgroundUrl || null} />
       <div className="today-record-veil" aria-hidden="true" />
 
       <div className="today-record-stage">
         <p className="today-brand">{brand}</p>
+        <p className="today-space-label">{space.label}</p>
         <h1 className="today-headline">今日の一曲</h1>
         <p className="today-support">
           {quoteLinesFiltered.length > 0 ? (

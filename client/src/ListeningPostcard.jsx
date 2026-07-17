@@ -5,6 +5,12 @@ import jacketRecordUrl from './assets/vinyl-jacket-2-record.svg?url'
 import jacketPaperUrl from './assets/vinyl-jacket-3-paper.svg?url'
 import jacketPetalUrl from './assets/vinyl-jacket-4-petal.svg?url'
 import defaultLabelUrl from './assets/vinyl-label-default.svg?url'
+import {
+    getPostcardThemeFromSpace,
+    LISTENING_SPACES,
+    loadSavedListeningSpaceId,
+} from './listeningSpaces'
+import SpaceScenery, { SpaceSceneryPreview } from './SpaceScenery'
 
 const JACKET_FALLBACKS = {
   petal: jacketPetalUrl,
@@ -13,27 +19,6 @@ const JACKET_FALLBACKS = {
   paper: jacketPaperUrl,
   record: jacketRecordUrl,
 }
-
-const POSTCARD_THEMES = [
-  {
-    id: 'night',
-    label: 'Night',
-    gradient: ['#1a2338', '#0c121c', '#05070d'],
-    glow: 'rgba(96, 165, 250, 0.28)',
-  },
-  {
-    id: 'sakura',
-    label: 'Sakura',
-    gradient: ['#3b1f35', '#23162a', '#12101e'],
-    glow: 'rgba(244, 114, 182, 0.26)',
-  },
-  {
-    id: 'retro',
-    label: 'Retro',
-    gradient: ['#2a2e4f', '#1e1d34', '#10101f'],
-    glow: 'rgba(251, 191, 36, 0.24)',
-  },
-]
 
 function resolveJacketUrl(jacketSrc, jacketStyleId) {
   if (jacketSrc) return jacketSrc
@@ -99,7 +84,8 @@ async function renderPostcardCanvas({
   jacketUrl,
   coverUrl,
   shareUrl,
-  themeId = 'night',
+  spaceId = 'ocean-night',
+  spaceTagline = '',
 }) {
   if (document.fonts?.ready) {
     try {
@@ -117,7 +103,7 @@ async function renderPostcardCanvas({
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('canvas unavailable')
 
-  const theme = POSTCARD_THEMES.find((entry) => entry.id === themeId) || POSTCARD_THEMES[0]
+  const theme = getPostcardThemeFromSpace(spaceId)
   const gradient = ctx.createLinearGradient(0, 0, width, height)
   gradient.addColorStop(0, theme.gradient[0])
   gradient.addColorStop(0.45, theme.gradient[1])
@@ -131,6 +117,13 @@ async function renderPostcardCanvas({
   glow.addColorStop(1, 'rgba(96, 165, 250, 0)')
   ctx.fillStyle = glow
   ctx.fillRect(0, 0, width, height)
+
+  const horizon = ctx.createLinearGradient(0, height * 0.42, 0, height * 0.58)
+  horizon.addColorStop(0, 'rgba(255, 255, 255, 0)')
+  horizon.addColorStop(0.5, 'rgba(255, 255, 255, 0.08)')
+  horizon.addColorStop(1, 'rgba(255, 255, 255, 0)')
+  ctx.fillStyle = horizon
+  ctx.fillRect(0, height * 0.34, width, height * 0.3)
 
   ctx.fillStyle = 'rgba(148, 163, 184, 0.9)'
   ctx.font = '500 22px "Cormorant Garamond", "Times New Roman", serif'
@@ -213,7 +206,18 @@ async function renderPostcardCanvas({
     ctx.fillText(line, 72, textTop + index * 52)
   })
 
-  let quoteY = textTop + titleLines.length * 52 + 36
+  let quoteY = textTop + titleLines.length * 52 + 28
+  if (spaceTagline) {
+    ctx.fillStyle = 'rgba(226, 232, 240, 0.88)'
+    ctx.font = 'italic 24px "Hiragino Mincho ProN", "Yu Mincho", "Cormorant Garamond", serif'
+    const taglineLines = wrapCanvasText(ctx, spaceTagline, width - 144).slice(0, 2)
+    taglineLines.forEach((line, index) => {
+      ctx.fillText(line, 72, quoteY + index * 34)
+    })
+    quoteY += taglineLines.length * 34 + 16
+  }
+
+  quoteY += 8
   if (lyricJa || lyricEn) {
     ctx.fillStyle = 'rgba(96, 165, 250, 0.85)'
     ctx.font = '500 16px Inter, "Segoe UI", sans-serif'
@@ -262,13 +266,14 @@ export default function ListeningPostcard({
   jacketSrc = null,
   jacketStyleId = null,
   coverSrc = null,
+  initialSpaceId = null,
   onClose,
   onShareFile = null,
 }) {
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
   const [localError, setLocalError] = useState('')
-  const [themeId, setThemeId] = useState('night')
+  const [spaceId, setSpaceId] = useState(initialSpaceId || loadSavedListeningSpaceId())
   const cardRef = useRef(null)
 
   const jacketUrl = useMemo(
@@ -281,17 +286,17 @@ export default function ListeningPostcard({
     setBusy(false)
     setStatus('')
     setLocalError('')
-    setThemeId('night')
+    setSpaceId(initialSpaceId || loadSavedListeningSpaceId())
     const onKey = (event) => {
       if (event.key === 'Escape') onClose?.()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  }, [open, onClose, initialSpaceId])
 
   if (!open) return null
 
-  const activeTheme = POSTCARD_THEMES.find((entry) => entry.id === themeId) || POSTCARD_THEMES[0]
+  const activeTheme = getPostcardThemeFromSpace(spaceId)
 
   const buildCanvas = () =>
     renderPostcardCanvas({
@@ -301,7 +306,8 @@ export default function ListeningPostcard({
       jacketUrl,
       coverUrl: coverSrc,
       shareUrl,
-      themeId,
+      spaceId,
+      spaceTagline: activeTheme.tagline,
     })
 
   const handleCopyLink = async () => {
@@ -411,9 +417,11 @@ export default function ListeningPostcard({
             '--postcard-glow': activeTheme.glow,
           }}
         >
+          <SpaceScenery spaceId={spaceId} className="postcard-card-scenery" variant="card" />
+          <div className="postcard-card-content">
           <div className="postcard-card-top">
             <span>Hana Media Box</span>
-            <span>この曲への招待</span>
+            <span>{activeTheme.label}で聴く</span>
           </div>
           <div
             className="postcard-jacket"
@@ -432,20 +440,23 @@ export default function ListeningPostcard({
               {lyricEn ? <p className="postcard-quote-en">{lyricEn}</p> : null}
             </blockquote>
           ) : null}
+          <p className="postcard-space-tagline">{activeTheme.tagline}</p>
           <p className="postcard-quote-fallback">いま、この一枚をあなたへ。</p>
           <p className="postcard-url">{shareUrl}</p>
+          </div>
         </article>
 
         {mode === 'share' ? (
-          <div className="postcard-theme-picker" role="group" aria-label="カードテーマ">
-            {POSTCARD_THEMES.map((theme) => (
+          <div className="postcard-theme-picker" role="group" aria-label="聴く場所">
+            {LISTENING_SPACES.map((space) => (
               <button
-                key={theme.id}
+                key={space.id}
                 type="button"
-                className={`postcard-theme-chip${theme.id === themeId ? ' is-active' : ''}`}
-                onClick={() => setThemeId(theme.id)}
+                className={`postcard-theme-chip${space.id === spaceId ? ' is-active' : ''}`}
+                onClick={() => setSpaceId(space.id)}
               >
-                {theme.label}
+                <SpaceSceneryPreview spaceId={space.id} />
+                <span>{space.labelShort}</span>
               </button>
             ))}
           </div>

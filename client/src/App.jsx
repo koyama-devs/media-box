@@ -20,6 +20,16 @@ import {
     uploadMediaFile,
 } from './firebase'
 import ListeningPostcard from './ListeningPostcard'
+import ListeningSpace from './ListeningSpace'
+import {
+    getSpaceBackground,
+    listeningSpaceStyleVars,
+    loadAmbientSettings,
+    loadSavedListeningSpaceId,
+    resolveTodayJacketStyleId,
+    saveListeningSpaceId,
+    suggestListeningSpace,
+} from './listeningSpaces'
 import { pickPostcardLyric } from './lyrics'
 import LyricsPanel from './LyricsPanel'
 import {
@@ -35,6 +45,7 @@ import {
     useTodayShuffle,
 } from './todayPick'
 import TodayRecord from './TodayRecord'
+import { useFloatingPanel } from './useFloatingPanel'
 import {
     createPlaylistId,
     loadCustomPlaylists,
@@ -306,10 +317,26 @@ function App() {
   const [postcardCoverUrl, setPostcardCoverUrl] = useState(null)
   const [todayOpen, setTodayOpen] = useState(() => !isTodayRecordShown())
   const [todayJacketUrl, setTodayJacketUrl] = useState(null)
+  const [todaySpaceBackgroundUrl, setTodaySpaceBackgroundUrl] = useState(null)
   const [todayOverrideId, setTodayOverrideId] = useState(null)
   const [todayPickedIds, setTodayPickedIds] = useState([])
   const [todayHistory, setTodayHistory] = useState(() => loadTodayRecordHistory())
   const [todayShuffleRemaining, setTodayShuffleRemaining] = useState(() => getTodayShuffleRemaining())
+  const ambientBoot = useMemo(() => loadAmbientSettings(), [])
+  const [listeningSpaceOpen, setListeningSpaceOpen] = useState(false)
+  const [listeningSpaceId, setListeningSpaceId] = useState(() => loadSavedListeningSpaceId())
+  const [ambientEnabled, setAmbientEnabled] = useState(() => ambientBoot.enabled)
+  const [ambientVolume, setAmbientVolume] = useState(() => ambientBoot.volume)
+  const [focusMode, setFocusMode] = useState(true)
+  const [playerExpanded, setPlayerExpanded] = useState(true)
+  const [spacePanelMinimized, setSpacePanelMinimized] = useState(false)
+  const {
+    panelRef: playerPanelRef,
+    panelStyle: playerPanelStyle,
+    panelClassName: playerPanelClassName,
+    onPointerDown: onPlayerPanelPointerDown,
+    resetPosition: resetPlayerPanelPosition,
+  } = useFloatingPanel('hana-player-card-pos')
   const [pendingDeleteId, setPendingDeleteId] = useState(null)
   const [swipeReveal, setSwipeReveal] = useState(null)
   const urlTrackAppliedRef = useRef(false)
@@ -380,6 +407,42 @@ function App() {
     [todayHistory, todayItem?.id, items],
   )
 
+  const activePlaylistName = useMemo(() => {
+    if (listFilter === 'all' || listFilter === 'favorites') return ''
+    return customPlaylists.find((playlist) => playlist.id === listFilter)?.name || ''
+  }, [listFilter, customPlaylists])
+
+  const todaySpaceId = useMemo(
+    () =>
+      suggestListeningSpace({
+        item: todayItem,
+        jacketStyleId: resolveTodayJacketStyleId(todayItem),
+        savedSpaceId: listeningSpaceId,
+      }),
+    [todayItem, listeningSpaceId],
+  )
+
+  const postcardSpaceId = useMemo(
+    () =>
+      suggestListeningSpace({
+        item: postcardItemId ? items.find((item) => item.id === postcardItemId) : null,
+        jacketStyleId: items.find((item) => item.id === postcardItemId)?.jacketStyle || null,
+        savedSpaceId: listeningSpaceId,
+      }),
+    [postcardItemId, items, listeningSpaceId],
+  )
+
+  const shellSpaceStyle = useMemo(() => {
+    if (showTodayHero) return listeningSpaceStyleVars(todaySpaceId)
+    if (listeningSpaceOpen) return listeningSpaceStyleVars(listeningSpaceId)
+    return undefined
+  }, [showTodayHero, todaySpaceId, listeningSpaceOpen, listeningSpaceId])
+
+  const reducedMotion = useMemo(
+    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    [],
+  )
+
   const favoriteIdSet = useMemo(() => new Set(favoriteIds), [favoriteIds])
 
   const visiblePlayableItems = useMemo(() => {
@@ -403,6 +466,17 @@ function App() {
   const selectedItem = useMemo(
     () => items.find((item) => item.id === selectedItemId) || visiblePlayableItems[0] || playableItems[0] || null,
     [items, selectedItemId, visiblePlayableItems, playableItems],
+  )
+
+  const suggestedListeningSpaceId = useMemo(
+    () =>
+      suggestListeningSpace({
+        item: selectedItem,
+        jacketStyleId: selectedItem?.jacketStyle || null,
+        playlistName: activePlaylistName,
+        savedSpaceId: listeningSpaceId,
+      }),
+    [selectedItem, activePlaylistName, listeningSpaceId],
   )
 
   const selectedPlayableIndex = useMemo(
@@ -563,6 +637,37 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!showTodayHero) {
+      setTodaySpaceBackgroundUrl(null)
+      return undefined
+    }
+    const entry = getSpaceBackground(todaySpaceId)
+    let cancelled = false
+    if (!entry) {
+      setTodaySpaceBackgroundUrl(null)
+      return undefined
+    }
+    if (entry.source === 'upload' && entry.dataUrl) {
+      setTodaySpaceBackgroundUrl(entry.dataUrl)
+      return undefined
+    }
+    if (entry.source === 'library' && entry.itemId) {
+      ensureMediaUrl(entry.itemId, entry.mimeType || 'image/jpeg')
+        .then((url) => {
+          if (!cancelled) setTodaySpaceBackgroundUrl(url)
+        })
+        .catch(() => {
+          if (!cancelled) setTodaySpaceBackgroundUrl(null)
+        })
+      return () => {
+        cancelled = true
+      }
+    }
+    setTodaySpaceBackgroundUrl(null)
+    return undefined
+  }, [showTodayHero, todaySpaceId, ensureMediaUrl])
+
+  useEffect(() => {
     if (!todayItem || !showTodayHero) {
       setTodayJacketUrl(null)
       return undefined
@@ -639,10 +744,52 @@ function App() {
 
   const playTodayRecord = useCallback(() => {
     if (!todayItem) return
+    setListeningSpaceId(todaySpaceId)
+    saveListeningSpaceId(todaySpaceId)
+    setListeningSpaceOpen(true)
+    setFocusMode(true)
+    setPlayerExpanded(false)
+    setSpacePanelMinimized(false)
+    resetPlayerPanelPosition()
     skipTodayHero()
     setPlaylistMode(true)
     selectItem(todayItem.id, true)
-  }, [todayItem, skipTodayHero, selectItem])
+  }, [todayItem, todaySpaceId, skipTodayHero, selectItem, resetPlayerPanelPosition])
+
+  const openListeningSpace = useCallback(
+    (spaceIdOverride = null) => {
+      const nextId = spaceIdOverride || suggestedListeningSpaceId
+      setListeningSpaceId(nextId)
+      saveListeningSpaceId(nextId)
+      setListeningSpaceOpen(true)
+      setFocusMode(true)
+      setPlayerExpanded(false)
+      setSpacePanelMinimized(false)
+      resetPlayerPanelPosition()
+    },
+    [suggestedListeningSpaceId, resetPlayerPanelPosition],
+  )
+
+  const closeListeningSpace = useCallback(() => {
+    setListeningSpaceOpen(false)
+    setPlayerExpanded(true)
+    setSpacePanelMinimized(false)
+    resetPlayerPanelPosition()
+  }, [resetPlayerPanelPosition])
+
+  useEffect(() => {
+    document.body.classList.toggle('is-space-panel-minimized', listeningSpaceOpen && spacePanelMinimized)
+    return () => document.body.classList.remove('is-space-panel-minimized')
+  }, [listeningSpaceOpen, spacePanelMinimized])
+
+  const togglePlayerExpanded = useCallback(() => {
+    setPlayerExpanded((current) => !current)
+  }, [])
+
+  const handleListeningSpaceChange = useCallback((nextId) => {
+    setListeningSpaceId(nextId)
+    saveListeningSpaceId(nextId)
+  }, [])
 
   const shuffleTodayRecord = useCallback(() => {
     if (!todayItem || todayShuffleRemaining <= 0) return
@@ -1875,7 +2022,10 @@ const playPrevious = useCallback(() => {
   }
 
   return (
-    <div className={`app-shell${showTodayHero ? ' app-shell--today' : ''}`}>
+    <div
+      className={`app-shell${showTodayHero ? ' app-shell--today' : ''}${listeningSpaceOpen ? ' app-shell--listening-space' : ''}${listeningSpaceOpen && !playerExpanded ? ' is-player-compact-view' : ''}${listeningSpaceOpen && spacePanelMinimized ? ' is-space-panel-minimized' : ''}`}
+      style={shellSpaceStyle}
+    >
       {!isLoggedIn ? (
         <section className="login-card">
           <div className="brand-mark" aria-hidden="true">M</div>
@@ -1904,7 +2054,9 @@ const playPrevious = useCallback(() => {
           dateLabel={formatTodayDateLabel()}
           title={getDisplayName(todayItem.name)}
           quoteLines={todayReveal.quote}
-          jacketUrl={todayJacketUrl || resolveJacketUrl(null, todayItem.jacketStyle || null)}
+          jacketUrl={todayJacketUrl || resolveJacketUrl(null, todayItem.jacketStyle || resolveTodayJacketStyleId(todayItem) || null)}
+          spaceId={todaySpaceId}
+          backgroundUrl={todaySpaceBackgroundUrl}
           onPlay={playTodayRecord}
           onShuffle={shuffleTodayRecord}
           shuffleRemaining={todayShuffleRemaining}
@@ -1914,7 +2066,7 @@ const playPrevious = useCallback(() => {
         />
       ) : (
         <>
-          <header className="topbar">
+          <header className={`topbar${listeningSpaceOpen && focusMode ? ' is-space-hidden' : ''}`}>
             <div>
               <p className="eyebrow">共有メディアスペース</p>
               <h2>メディア共有</h2>
@@ -1928,7 +2080,7 @@ const playPrevious = useCallback(() => {
             </div>
           </header>
 
-          <section className="upload-card">
+          <section className={`upload-card${listeningSpaceOpen && focusMode ? ' is-space-hidden' : ''}`}>
             <div>
               <p className="eyebrow">すぐアップロード</p>
               <h3>メディアを共有ボックスへ追加</h3>
@@ -2046,8 +2198,18 @@ const playPrevious = useCallback(() => {
 
           {error ? <p className="message error">{error}</p> : null}
 
-          <main className="content-grid">
-            <section className="player-card">
+          <main
+            className={`content-grid${listeningSpaceOpen ? ' is-in-space' : ''}${listeningSpaceOpen && focusMode ? ' is-focus-mode' : ''}${listeningSpaceOpen && !playerExpanded ? ' is-player-compact' : ''}`}
+          >
+            {(() => {
+              const floatingCompact = listeningSpaceOpen && !playerExpanded
+              const playerCard = (
+            <section
+              ref={floatingCompact ? playerPanelRef : undefined}
+              className={`player-card${listeningSpaceOpen ? ' is-in-space' : ''}${listeningSpaceOpen && playerExpanded ? ' is-expanded' : ''}${floatingCompact ? ' is-compact' : ''}${floatingCompact && playerPanelClassName ? ` ${playerPanelClassName}` : ''}`}
+              style={floatingCompact ? playerPanelStyle : undefined}
+              onPointerDown={floatingCompact ? onPlayerPanelPointerDown : undefined}
+            >
               {loadingItems ? (
                 <div className="empty-state">
                   <h3>読み込み中...</h3>
@@ -2055,7 +2217,61 @@ const playPrevious = useCallback(() => {
                 </div>
               ) : selectedItem ? (
                 <>
-                  <div className="player-header">
+                  {listeningSpaceOpen && !playerExpanded ? (
+                    <div className="player-compact-bar">
+                      <button
+                        type="button"
+                        className="floating-drag-handle"
+                        data-drag-handle
+                        aria-label="ドラッグして移動"
+                        title="ドラッグして移動"
+                      >
+                        ⋮⋮
+                      </button>
+                      <p className="player-compact-title">{getDisplayName(selectedItem.name)}</p>
+                      <div className="player-compact-actions">
+                        <button
+                          type="button"
+                          className="secondary-button player-expand-btn"
+                          onClick={togglePlayerExpanded}
+                        >
+                          プレイヤーを開く
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-button listening-space-open-btn is-active"
+                          onClick={closeListeningSpace}
+                        >
+                          場所を閉じる
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {selectedItem.kind === 'audio' && !(listeningSpaceOpen && !playerExpanded) ? (
+                    <div className="player-space-access">
+                      <button
+                        type="button"
+                        className={`secondary-button listening-space-open-btn${listeningSpaceOpen ? ' is-active' : ''}`}
+                        onClick={() => (listeningSpaceOpen ? closeListeningSpace() : openListeningSpace())}
+                        title="リスニングスペースを開く"
+                      >
+                        {listeningSpaceOpen ? '場所を閉じる' : '聴く場所'}
+                      </button>
+                      {listeningSpaceOpen && playerExpanded ? (
+                        <button
+                          type="button"
+                          className="secondary-button player-scenery-btn"
+                          onClick={togglePlayerExpanded}
+                          title="景色を広く見る"
+                        >
+                          景色を見る
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  <div className={`player-header${listeningSpaceOpen && !playerExpanded ? ' is-space-hidden' : ''}`}>
                     <div>
                       <p className="eyebrow">プレビュー</p>
                       <h3>{getDisplayName(selectedItem.name)}</h3>
@@ -2086,6 +2302,7 @@ const playPrevious = useCallback(() => {
                         リスト再生
                       </button>
                       {selectedItem.kind === 'audio' ? (
+                        <>
                         <button
                           type="button"
                           className="secondary-button postcard-open-btn"
@@ -2094,6 +2311,7 @@ const playPrevious = useCallback(() => {
                         >
                           カードで送る
                         </button>
+                        </>
                       ) : null}
                       <button type="button" className="danger-button" onClick={() => requestDelete(selectedItem.id)}>
                         削除
@@ -2134,6 +2352,7 @@ const playPrevious = useCallback(() => {
                           onJacketStyleChange={handleJacketStyleChange}
                           onTogglePlayback={handleTogglePlayback}
                           onSeek={handleSeekAudio}
+                          compact={listeningSpaceOpen && !playerExpanded}
                         >
                           <audio
                             ref={mediaRef}
@@ -2150,6 +2369,7 @@ const playPrevious = useCallback(() => {
                             onSeeked={handleMediaTimeUpdate}
                           />
                         </VinylPlayer>
+                        <div className={listeningSpaceOpen && !playerExpanded ? 'is-space-hidden' : ''}>
                         <LyricsPanel
                           key={selectedItem.id}
                           trackId={selectedItem.id}
@@ -2161,6 +2381,7 @@ const playPrevious = useCallback(() => {
                           onClear={handleClearLyrics}
                           onSeek={handleSeekToLyric}
                         />
+                        </div>
                         </>
                       ) : (
                         <video
@@ -2185,7 +2406,7 @@ const playPrevious = useCallback(() => {
                     </div>
                   )}
 
-                  <div className="video-meta">
+                  <div className={`video-meta${listeningSpaceOpen && !playerExpanded ? ' is-space-hidden' : ''}`}>
                     <span className={`kind-badge kind-${selectedItem.kind}`}>
                       {getKindLabel(selectedItem.kind)}
                     </span>
@@ -2200,6 +2421,9 @@ const playPrevious = useCallback(() => {
                 </div>
               )}
             </section>
+              )
+              return floatingCompact ? createPortal(playerCard, document.body) : playerCard
+            })()}
 
             <aside className="list-card">
               <div className="list-header">
@@ -2787,6 +3011,29 @@ const playPrevious = useCallback(() => {
         </>
       )}
 
+      {isLoggedIn && listeningSpaceOpen && selectedItem?.kind === 'audio' ? (
+        <ListeningSpace
+          open={listeningSpaceOpen}
+          spaceId={listeningSpaceId}
+          onSpaceChange={handleListeningSpaceChange}
+          onClose={closeListeningSpace}
+          ambientEnabled={ambientEnabled}
+          ambientVolume={ambientVolume}
+          onAmbientEnabledChange={setAmbientEnabled}
+          onAmbientVolumeChange={setAmbientVolume}
+          focusMode={focusMode}
+          onFocusModeChange={setFocusMode}
+          playerExpanded={playerExpanded}
+          onTogglePlayerExpanded={togglePlayerExpanded}
+          panelMinimized={spacePanelMinimized}
+          onPanelMinimizedChange={setSpacePanelMinimized}
+          libraryImages={imageItems}
+          loadLibraryImageUrl={ensureMediaUrl}
+          suggestedSpaceId={suggestedListeningSpaceId}
+          reducedMotion={reducedMotion}
+        />
+      ) : null}
+
       {postcardItem ? (
         <ListeningPostcard
           open
@@ -2798,6 +3045,7 @@ const playPrevious = useCallback(() => {
           jacketSrc={postcardJacketUrl}
           jacketStyleId={postcardItem.jacketStyle || null}
           coverSrc={postcardCoverUrl}
+          initialSpaceId={postcardSpaceId}
           onClose={closeListeningPostcard}
           onShareFile={
             postcardMode === 'share'

@@ -150,6 +150,7 @@ export default function VinylPlayer({
   onJacketStyleChange,
   onTogglePlayback,
   onSeek,
+  compact = false,
   children,
 }) {
   const useDefaultLabel = !coverSrc
@@ -233,7 +234,7 @@ export default function VinylPlayer({
   }
 
   return (
-    <div className={`vinyl-player ${isPlaying ? 'is-playing' : ''}`}>
+    <div className={`vinyl-player${compact ? ' vinyl-player--compact' : ''}${isPlaying ? ' is-playing' : ''}`}>
       <div
         className={`vinyl-jacket ${useDefaultJacket ? 'is-default' : 'has-art'}${isPeekingJacket ? ' is-peeking' : ''}`}
       >
@@ -438,7 +439,7 @@ export default function VinylPlayer({
         onChange={handleJacketFile}
       />
 
-      <p className="vinyl-track-title">{title}</p>
+      <p className={`vinyl-track-title${compact ? ' is-space-hidden' : ''}`}>{title}</p>
 
       <div className="vinyl-controls">
         {children}
