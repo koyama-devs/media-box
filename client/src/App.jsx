@@ -19,6 +19,8 @@ import {
     updatePlaylistOrder,
     uploadMediaFile,
 } from './firebase'
+import ListeningPostcard from './ListeningPostcard'
+import { pickPostcardLyric } from './lyrics'
 import LyricsPanel from './LyricsPanel'
 import {
     createPlaylistId,
@@ -285,6 +287,10 @@ function App() {
   const [copiedItemId, setCopiedItemId] = useState(null)
   const [sharingItemId, setSharingItemId] = useState(null)
   const [sharedItemId, setSharedItemId] = useState(null)
+  const [postcardItemId, setPostcardItemId] = useState(null)
+  const [postcardMode, setPostcardMode] = useState('share')
+  const [postcardJacketUrl, setPostcardJacketUrl] = useState(null)
+  const [postcardCoverUrl, setPostcardCoverUrl] = useState(null)
   const [pendingDeleteId, setPendingDeleteId] = useState(null)
   const [swipeReveal, setSwipeReveal] = useState(null)
   const urlTrackAppliedRef = useRef(false)
@@ -534,6 +540,21 @@ function App() {
       const trackId = new URLSearchParams(window.location.search).get(TRACK_QUERY_KEY)
       if (trackId && playableItems.some((item) => item.id === trackId)) {
         selectItem(trackId, false)
+        const item = playableItems.find((entry) => entry.id === trackId)
+        if (item?.kind === 'audio') {
+          const seenKey = `hana-postcard-welcome-${trackId}`
+          let alreadySeen = false
+          try {
+            alreadySeen = sessionStorage.getItem(seenKey) === '1'
+            if (!alreadySeen) sessionStorage.setItem(seenKey, '1')
+          } catch {
+            /* ignore */
+          }
+          if (!alreadySeen) {
+            setPostcardMode('welcome')
+            setPostcardItemId(trackId)
+          }
+        }
       }
     } catch {
       /* ignore */
@@ -1473,6 +1494,96 @@ const playPrevious = useCallback(() => {
     }
   }
 
+  const closeListeningPostcard = useCallback(() => {
+    setPostcardItemId(null)
+    setPostcardMode('share')
+    setPostcardJacketUrl(null)
+    setPostcardCoverUrl(null)
+  }, [])
+
+  const openListeningPostcard = useCallback((item, mode = 'share') => {
+    if (!item || item.kind !== 'audio') return
+    setPostcardMode(mode)
+    setPostcardItemId(item.id)
+  }, [])
+
+  const postcardItem = useMemo(
+    () => (postcardItemId ? items.find((item) => item.id === postcardItemId) : null),
+    [items, postcardItemId],
+  )
+
+  const postcardLyric = useMemo(() => {
+    if (!postcardItem) return { ja: '', en: '' }
+    const fromLyrics = pickPostcardLyric(
+      postcardItem.lyrics,
+      postcardItem.id === selectedItem?.id ? playbackTime : 0,
+    )
+    if (fromLyrics.ja || fromLyrics.en) return fromLyrics
+    return { ja: '', en: '' }
+  }, [postcardItem, selectedItem?.id, playbackTime])
+
+  useEffect(() => {
+    if (!postcardItem) {
+      setPostcardJacketUrl(null)
+      setPostcardCoverUrl(null)
+      return undefined
+    }
+
+    let cancelled = false
+
+    const loadSideImages = async () => {
+      if (
+        postcardItem.id === selectedItem?.id &&
+        (jacketPreviewUrl || coverPreviewUrl)
+      ) {
+        if (!cancelled) {
+          setPostcardJacketUrl(jacketPreviewUrl)
+          setPostcardCoverUrl(coverPreviewUrl)
+        }
+      }
+
+      try {
+        if (postcardItem.jacketId) {
+          const jacketItem = items.find((entry) => entry.id === postcardItem.jacketId)
+          if (jacketItem) {
+            const url = await ensureMediaUrl(jacketItem.id, jacketItem.type)
+            if (!cancelled) setPostcardJacketUrl(url)
+          } else if (!cancelled) {
+            setPostcardJacketUrl(null)
+          }
+        } else if (!cancelled) {
+          setPostcardJacketUrl(null)
+        }
+
+        if (postcardItem.coverId) {
+          const coverItem = items.find((entry) => entry.id === postcardItem.coverId)
+          if (coverItem) {
+            const url = await ensureMediaUrl(coverItem.id, coverItem.type)
+            if (!cancelled) setPostcardCoverUrl(url)
+          } else if (!cancelled) {
+            setPostcardCoverUrl(null)
+          }
+        } else if (!cancelled) {
+          setPostcardCoverUrl(null)
+        }
+      } catch (loadError) {
+        console.error(loadError)
+      }
+    }
+
+    loadSideImages()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    postcardItem,
+    selectedItem?.id,
+    jacketPreviewUrl,
+    coverPreviewUrl,
+    items,
+    ensureMediaUrl,
+  ])
+
   const shareTrack = async (item) => {
     if (!item || (item.kind !== 'audio' && item.kind !== 'video')) return
     if (sharingItemId) return
@@ -1819,6 +1930,16 @@ const playPrevious = useCallback(() => {
                       <button type="button" className="primary-button" onClick={startPlaylist} disabled={visiblePlayableItems.length === 0 && playableItems.length === 0}>
                         リスト再生
                       </button>
+                      {selectedItem.kind === 'audio' ? (
+                        <button
+                          type="button"
+                          className="secondary-button postcard-open-btn"
+                          onClick={() => openListeningPostcard(selectedItem, 'share')}
+                          title="この曲をカード画像で送る"
+                        >
+                          カードで送る
+                        </button>
+                      ) : null}
                       <button type="button" className="danger-button" onClick={() => requestDelete(selectedItem.id)}>
                         削除
                       </button>
@@ -2410,13 +2531,23 @@ const playPrevious = useCallback(() => {
                                   ? `「${item.name || getDisplayName(item.name)}」を準備中...`
                                   : sharedItemId === item.id
                                     ? '共有しました'
-                                    : `「${item.name || 'media'}」を共有`
+                                    : item.kind === 'audio'
+                                      ? 'この曲をカードで送る'
+                                      : `「${item.name || 'media'}」を共有`
                               }
-                              aria-label={`「${item.name || 'media'}」を共有`}
+                              aria-label={
+                                item.kind === 'audio'
+                                  ? 'この曲をカードで送る'
+                                  : `「${item.name || 'media'}」を共有`
+                              }
                               aria-busy={sharingItemId === item.id}
                               disabled={sharingItemId === item.id}
                               onClick={(event) => {
                                 event.stopPropagation()
+                                if (item.kind === 'audio') {
+                                  openListeningPostcard(item, 'share')
+                                  return
+                                }
                                 shareTrack(item)
                               }}
                             >
@@ -2500,6 +2631,29 @@ const playPrevious = useCallback(() => {
           </main>
         </>
       )}
+
+      {postcardItem ? (
+        <ListeningPostcard
+          open
+          mode={postcardMode}
+          title={getDisplayName(postcardItem.name)}
+          shareUrl={getTrackShareUrl(postcardItem.id)}
+          lyricJa={postcardLyric.ja}
+          lyricEn={postcardLyric.en}
+          jacketSrc={postcardJacketUrl}
+          jacketStyleId={postcardItem.jacketStyle || null}
+          coverSrc={postcardCoverUrl}
+          onClose={closeListeningPostcard}
+          onShareFile={
+            postcardMode === 'share'
+              ? () => {
+                  closeListeningPostcard()
+                  shareTrack(postcardItem)
+                }
+              : null
+          }
+        />
+      ) : null}
 
       {pendingDeleteId ? (
         <div className="confirm-overlay" role="presentation" onClick={cancelDelete}>

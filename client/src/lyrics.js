@@ -124,3 +124,16 @@ export function normalizeStoredLyrics(lyrics) {
   if (lines.length === 0) return null
   return { lines }
 }
+
+/** Pick one lyric line for postcard: current line if playing, else first meaningful line. */
+export function pickPostcardLyric(lyrics, currentTime = 0) {
+  const normalized = normalizeStoredLyrics(lyrics)
+  const lines = normalized?.lines || []
+  if (lines.length === 0) return { ja: '', en: '' }
+  const activeIndex = getActiveLyricIndex(lines, currentTime)
+  const line = activeIndex >= 0 ? lines[activeIndex] : lines[0]
+  return {
+    ja: line.ja || '',
+    en: line.en || '',
+  }
+}
