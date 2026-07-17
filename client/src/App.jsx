@@ -23,6 +23,15 @@ import ListeningPostcard from './ListeningPostcard'
 import { pickPostcardLyric } from './lyrics'
 import LyricsPanel from './LyricsPanel'
 import {
+    formatTodayDateLabel,
+    isTodayRecordShown,
+    markTodayRecordShown,
+    pickTodayAudioItem,
+    resolveJacketUrl,
+    resolveTodayReveal,
+} from './todayPick'
+import TodayRecord from './TodayRecord'
+import {
     createPlaylistId,
     loadCustomPlaylists,
     loadFavoriteIds,
@@ -291,9 +300,12 @@ function App() {
   const [postcardMode, setPostcardMode] = useState('share')
   const [postcardJacketUrl, setPostcardJacketUrl] = useState(null)
   const [postcardCoverUrl, setPostcardCoverUrl] = useState(null)
+  const [todayOpen, setTodayOpen] = useState(() => !isTodayRecordShown())
+  const [todayJacketUrl, setTodayJacketUrl] = useState(null)
   const [pendingDeleteId, setPendingDeleteId] = useState(null)
   const [swipeReveal, setSwipeReveal] = useState(null)
   const urlTrackAppliedRef = useRef(false)
+  const skipTodayFromDeepLinkRef = useRef(false)
   const swipeStartRef = useRef({ x: 0, y: 0, id: null, ignoring: false })
   const swipeOffsetRef = useRef(0)
   const blobUrlsRef = useRef(new Set())
@@ -321,6 +333,26 @@ function App() {
   const playableItems = useMemo(
     () => items.filter((item) => item.kind === 'audio' || item.kind === 'video'),
     [items],
+  )
+
+  const todayItem = useMemo(() => {
+    if (!isLoggedIn || !todayOpen || skipTodayFromDeepLinkRef.current) return null
+    if (!playlistSyncReady) return null
+    return pickTodayAudioItem(playableItems, customPlaylists)
+  }, [isLoggedIn, todayOpen, playableItems, customPlaylists, playlistSyncReady])
+
+  const todayReveal = useMemo(
+    () => resolveTodayReveal(todayItem),
+    [todayItem],
+  )
+
+  const showTodayHero = Boolean(
+    isLoggedIn
+      && todayOpen
+      && todayItem
+      && !loadingItems
+      && playlistSyncReady
+      && !skipTodayFromDeepLinkRef.current,
   )
 
   const favoriteIdSet = useMemo(() => new Set(favoriteIds), [favoriteIds])
@@ -505,6 +537,40 @@ function App() {
     return url
   }, [])
 
+  useEffect(() => {
+    if (!todayItem || !showTodayHero) {
+      setTodayJacketUrl(null)
+      return undefined
+    }
+
+    // One show per device per day — mark as soon as the hero is displayed.
+    markTodayRecordShown()
+
+    let cancelled = false
+    const loadJacket = async () => {
+      if (todayItem.jacketId) {
+        const jacketItem = items.find((entry) => entry.id === todayItem.jacketId)
+        if (jacketItem) {
+          try {
+            const url = await ensureMediaUrl(jacketItem.id, jacketItem.type)
+            if (!cancelled) setTodayJacketUrl(url)
+            return
+          } catch (error) {
+            console.error(error)
+          }
+        }
+      }
+      if (!cancelled) {
+        setTodayJacketUrl(resolveJacketUrl(null, todayItem.jacketStyle || null))
+      }
+    }
+
+    loadJacket()
+    return () => {
+      cancelled = true
+    }
+  }, [todayItem, showTodayHero, items, ensureMediaUrl])
+
   const prefetchMediaUrl = useCallback((item) => {
     if (!item || item.kind === 'image') return
     if (mediaUrlCacheRef.current.has(item.id)) return
@@ -527,6 +593,19 @@ function App() {
 
 }, [])
 
+  const skipTodayHero = useCallback(() => {
+    markTodayRecordShown()
+    setTodayOpen(false)
+    setTodayJacketUrl(null)
+  }, [])
+
+  const playTodayRecord = useCallback(() => {
+    if (!todayItem) return
+    skipTodayHero()
+    setPlaylistMode(true)
+    selectItem(todayItem.id, true)
+  }, [todayItem, skipTodayHero, selectItem])
+
   useEffect(() => {
     recordAccessVisit().catch((accessError) => {
       console.warn('Access log skipped:', accessError)
@@ -539,6 +618,8 @@ function App() {
     try {
       const trackId = new URLSearchParams(window.location.search).get(TRACK_QUERY_KEY)
       if (trackId && playableItems.some((item) => item.id === trackId)) {
+        skipTodayFromDeepLinkRef.current = true
+        setTodayOpen(false)
         selectItem(trackId, false)
         const item = playableItems.find((entry) => entry.id === trackId)
         if (item?.kind === 'audio') {
@@ -1733,7 +1814,7 @@ const playPrevious = useCallback(() => {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${showTodayHero ? ' app-shell--today' : ''}`}>
       {!isLoggedIn ? (
         <section className="login-card">
           <div className="brand-mark" aria-hidden="true">M</div>
@@ -1757,6 +1838,15 @@ const playPrevious = useCallback(() => {
 
           {error ? <p className="message error">{error}</p> : null}
         </section>
+      ) : showTodayHero ? (
+        <TodayRecord
+          dateLabel={formatTodayDateLabel()}
+          title={getDisplayName(todayItem.name)}
+          quoteLines={todayReveal.quote}
+          jacketUrl={todayJacketUrl || resolveJacketUrl(null, todayItem.jacketStyle || null)}
+          onPlay={playTodayRecord}
+          onSkip={skipTodayHero}
+        />
       ) : (
         <>
           <header className="topbar">

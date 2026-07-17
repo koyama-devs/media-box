@@ -2242,6 +2242,156 @@
   backdrop-filter: blur(4px);
 }
 
+.app-shell--today {
+  max-width: none;
+  padding: 0;
+  min-height: 100vh;
+}
+
+.today-record {
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow: hidden;
+  color: #f8fafc;
+  opacity: 0;
+  transform: translateY(10px);
+  transition:
+    opacity 0.7s ease,
+    transform 0.7s ease;
+}
+
+.today-record.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.today-record-plane {
+  position: absolute;
+  inset: -4%;
+  z-index: 0;
+  background-color: #0b1220;
+  background-image: var(--today-jacket);
+  background-size: cover;
+  background-position: center;
+  transform: scale(1.04);
+  animation: today-drift 18s ease-in-out infinite alternate;
+}
+
+.today-record-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(90deg, rgba(5, 7, 13, 0.88) 0%, rgba(5, 7, 13, 0.55) 42%, rgba(5, 7, 13, 0.28) 100%),
+    linear-gradient(0deg, rgba(5, 7, 13, 0.72) 0%, rgba(5, 7, 13, 0.15) 45%, rgba(5, 7, 13, 0.35) 100%);
+}
+
+.today-record-stage {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 14px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  max-width: 720px;
+  padding: clamp(28px, 6vh, 64px) clamp(22px, 5vw, 72px) clamp(36px, 8vh, 80px);
+  box-sizing: border-box;
+}
+
+.today-brand {
+  margin: 0;
+  font-family: 'Cormorant Garamond', 'Times New Roman', serif;
+  font-size: clamp(1.35rem, 2.4vw, 1.85rem);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #f8fafc;
+}
+
+.today-headline {
+  margin: 0;
+  font-family: 'Cormorant Garamond', 'Times New Roman', serif;
+  font-size: clamp(2.6rem, 7vw, 4.4rem);
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: 0.02em;
+}
+
+.today-support {
+  margin: 0;
+  max-width: 22em;
+  font-family: 'Hiragino Mincho ProN', 'Yu Mincho', 'Cormorant Garamond', serif;
+  font-size: clamp(1.05rem, 2.2vw, 1.35rem);
+  line-height: 1.55;
+  color: rgba(226, 232, 240, 0.9);
+}
+
+.today-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+  opacity: 0;
+  transform: translateY(8px);
+  animation: today-rise 0.6s ease 0.25s forwards;
+}
+
+.today-play,
+.today-skip {
+  min-width: 148px;
+}
+
+.today-track {
+  margin: 4px 0 0;
+  font-size: 0.88rem;
+  color: rgba(148, 163, 184, 0.95);
+  opacity: 0;
+  animation: today-rise 0.6s ease 0.4s forwards;
+}
+
+@keyframes today-drift {
+  from {
+    transform: scale(1.04) translate3d(0, 0, 0);
+  }
+  to {
+    transform: scale(1.1) translate3d(-1.5%, -1%, 0);
+  }
+}
+
+@keyframes today-rise {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 640px) {
+  .today-record-veil {
+    background:
+      linear-gradient(180deg, rgba(5, 7, 13, 0.35) 0%, rgba(5, 7, 13, 0.55) 40%, rgba(5, 7, 13, 0.9) 100%);
+  }
+
+  .today-actions .primary-button,
+  .today-actions .secondary-button {
+    flex: 1 1 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .today-record,
+  .today-record-plane,
+  .today-actions,
+  .today-track {
+    animation: none;
+    transition: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
 .postcard-overlay {
   position: fixed;
   inset: 0;
