@@ -431,9 +431,8 @@ export default function ListeningPostcard({
               {lyricJa ? <p className="postcard-quote-ja">{lyricJa}</p> : null}
               {lyricEn ? <p className="postcard-quote-en">{lyricEn}</p> : null}
             </blockquote>
-          ) : (
-            <p className="postcard-quote-fallback">いま、この一枚をあなたへ。</p>
-          )}
+          ) : null}
+          <p className="postcard-quote-fallback">いま、この一枚をあなたへ。</p>
           <p className="postcard-url">{shareUrl}</p>
         </article>
 
