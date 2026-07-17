@@ -2329,6 +2329,10 @@
   color: rgba(226, 232, 240, 0.9);
 }
 
+.today-quote-line {
+  display: block;
+}
+
 .today-actions {
   display: flex;
   flex-wrap: wrap;

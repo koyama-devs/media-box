@@ -115,7 +115,7 @@ async function renderPostcardCanvas({
 
   ctx.fillStyle = 'rgba(248, 250, 252, 0.95)'
   ctx.font = '600 18px Inter, "Segoe UI", sans-serif'
-  ctx.fillText('hana mediabox', 72, 112)
+  ctx.fillText('Hana Media Box', 72, 112)
 
   let jacketImage = null
   let coverImage = null
@@ -324,7 +324,7 @@ export default function ListeningPostcard({
       const text = [title, lyricJa || lyricEn, shareUrl].filter(Boolean).join('\n')
 
       if (typeof navigator.share === 'function') {
-        const payload = { title: title || 'hana mediabox', text, url: shareUrl }
+        const payload = { title: title || 'Hana Media Box', text, url: shareUrl }
         const withFile =
           typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] })
         try {
@@ -375,7 +375,7 @@ export default function ListeningPostcard({
 
         <article className="postcard-card" ref={cardRef}>
           <div className="postcard-card-top">
-            <span>hana mediabox</span>
+            <span>Hana Media Box</span>
             <span>この曲への招待</span>
           </div>
           <div
@@ -431,4 +431,3 @@ export default function ListeningPostcard({
     </div>
   )
 }
-

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 export default function TodayRecord({
-  brand = 'hana mediabox',
+  brand = 'Hana Media Box',
   dateLabel = '',
   title = '',
   quoteLines = [],
@@ -16,12 +16,12 @@ export default function TodayRecord({
     return () => window.cancelAnimationFrame(frame)
   }, [])
 
-  const quote = Array.isArray(quoteLines) ? quoteLines.filter(Boolean).join(' ') : ''
+  const quoteLinesFiltered = Array.isArray(quoteLines) ? quoteLines.filter(Boolean) : []
 
   return (
     <section
       className={`today-record${visible ? ' is-visible' : ''}`}
-      aria-label="今日の一枚"
+      aria-label="今日の一曲"
       style={
         jacketUrl
           ? { '--today-jacket': `url("${jacketUrl}")` }
@@ -33,14 +33,22 @@ export default function TodayRecord({
 
       <div className="today-record-stage">
         <p className="today-brand">{brand}</p>
-        <h1 className="today-headline">今日の一枚</h1>
+        <h1 className="today-headline">今日の一曲</h1>
         <p className="today-support">
-          {quote || (dateLabel ? `${dateLabel}の一枚` : '今日、この一枚を。')}
+          {quoteLinesFiltered.length > 0 ? (
+            quoteLinesFiltered.map((line) => (
+              <span key={line} className="today-quote-line">
+                {line}
+              </span>
+            ))
+          ) : (
+            dateLabel ? `${dateLabel}のおすすめ` : '今日のおすすめをお届けします。'
+          )}
         </p>
 
         <div className="today-actions">
           <button type="button" className="primary-button today-play" onClick={onPlay}>
-            この一枚を聴く
+            この曲を再生
           </button>
           <button type="button" className="secondary-button today-skip" onClick={onSkip}>
             とばす
