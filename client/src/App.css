@@ -2992,12 +2992,19 @@ body.is-listening-space-open #root {
   width: min(100% - 24px, 720px);
   padding: 14px 16px;
   border-radius: 16px;
-  border: 1px solid rgba(148, 163, 184, 0.4);
-  background: rgba(8, 12, 20, 0.88);
-  backdrop-filter: blur(14px);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(8, 12, 20, 0.4);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.3);
   color: #f8fafc;
   touch-action: none;
+  transition: background 0.25s ease, backdrop-filter 0.25s ease;
+}
+
+.listening-space-panel:hover,
+.listening-space-panel:focus-within {
+  background: rgba(8, 12, 20, 0.68);
+  backdrop-filter: blur(12px);
 }
 
 .listening-space-panel.is-drag-positioned {
@@ -3284,9 +3291,40 @@ body.is-listening-space-open #root {
 }
 
 .player-card.is-in-space.is-expanded {
-  max-width: min(100%, 460px);
-  margin-inline: auto;
-  padding-bottom: clamp(180px, 24vh, 240px);
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+  z-index: 60;
+  width: min(100% - 24px, 460px);
+  max-height: min(90dvh, 820px);
+  overflow: auto;
+  margin: 0;
+  padding: 16px;
+  padding-bottom: 16px;
+  background: rgba(8, 12, 20, 0.42);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  touch-action: none;
+  pointer-events: auto;
+}
+
+.player-card.is-in-space.is-expanded.is-drag-positioned {
+  left: auto;
+  top: auto;
+  transform: none;
+}
+
+.content-grid.is-in-space {
+  display: block;
+  min-height: calc(100dvh - 24px);
+  pointer-events: none;
+}
+
+.content-grid.is-in-space .player-card {
+  pointer-events: auto;
 }
 
 .content-grid.is-in-space.is-player-compact {
@@ -3308,11 +3346,11 @@ body.is-listening-space-open #root {
   width: min(100% - 24px, 400px);
   padding: 10px 12px 12px;
   margin: 0;
-  background: rgba(8, 12, 20, 0.92);
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(8, 12, 20, 0.38);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(148, 163, 184, 0.3);
   border-radius: var(--radius-lg);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.32);
   touch-action: none;
   pointer-events: auto;
 }
@@ -3321,6 +3359,19 @@ body.is-listening-space-open #root {
   left: auto;
   bottom: auto;
   transform: none;
+}
+
+.player-card.is-in-space.is-compact,
+.player-card.is-in-space.is-expanded {
+  transition: background 0.25s ease, backdrop-filter 0.25s ease;
+}
+
+.player-card.is-in-space.is-compact:hover,
+.player-card.is-in-space.is-compact:focus-within,
+.player-card.is-in-space.is-expanded:hover,
+.player-card.is-in-space.is-expanded:focus-within {
+  background: rgba(8, 12, 20, 0.66);
+  backdrop-filter: blur(12px);
 }
 
 .app-shell--listening-space.is-player-compact-view.is-space-panel-minimized .player-card.is-in-space.is-compact:not(.is-drag-positioned),
@@ -3349,6 +3400,7 @@ body.is-listening-space-open.is-space-panel-minimized .player-card.is-in-space.i
 .player-space-access {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   margin-bottom: 12px;
 }

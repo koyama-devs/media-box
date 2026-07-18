@@ -756,9 +756,20 @@ function App() {
     selectItem(todayItem.id, true)
   }, [todayItem, todaySpaceId, skipTodayHero, selectItem, resetPlayerPanelPosition])
 
+  const resumePlaybackSoon = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      window.setTimeout(() => {
+        const media = mediaRef.current
+        if (!media || !media.paused) return
+        media.play().catch(() => {})
+      }, 40)
+    })
+  }, [])
+
   const openListeningSpace = useCallback(
     (spaceIdOverride = null) => {
       const nextId = spaceIdOverride || suggestedListeningSpaceId
+      const shouldResume = Boolean(mediaRef.current && !mediaRef.current.paused)
       setListeningSpaceId(nextId)
       saveListeningSpaceId(nextId)
       setListeningSpaceOpen(true)
@@ -766,16 +777,19 @@ function App() {
       setPlayerExpanded(false)
       setSpacePanelMinimized(false)
       resetPlayerPanelPosition()
+      if (shouldResume) resumePlaybackSoon()
     },
-    [suggestedListeningSpaceId, resetPlayerPanelPosition],
+    [suggestedListeningSpaceId, resetPlayerPanelPosition, resumePlaybackSoon],
   )
 
   const closeListeningSpace = useCallback(() => {
+    const shouldResume = Boolean(mediaRef.current && !mediaRef.current.paused)
     setListeningSpaceOpen(false)
     setPlayerExpanded(true)
     setSpacePanelMinimized(false)
     resetPlayerPanelPosition()
-  }, [resetPlayerPanelPosition])
+    if (shouldResume) resumePlaybackSoon()
+  }, [resetPlayerPanelPosition, resumePlaybackSoon])
 
   useEffect(() => {
     document.body.classList.toggle('is-space-panel-minimized', listeningSpaceOpen && spacePanelMinimized)
@@ -2202,13 +2216,14 @@ const playPrevious = useCallback(() => {
             className={`content-grid${listeningSpaceOpen ? ' is-in-space' : ''}${listeningSpaceOpen && focusMode ? ' is-focus-mode' : ''}${listeningSpaceOpen && !playerExpanded ? ' is-player-compact' : ''}`}
           >
             {(() => {
+              const floatingInSpace = listeningSpaceOpen
               const floatingCompact = listeningSpaceOpen && !playerExpanded
               const playerCard = (
             <section
-              ref={floatingCompact ? playerPanelRef : undefined}
-              className={`player-card${listeningSpaceOpen ? ' is-in-space' : ''}${listeningSpaceOpen && playerExpanded ? ' is-expanded' : ''}${floatingCompact ? ' is-compact' : ''}${floatingCompact && playerPanelClassName ? ` ${playerPanelClassName}` : ''}`}
-              style={floatingCompact ? playerPanelStyle : undefined}
-              onPointerDown={floatingCompact ? onPlayerPanelPointerDown : undefined}
+              ref={floatingInSpace ? playerPanelRef : undefined}
+              className={`player-card${listeningSpaceOpen ? ' is-in-space' : ''}${listeningSpaceOpen && playerExpanded ? ' is-expanded' : ''}${floatingCompact ? ' is-compact' : ''}${floatingInSpace && playerPanelClassName ? ` ${playerPanelClassName}` : ''}`}
+              style={floatingInSpace ? playerPanelStyle : undefined}
+              onPointerDown={floatingInSpace ? onPlayerPanelPointerDown : undefined}
             >
               {loadingItems ? (
                 <div className="empty-state">
@@ -2250,6 +2265,17 @@ const playPrevious = useCallback(() => {
 
                   {selectedItem.kind === 'audio' && !(listeningSpaceOpen && !playerExpanded) ? (
                     <div className="player-space-access">
+                      {listeningSpaceOpen ? (
+                        <button
+                          type="button"
+                          className="floating-drag-handle"
+                          data-drag-handle
+                          aria-label="ドラッグして移動"
+                          title="ドラッグして移動"
+                        >
+                          ⋮⋮
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className={`secondary-button listening-space-open-btn${listeningSpaceOpen ? ' is-active' : ''}`}
@@ -2422,7 +2448,9 @@ const playPrevious = useCallback(() => {
               )}
             </section>
               )
-              return floatingCompact ? createPortal(playerCard, document.body) : playerCard
+              // Keep player portaled for the whole Listening Space session so expand/collapse
+              // does not remount <audio> (which would stop playback) or hide under the backdrop.
+              return floatingInSpace ? createPortal(playerCard, document.body) : playerCard
             })()}
 
             <aside className="list-card">
