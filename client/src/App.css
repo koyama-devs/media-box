@@ -2442,7 +2442,7 @@
 .postcard-overlay {
   position: fixed;
   inset: 0;
-  z-index: 90;
+  z-index: 120;
   display: grid;
   place-items: center;
   padding: 18px;
@@ -3058,6 +3058,9 @@ body.is-listening-space-open.is-focus-mode-off .upload-card {
   overscroll-behavior: contain;
   scrollbar-width: none;
   touch-action: pan-y;
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
 }
 
 .player-space-settings::-webkit-scrollbar {
@@ -3232,8 +3235,77 @@ body.is-listening-space-open.is-focus-mode-off .upload-card {
 }
 
 .listening-space-fullscreen {
+  position: relative;
+  z-index: 2;
   min-width: auto;
   padding-inline: 12px;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.listening-space-fullscreen.is-active {
+  border-color: rgba(96, 165, 250, 0.75);
+  color: #dbeafe;
+  background: rgba(37, 99, 235, 0.22);
+}
+
+.listening-space-fullscreen-exit {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top, 0px) + 8px);
+  right: max(12px, env(safe-area-inset-right, 0px) + 8px);
+  z-index: 130;
+  min-width: 72px;
+  padding: 8px 14px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 999px;
+  background: rgba(8, 12, 20, 0.72);
+  backdrop-filter: blur(10px);
+  color: #f8fafc;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.listening-space-fullscreen-exit:hover {
+  background: rgba(15, 23, 42, 0.88);
+  border-color: rgba(96, 165, 250, 0.65);
+}
+
+.listening-space-fullscreen-toast {
+  position: fixed;
+  left: 50%;
+  top: max(56px, env(safe-area-inset-top, 0px) + 52px);
+  bottom: auto;
+  transform: translateX(-50%);
+  z-index: 130;
+  margin: 0;
+  max-width: min(92vw, 420px);
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(8, 12, 20, 0.86);
+  backdrop-filter: blur(12px);
+  color: #e2e8f0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  text-align: center;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  animation: listening-space-toast-in 0.28s ease;
+}
+
+@keyframes listening-space-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 }
 
 .listening-space-open-btn.is-active {

@@ -162,10 +162,26 @@ export class AmbientEngine {
   }
 }
 
+export function getFullscreenElement() {
+  return (
+    document.fullscreenElement
+    || document.webkitFullscreenElement
+    || document.mozFullScreenElement
+    || document.msFullscreenElement
+    || null
+  )
+}
+
 export async function tryEnterFullscreen() {
+  const el = document.documentElement
   try {
-    if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
-      await document.documentElement.requestFullscreen()
+    if (getFullscreenElement()) return
+    if (el.requestFullscreen) {
+      await el.requestFullscreen()
+    } else if (el.webkitRequestFullscreen) {
+      await el.webkitRequestFullscreen()
+    } else if (el.msRequestFullscreen) {
+      await el.msRequestFullscreen()
     }
   } catch {
     /* ignore */
@@ -174,8 +190,13 @@ export async function tryEnterFullscreen() {
 
 export async function tryExitFullscreen() {
   try {
-    if (document.fullscreenElement && document.exitFullscreen) {
+    if (!getFullscreenElement()) return
+    if (document.exitFullscreen) {
       await document.exitFullscreen()
+    } else if (document.webkitExitFullscreen) {
+      await document.webkitExitFullscreen()
+    } else if (document.msExitFullscreen) {
+      await document.msExitFullscreen()
     }
   } catch {
     /* ignore */

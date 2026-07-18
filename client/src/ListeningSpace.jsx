@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { AmbientEngine, tryEnterFullscreen, tryExitFullscreen } from './ambientAudio'
+import { AmbientEngine, getFullscreenElement, tryEnterFullscreen, tryExitFullscreen } from './ambientAudio'
 import {
     LISTENING_SPACES,
     compressImageFileToDataUrl,
@@ -14,6 +14,33 @@ import {
 } from './listeningSpaces'
 import SpaceParticles from './SpaceParticles'
 import SpaceScenery, { SpaceSceneryPreview } from './SpaceScenery'
+
+function useDocumentFullscreen() {
+  const [isFullscreen, setIsFullscreen] = useState(() => (
+    typeof document !== 'undefined' && Boolean(getFullscreenElement())
+  ))
+
+  useEffect(() => {
+    const sync = () => setIsFullscreen(Boolean(getFullscreenElement()))
+    document.addEventListener('fullscreenchange', sync)
+    document.addEventListener('webkitfullscreenchange', sync)
+    sync()
+    return () => {
+      document.removeEventListener('fullscreenchange', sync)
+      document.removeEventListener('webkitfullscreenchange', sync)
+    }
+  }, [])
+
+  const toggleFullscreen = async () => {
+    if (getFullscreenElement()) {
+      await tryExitFullscreen()
+    } else {
+      await tryEnterFullscreen()
+    }
+  }
+
+  return { isFullscreen, toggleFullscreen }
+}
 
 function useResolvedBackgroundUrl(entry, loadLibraryImageUrl) {
   const [url, setUrl] = useState(null)
@@ -70,10 +97,29 @@ export default function ListeningSpace({
   const [prevSpaceId, setPrevSpaceId] = useState(spaceId)
   const [crossfading, setCrossfading] = useState(false)
   const ambientRef = useRef(null)
+  const wasFullscreenRef = useRef(false)
+  const [fullscreenToast, setFullscreenToast] = useState(null)
+  const { isFullscreen, toggleFullscreen } = useDocumentFullscreen()
 
   const activeSpace = useMemo(() => resolveListeningSpace(displaySpaceId), [displaySpaceId])
   const displayBgUrl = useResolvedBackgroundUrl(backgrounds[displaySpaceId] || null, loadLibraryImageUrl)
   const prevBgUrl = useResolvedBackgroundUrl(backgrounds[prevSpaceId] || null, loadLibraryImageUrl)
+
+  useEffect(() => {
+    if (isFullscreen && !wasFullscreenRef.current) {
+      setFullscreenToast('もう一度「縮小」を押すか、Escキーで全画面を終了できます')
+    }
+    if (!isFullscreen) {
+      setFullscreenToast(null)
+    }
+    wasFullscreenRef.current = isFullscreen
+  }, [isFullscreen])
+
+  useEffect(() => {
+    if (!fullscreenToast) return undefined
+    const timer = window.setTimeout(() => setFullscreenToast(null), 5200)
+    return () => window.clearTimeout(timer)
+  }, [fullscreenToast])
 
   useEffect(() => {
     if (spaceId === displaySpaceId) return undefined
@@ -112,7 +158,8 @@ export default function ListeningSpace({
     if (!open) return undefined
     document.body.classList.add('is-listening-space-open')
     const onKey = (event) => {
-      if (event.key === 'Escape') onClose?.()
+      // Esc exits browser fullscreen first; don't also close the space.
+      if (event.key === 'Escape' && !getFullscreenElement()) onClose?.()
     }
     window.addEventListener('keydown', onKey)
     return () => {
@@ -129,26 +176,50 @@ export default function ListeningSpace({
   if (!open || typeof document === 'undefined') return null
 
   return createPortal(
-    <div className="listening-space-root" aria-hidden="true">
-      <div
-        className={`listening-space-layer${crossfading ? ' is-fading' : ''}`}
-        style={listeningSpaceStyleVars(prevSpaceId)}
-      >
-        <div className="listening-space-sky" />
-        <SpaceScenery spaceId={prevSpaceId} backgroundUrl={prevBgUrl} />
-        <div className="listening-space-horizon" />
-        <SpaceParticles spaceId={prevSpaceId} reducedMotion={reducedMotion} />
+    <>
+      <div className="listening-space-root" aria-hidden="true">
+        <div
+          className={`listening-space-layer${crossfading ? ' is-fading' : ''}`}
+          style={listeningSpaceStyleVars(prevSpaceId)}
+        >
+          <div className="listening-space-sky" />
+          <SpaceScenery spaceId={prevSpaceId} backgroundUrl={prevBgUrl} />
+          <div className="listening-space-horizon" />
+          <SpaceParticles spaceId={prevSpaceId} reducedMotion={reducedMotion} />
+        </div>
+        <div
+          className={`listening-space-layer is-front${crossfading ? ' is-active' : ''}`}
+          style={listeningSpaceStyleVars(displaySpaceId)}
+        >
+          <div className="listening-space-sky" />
+          <SpaceScenery spaceId={displaySpaceId} backgroundUrl={displayBgUrl} />
+          <div className="listening-space-horizon" />
+          <SpaceParticles spaceId={displaySpaceId} reducedMotion={reducedMotion} />
+        </div>
       </div>
-      <div
-        className={`listening-space-layer is-front${crossfading ? ' is-active' : ''}`}
-        style={listeningSpaceStyleVars(displaySpaceId)}
-      >
-        <div className="listening-space-sky" />
-        <SpaceScenery spaceId={displaySpaceId} backgroundUrl={displayBgUrl} />
-        <div className="listening-space-horizon" />
-        <SpaceParticles spaceId={displaySpaceId} reducedMotion={reducedMotion} />
-      </div>
-    </div>,
+
+      {isFullscreen ? (
+        <button
+          type="button"
+          className="listening-space-fullscreen-exit"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            void toggleFullscreen()
+          }}
+          title="全画面を終了"
+        >
+          縮小
+        </button>
+      ) : null}
+
+      {fullscreenToast ? (
+        <p className="listening-space-fullscreen-toast" role="status">
+          {fullscreenToast}
+        </p>
+      ) : null}
+    </>,
     document.body,
   )
 }
@@ -177,6 +248,7 @@ export function ListeningSpaceSettings({
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [libraryThumbs, setLibraryThumbs] = useState({})
   const fileInputRef = useRef(null)
+  const { isFullscreen, toggleFullscreen } = useDocumentFullscreen()
 
   const activeSpace = resolveListeningSpace(spaceId)
   const activeEntry = backgrounds[spaceId] || null
@@ -417,8 +489,18 @@ export function ListeningSpaceSettings({
           <input type="checkbox" checked={focusMode} onChange={handleFocusToggle} />
           <span>集中モード</span>
         </label>
-        <button type="button" className="secondary-button listening-space-fullscreen" onClick={() => tryEnterFullscreen()}>
-          全画面
+        <button
+          type="button"
+          className={`secondary-button listening-space-fullscreen${isFullscreen ? ' is-active' : ''}`}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            void toggleFullscreen()
+          }}
+          title={isFullscreen ? '全画面を終了' : '全画面で景色を見る'}
+        >
+          {isFullscreen ? '縮小' : '全画面'}
         </button>
       </div>
     </div>

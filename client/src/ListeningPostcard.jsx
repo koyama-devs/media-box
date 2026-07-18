@@ -1,4 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import jacketSakuraUrl from './assets/vinyl-jacket-0-sakura.svg?url'
 import jacketPosterUrl from './assets/vinyl-jacket-1-poster.svg?url'
 import jacketRecordUrl from './assets/vinyl-jacket-2-record.svg?url'
@@ -294,7 +295,7 @@ export default function ListeningPostcard({
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose, initialSpaceId])
 
-  if (!open) return null
+  if (!open || typeof document === 'undefined') return null
 
   const activeTheme = getPostcardThemeFromSpace(spaceId)
 
@@ -380,7 +381,7 @@ export default function ListeningPostcard({
     }
   }
 
-  return (
+  return createPortal(
     <div
       className="postcard-overlay"
       role="dialog"
@@ -490,6 +491,7 @@ export default function ListeningPostcard({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
