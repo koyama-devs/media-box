@@ -2319,9 +2319,9 @@ const playPrevious = useCallback(() => {
                             type="button"
                             className="secondary-button player-expand-btn"
                             onClick={togglePlayerExpanded}
-                            title={playerExpanded ? 'プレイヤーを小さくして景色を広く見る' : 'プレイヤーの詳細を表示'}
+                            title={playerExpanded ? '景色を広く見る' : 'プレイヤーを開く'}
                           >
-                            {playerExpanded ? '景色優先' : '詳細表示'}
+                            {playerExpanded ? '景色を見る' : 'プレイヤーを開く'}
                           </button>
                         ) : null}
                         <button
