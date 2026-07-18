@@ -258,7 +258,10 @@ function normalizePlaylistName(name) {
 function isStudyPlaylistName(playlist) {
   const name = normalizePlaylistName(playlist?.name)
   if (!name) return false
-  return /英語|学習|english|study|toeic|ielts|単語|listening\s*practice|học|tiếng\s*anh/.test(name)
+  // Match JP / EN / VN / romaji (e.g. eigogakushuu = 英語学習)
+  return /英語|学習|english|study|toeic|ielts|単語|listening\s*practice|học|tiếng\s*anh|eigo|gakushuu|gakushu|eigogakushuu|eigogakushu/.test(
+    name,
+  )
 }
 
 function isMusicPlaylistName(playlist) {

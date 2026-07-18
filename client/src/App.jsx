@@ -20,12 +20,12 @@ import {
     uploadMediaFile,
 } from './firebase'
 import ListeningPostcard from './ListeningPostcard'
-import ListeningSpace from './ListeningSpace'
+import ListeningSpace, { ListeningSpaceSettings } from './ListeningSpace'
 import {
-    getSpaceBackground,
     listeningSpaceStyleVars,
     loadAmbientSettings,
     loadSavedListeningSpaceId,
+    loadSpaceBackgrounds,
     resolveTodayJacketStyleId,
     saveListeningSpaceId,
     suggestListeningSpace,
@@ -58,7 +58,7 @@ import {
 import VinylPlayer from './VinylPlayer'
 
 const AUTH_KEY = 'media-share-lite-auth'
-const PASSWORD = 'hiro'
+const PASSWORDS = new Set(['hiro', 'zen'])
 const TRACK_QUERY_KEY = 'track'
 
 function getTrackShareUrl(itemId) {
@@ -329,7 +329,8 @@ function App() {
   const [ambientVolume, setAmbientVolume] = useState(() => ambientBoot.volume)
   const [focusMode, setFocusMode] = useState(true)
   const [playerExpanded, setPlayerExpanded] = useState(true)
-  const [spacePanelMinimized, setSpacePanelMinimized] = useState(false)
+  const [spaceSettingsOpen, setSpaceSettingsOpen] = useState(false)
+  const [spaceBackgrounds, setSpaceBackgrounds] = useState(() => loadSpaceBackgrounds())
   const {
     panelRef: playerPanelRef,
     panelStyle: playerPanelStyle,
@@ -641,7 +642,7 @@ function App() {
       setTodaySpaceBackgroundUrl(null)
       return undefined
     }
-    const entry = getSpaceBackground(todaySpaceId)
+    const entry = spaceBackgrounds[todaySpaceId] || null
     let cancelled = false
     if (!entry) {
       setTodaySpaceBackgroundUrl(null)
@@ -665,7 +666,7 @@ function App() {
     }
     setTodaySpaceBackgroundUrl(null)
     return undefined
-  }, [showTodayHero, todaySpaceId, ensureMediaUrl])
+  }, [showTodayHero, todaySpaceId, spaceBackgrounds, ensureMediaUrl])
 
   useEffect(() => {
     if (!todayItem || !showTodayHero) {
@@ -749,7 +750,7 @@ function App() {
     setListeningSpaceOpen(true)
     setFocusMode(true)
     setPlayerExpanded(false)
-    setSpacePanelMinimized(false)
+    setSpaceSettingsOpen(false)
     resetPlayerPanelPosition()
     skipTodayHero()
     setPlaylistMode(true)
@@ -775,7 +776,7 @@ function App() {
       setListeningSpaceOpen(true)
       setFocusMode(true)
       setPlayerExpanded(false)
-      setSpacePanelMinimized(false)
+      setSpaceSettingsOpen(false)
       resetPlayerPanelPosition()
       if (shouldResume) resumePlaybackSoon()
     },
@@ -786,19 +787,31 @@ function App() {
     const shouldResume = Boolean(mediaRef.current && !mediaRef.current.paused)
     setListeningSpaceOpen(false)
     setPlayerExpanded(true)
-    setSpacePanelMinimized(false)
+    setSpaceSettingsOpen(false)
     resetPlayerPanelPosition()
     if (shouldResume) resumePlaybackSoon()
   }, [resetPlayerPanelPosition, resumePlaybackSoon])
 
   useEffect(() => {
-    document.body.classList.toggle('is-space-panel-minimized', listeningSpaceOpen && spacePanelMinimized)
-    return () => document.body.classList.remove('is-space-panel-minimized')
-  }, [listeningSpaceOpen, spacePanelMinimized])
+    document.body.classList.toggle('is-focus-mode-off', listeningSpaceOpen && !focusMode)
+    return () => {
+      document.body.classList.remove('is-focus-mode-off')
+    }
+  }, [listeningSpaceOpen, focusMode])
 
   const togglePlayerExpanded = useCallback(() => {
     setPlayerExpanded((current) => !current)
   }, [])
+
+  const handleFocusModeChange = useCallback((next) => {
+    setFocusMode(next)
+    // Focus OFF = normal full layout: the card joins the grid, so show
+    // the full player and forget any dragged position.
+    if (!next) {
+      setPlayerExpanded(true)
+      resetPlayerPanelPosition()
+    }
+  }, [resetPlayerPanelPosition])
 
   const handleListeningSpaceChange = useCallback((nextId) => {
     setListeningSpaceId(nextId)
@@ -1561,7 +1574,7 @@ const playPrevious = useCallback(() => {
   const handleLogin = (event) => {
     event.preventDefault()
 
-    if (password === PASSWORD) {
+    if (PASSWORDS.has(password)) {
       try {
         window.localStorage.setItem(AUTH_KEY, 'true')
       } catch {
@@ -2037,7 +2050,7 @@ const playPrevious = useCallback(() => {
 
   return (
     <div
-      className={`app-shell${showTodayHero ? ' app-shell--today' : ''}${listeningSpaceOpen ? ' app-shell--listening-space' : ''}${listeningSpaceOpen && !playerExpanded ? ' is-player-compact-view' : ''}${listeningSpaceOpen && spacePanelMinimized ? ' is-space-panel-minimized' : ''}`}
+      className={`app-shell${showTodayHero ? ' app-shell--today' : ''}${listeningSpaceOpen ? ' app-shell--listening-space' : ''}${listeningSpaceOpen && !playerExpanded ? ' is-player-compact-view' : ''}`}
       style={shellSpaceStyle}
     >
       {!isLoggedIn ? (
@@ -2213,15 +2226,17 @@ const playPrevious = useCallback(() => {
           {error ? <p className="message error">{error}</p> : null}
 
           <main
-            className={`content-grid${listeningSpaceOpen ? ' is-in-space' : ''}${listeningSpaceOpen && focusMode ? ' is-focus-mode' : ''}${listeningSpaceOpen && !playerExpanded ? ' is-player-compact' : ''}`}
+            className={`content-grid${listeningSpaceOpen ? ' is-in-space' : ''}${listeningSpaceOpen && focusMode ? ' is-focus-mode' : ''}${listeningSpaceOpen && focusMode && !playerExpanded ? ' is-player-compact' : ''}`}
           >
             {(() => {
-              const floatingInSpace = listeningSpaceOpen
-              const floatingCompact = listeningSpaceOpen && !playerExpanded
+              // Focus ON: card floats over the scenery. Focus OFF: card sits
+              // inline in the normal grid layout together with the list.
+              const floatingInSpace = listeningSpaceOpen && focusMode
+              const floatingCompact = floatingInSpace && !playerExpanded
               const playerCard = (
             <section
               ref={floatingInSpace ? playerPanelRef : undefined}
-              className={`player-card${listeningSpaceOpen ? ' is-in-space' : ''}${listeningSpaceOpen && playerExpanded ? ' is-expanded' : ''}${floatingCompact ? ' is-compact' : ''}${floatingInSpace && playerPanelClassName ? ` ${playerPanelClassName}` : ''}`}
+              className={`player-card${listeningSpaceOpen ? ' is-in-space' : ''}${floatingInSpace && playerExpanded ? ' is-expanded' : ''}${floatingCompact ? ' is-compact' : ''}${floatingInSpace && playerPanelClassName ? ` ${playerPanelClassName}` : ''}`}
               style={floatingInSpace ? playerPanelStyle : undefined}
               onPointerDown={floatingInSpace ? onPlayerPanelPointerDown : undefined}
             >
@@ -2232,40 +2247,9 @@ const playPrevious = useCallback(() => {
                 </div>
               ) : selectedItem ? (
                 <>
-                  {listeningSpaceOpen && !playerExpanded ? (
+                  {listeningSpaceOpen ? (
                     <div className="player-compact-bar">
-                      <button
-                        type="button"
-                        className="floating-drag-handle"
-                        data-drag-handle
-                        aria-label="ドラッグして移動"
-                        title="ドラッグして移動"
-                      >
-                        ⋮⋮
-                      </button>
-                      <p className="player-compact-title">{getDisplayName(selectedItem.name)}</p>
-                      <div className="player-compact-actions">
-                        <button
-                          type="button"
-                          className="secondary-button player-expand-btn"
-                          onClick={togglePlayerExpanded}
-                        >
-                          プレイヤーを開く
-                        </button>
-                        <button
-                          type="button"
-                          className="secondary-button listening-space-open-btn is-active"
-                          onClick={closeListeningSpace}
-                        >
-                          場所を閉じる
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {selectedItem.kind === 'audio' && !(listeningSpaceOpen && !playerExpanded) ? (
-                    <div className="player-space-access">
-                      {listeningSpaceOpen ? (
+                      {focusMode ? (
                         <button
                           type="button"
                           className="floating-drag-handle"
@@ -2276,28 +2260,71 @@ const playPrevious = useCallback(() => {
                           ⋮⋮
                         </button>
                       ) : null}
-                      <button
-                        type="button"
-                        className={`secondary-button listening-space-open-btn${listeningSpaceOpen ? ' is-active' : ''}`}
-                        onClick={() => (listeningSpaceOpen ? closeListeningSpace() : openListeningSpace())}
-                        title="リスニングスペースを開く"
-                      >
-                        {listeningSpaceOpen ? '場所を閉じる' : '聴く場所'}
-                      </button>
-                      {listeningSpaceOpen && playerExpanded ? (
+                      <p className="player-compact-title">{getDisplayName(selectedItem.name)}</p>
+                      <div className="player-compact-actions">
+                        {focusMode ? (
+                          <button
+                            type="button"
+                            className="secondary-button player-expand-btn"
+                            onClick={togglePlayerExpanded}
+                            title={playerExpanded ? '小さくして景色を見る' : 'プレイヤーを開く'}
+                          >
+                            {playerExpanded ? '景色' : '開く'}
+                          </button>
+                        ) : null}
                         <button
                           type="button"
-                          className="secondary-button player-scenery-btn"
-                          onClick={togglePlayerExpanded}
-                          title="景色を広く見る"
+                          className={`secondary-button space-settings-btn${spaceSettingsOpen ? ' is-active' : ''}`}
+                          onClick={() => setSpaceSettingsOpen((current) => !current)}
+                          title="場所の設定"
                         >
-                          景色を見る
+                          設定
                         </button>
-                      ) : null}
+                        <button
+                          type="button"
+                          className="icon-button listening-space-close"
+                          onClick={closeListeningSpace}
+                          aria-label="場所を閉じる"
+                          title="場所を閉じる"
+                        >
+                          ×
+                        </button>
+                      </div>
                     </div>
                   ) : null}
 
-                  <div className={`player-header${listeningSpaceOpen && !playerExpanded ? ' is-space-hidden' : ''}`}>
+                  {listeningSpaceOpen && spaceSettingsOpen && selectedItem.kind === 'audio' ? (
+                    <ListeningSpaceSettings
+                      spaceId={listeningSpaceId}
+                      onSpaceChange={handleListeningSpaceChange}
+                      ambientEnabled={ambientEnabled}
+                      ambientVolume={ambientVolume}
+                      onAmbientEnabledChange={setAmbientEnabled}
+                      onAmbientVolumeChange={setAmbientVolume}
+                      focusMode={focusMode}
+                      onFocusModeChange={handleFocusModeChange}
+                      suggestedSpaceId={suggestedListeningSpaceId}
+                      backgrounds={spaceBackgrounds}
+                      onBackgroundsChange={setSpaceBackgrounds}
+                      libraryImages={imageItems}
+                      loadLibraryImageUrl={ensureMediaUrl}
+                    />
+                  ) : null}
+
+                  {!listeningSpaceOpen && selectedItem.kind === 'audio' ? (
+                    <div className="player-space-access">
+                      <button
+                        type="button"
+                        className="secondary-button listening-space-open-btn"
+                        onClick={() => openListeningSpace()}
+                        title="リスニングスペースを開く"
+                      >
+                        聴く場所
+                      </button>
+                    </div>
+                  ) : null}
+
+                  <div className={`player-header${listeningSpaceOpen && focusMode && !playerExpanded ? ' is-space-hidden' : ''}`}>
                     <div>
                       <p className="eyebrow">プレビュー</p>
                       <h3>{getDisplayName(selectedItem.name)}</h3>
@@ -2378,24 +2405,9 @@ const playPrevious = useCallback(() => {
                           onJacketStyleChange={handleJacketStyleChange}
                           onTogglePlayback={handleTogglePlayback}
                           onSeek={handleSeekAudio}
-                          compact={listeningSpaceOpen && !playerExpanded}
-                        >
-                          <audio
-                            ref={mediaRef}
-                            className="sr-only"
-                            preload="auto"
-                            src={previewUrl}
-                            onCanPlayThrough={handleMediaCanPlay}
-                            onLoadedMetadata={handleMediaDuration}
-                            onDurationChange={handleMediaDuration}
-                            onEnded={handleMediaEnded}
-                            onPlay={handleMediaPlay}
-                            onPause={handleMediaPause}
-                            onTimeUpdate={handleMediaTimeUpdate}
-                            onSeeked={handleMediaTimeUpdate}
-                          />
-                        </VinylPlayer>
-                        <div className={listeningSpaceOpen && !playerExpanded ? 'is-space-hidden' : ''}>
+                          compact={listeningSpaceOpen && focusMode && !playerExpanded}
+                        />
+                        <div className={listeningSpaceOpen && focusMode && !playerExpanded ? 'is-space-hidden' : ''}>
                         <LyricsPanel
                           key={selectedItem.id}
                           trackId={selectedItem.id}
@@ -2432,7 +2444,7 @@ const playPrevious = useCallback(() => {
                     </div>
                   )}
 
-                  <div className={`video-meta${listeningSpaceOpen && !playerExpanded ? ' is-space-hidden' : ''}`}>
+                  <div className={`video-meta${listeningSpaceOpen && focusMode && !playerExpanded ? ' is-space-hidden' : ''}`}>
                     <span className={`kind-badge kind-${selectedItem.kind}`}>
                       {getKindLabel(selectedItem.kind)}
                     </span>
@@ -3039,25 +3051,34 @@ const playPrevious = useCallback(() => {
         </>
       )}
 
+      {/* The audio element lives outside the player card so the card can
+          switch between floating / inline layouts without interrupting playback. */}
+      {isLoggedIn && selectedItem?.kind === 'audio' && !loadingPreview && previewUrl ? (
+        <audio
+          ref={mediaRef}
+          className="sr-only"
+          preload="auto"
+          src={previewUrl}
+          onCanPlayThrough={handleMediaCanPlay}
+          onLoadedMetadata={handleMediaDuration}
+          onDurationChange={handleMediaDuration}
+          onEnded={handleMediaEnded}
+          onPlay={handleMediaPlay}
+          onPause={handleMediaPause}
+          onTimeUpdate={handleMediaTimeUpdate}
+          onSeeked={handleMediaTimeUpdate}
+        />
+      ) : null}
+
       {isLoggedIn && listeningSpaceOpen && selectedItem?.kind === 'audio' ? (
         <ListeningSpace
           open={listeningSpaceOpen}
           spaceId={listeningSpaceId}
-          onSpaceChange={handleListeningSpaceChange}
           onClose={closeListeningSpace}
           ambientEnabled={ambientEnabled}
           ambientVolume={ambientVolume}
-          onAmbientEnabledChange={setAmbientEnabled}
-          onAmbientVolumeChange={setAmbientVolume}
-          focusMode={focusMode}
-          onFocusModeChange={setFocusMode}
-          playerExpanded={playerExpanded}
-          onTogglePlayerExpanded={togglePlayerExpanded}
-          panelMinimized={spacePanelMinimized}
-          onPanelMinimizedChange={setSpacePanelMinimized}
-          libraryImages={imageItems}
+          backgrounds={spaceBackgrounds}
           loadLibraryImageUrl={ensureMediaUrl}
-          suggestedSpaceId={suggestedListeningSpaceId}
           reducedMotion={reducedMotion}
         />
       ) : null}

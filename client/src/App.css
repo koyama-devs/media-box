@@ -2824,6 +2824,42 @@ body.is-listening-space-open #root {
   z-index: 1;
 }
 
+/* Focus OFF: bring app chrome/list above the scenery so the toggle is visible */
+body.is-listening-space-open.is-focus-mode-off #root {
+  z-index: 55;
+}
+
+body.is-listening-space-open.is-focus-mode-off .listening-space-root {
+  opacity: 0.42;
+  filter: saturate(0.85);
+}
+
+/* Focus OFF: the card sits inline in the grid — give it a solid enough
+   background to read over the dimmed scenery, same as the list card. */
+body.is-listening-space-open.is-focus-mode-off .player-card.is-in-space {
+  background: rgba(8, 12, 20, 0.72);
+  backdrop-filter: blur(10px);
+}
+
+body.is-listening-space-open.is-focus-mode-off .content-grid.is-in-space {
+  pointer-events: auto;
+  display: grid;
+  min-height: auto;
+}
+
+body.is-listening-space-open.is-focus-mode-off .content-grid.is-in-space .list-card {
+  display: block;
+  pointer-events: auto;
+  background: rgba(8, 12, 20, 0.72);
+  backdrop-filter: blur(10px);
+}
+
+body.is-listening-space-open.is-focus-mode-off .topbar,
+body.is-listening-space-open.is-focus-mode-off .upload-card {
+  background: rgba(8, 12, 20, 0.72);
+  backdrop-filter: blur(10px);
+}
+
 .app-shell--listening-space {
   position: relative;
   min-height: 100vh;
@@ -2983,73 +3019,9 @@ body.is-listening-space-open #root {
   z-index: 3;
 }
 
-.listening-space-panel {
-  position: fixed;
-  left: 50%;
-  bottom: max(16px, env(safe-area-inset-bottom, 0px) + 12px);
-  transform: translateX(-50%);
-  z-index: 70;
-  width: min(100% - 24px, 720px);
-  padding: 14px 16px;
-  border-radius: 16px;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  background: rgba(8, 12, 20, 0.4);
-  backdrop-filter: blur(8px);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.3);
-  color: #f8fafc;
-  touch-action: none;
-  transition: background 0.25s ease, backdrop-filter 0.25s ease;
-}
-
-.listening-space-panel:hover,
-.listening-space-panel:focus-within {
-  background: rgba(8, 12, 20, 0.68);
-  backdrop-filter: blur(12px);
-}
-
-.listening-space-panel.is-drag-positioned {
-  left: auto;
-  bottom: auto;
-  transform: none;
-}
-
-.listening-space-panel.is-dragging,
-.player-card.is-in-space.is-compact.is-dragging {
+.player-card.is-in-space.is-dragging {
   cursor: grabbing;
   user-select: none;
-}
-
-.listening-space-panel.is-minimized {
-  width: auto;
-  max-width: min(100% - 24px, 420px);
-  padding: 8px 10px;
-}
-
-.listening-space-mini {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.listening-space-mini-label {
-  font-size: 0.84rem;
-  font-weight: 600;
-  color: #f8fafc;
-  white-space: nowrap;
-}
-
-.listening-space-panel-heading {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  min-width: 0;
-}
-
-.listening-space-panel-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
 }
 
 .floating-drag-handle {
@@ -3074,25 +3046,30 @@ body.is-listening-space-open #root {
   cursor: grabbing;
 }
 
-.listening-space-minimize,
-.listening-space-expand {
-  font-size: 0.9rem;
-  line-height: 1;
+.player-space-settings {
+  margin-bottom: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+  padding-bottom: 10px;
+  max-height: min(40dvh, 320px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  touch-action: pan-y;
 }
 
-.listening-space-panel-top {
+.player-space-settings::-webkit-scrollbar {
+  display: none;
+}
+
+.listening-space-heading-row {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   margin-bottom: 10px;
-}
-
-.listening-space-eyebrow {
-  margin: 0 0 2px;
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #93c5fd;
 }
 
 .listening-space-title {
@@ -3293,28 +3270,33 @@ body.is-listening-space-open #root {
 .player-card.is-in-space.is-expanded {
   position: fixed;
   left: 50%;
-  top: 50%;
-  bottom: auto;
-  transform: translate(-50%, -50%);
-  z-index: 60;
+  bottom: max(16px, env(safe-area-inset-bottom, 0px) + 12px);
+  top: auto;
+  transform: translateX(-50%);
+  z-index: 70;
   width: min(100% - 24px, 460px);
-  max-height: min(90dvh, 820px);
-  overflow: auto;
+  max-height: calc(100dvh - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   margin: 0;
   padding: 16px;
-  padding-bottom: 16px;
+  padding-bottom: 20px;
   background: rgba(8, 12, 20, 0.42);
   backdrop-filter: blur(8px);
   border: 1px solid rgba(148, 163, 184, 0.3);
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
-  touch-action: none;
+  touch-action: pan-y;
   pointer-events: auto;
 }
 
 .player-card.is-in-space.is-expanded.is-drag-positioned {
   left: auto;
   top: auto;
+  bottom: auto;
   transform: none;
+  max-height: min(85dvh, 820px);
 }
 
 .content-grid.is-in-space {
@@ -3340,10 +3322,10 @@ body.is-listening-space-open #root {
 .player-card.is-in-space.is-compact {
   position: fixed;
   left: 50%;
-  bottom: calc(clamp(200px, 28vh, 280px) + 12px);
+  bottom: max(16px, env(safe-area-inset-bottom, 0px) + 12px);
   transform: translateX(-50%);
-  z-index: 60;
-  width: min(100% - 24px, 400px);
+  z-index: 70;
+  width: min(100% - 24px, 440px);
   padding: 10px 12px 12px;
   margin: 0;
   background: rgba(8, 12, 20, 0.38);
@@ -3351,7 +3333,11 @@ body.is-listening-space-open #root {
   border: 1px solid rgba(148, 163, 184, 0.3);
   border-radius: var(--radius-lg);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.32);
-  touch-action: none;
+  max-height: calc(100dvh - 16px - env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
   pointer-events: auto;
 }
 
@@ -3364,6 +3350,12 @@ body.is-listening-space-open #root {
 .player-card.is-in-space.is-compact,
 .player-card.is-in-space.is-expanded {
   transition: background 0.25s ease, backdrop-filter 0.25s ease;
+  scrollbar-width: none;
+}
+
+.player-card.is-in-space.is-compact::-webkit-scrollbar,
+.player-card.is-in-space.is-expanded::-webkit-scrollbar {
+  display: none;
 }
 
 .player-card.is-in-space.is-compact:hover,
@@ -3372,11 +3364,6 @@ body.is-listening-space-open #root {
 .player-card.is-in-space.is-expanded:focus-within {
   background: rgba(8, 12, 20, 0.66);
   backdrop-filter: blur(12px);
-}
-
-.app-shell--listening-space.is-player-compact-view.is-space-panel-minimized .player-card.is-in-space.is-compact:not(.is-drag-positioned),
-body.is-listening-space-open.is-space-panel-minimized .player-card.is-in-space.is-compact:not(.is-drag-positioned) {
-  bottom: clamp(72px, 12vh, 96px);
 }
 
 .player-compact-bar {
@@ -3485,11 +3472,6 @@ body.is-listening-space-open.is-space-panel-minimized .player-card.is-in-space.i
   font-size: 0.72rem;
 }
 
-.listening-space-player-toggle {
-  min-width: auto;
-  white-space: nowrap;
-}
-
 .app-shell--listening-space.is-player-compact-view {
   overflow: visible;
 }
@@ -3547,13 +3529,18 @@ body.is-listening-space-open.is-space-panel-minimized .player-card.is-in-space.i
 }
 
 @media (max-width: 640px) {
-  .listening-space-panel:not(.is-drag-positioned) {
-    bottom: 8px;
-    padding: 12px;
+  .player-card.is-in-space.is-expanded:not(.is-drag-positioned),
+  .player-card.is-in-space.is-compact:not(.is-drag-positioned) {
+    bottom: max(8px, env(safe-area-inset-bottom, 0px) + 6px);
+    width: min(100% - 16px, 460px);
   }
 
-  .listening-space-panel.is-minimized:not(.is-drag-positioned) {
-    padding: 8px;
+  .player-card.is-in-space.is-expanded:not(.is-drag-positioned) {
+    max-height: calc(100dvh - 16px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  }
+
+  .player-space-settings {
+    max-height: min(34dvh, 280px);
   }
 
   .listening-space-controls {
@@ -3563,6 +3550,12 @@ body.is-listening-space-open.is-space-panel-minimized .player-card.is-in-space.i
 
   .listening-space-fullscreen {
     width: 100%;
+  }
+
+  body.is-listening-space-open.is-focus-mode-off .content-grid.is-in-space {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
   }
 }
 
