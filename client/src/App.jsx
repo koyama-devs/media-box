@@ -2319,18 +2319,18 @@ const playPrevious = useCallback(() => {
                             type="button"
                             className="secondary-button player-expand-btn"
                             onClick={togglePlayerExpanded}
-                            title={playerExpanded ? '小さくして景色を見る' : 'プレイヤーを開く'}
+                            title={playerExpanded ? 'プレイヤーを小さくして景色を広く見る' : 'プレイヤーの詳細を表示'}
                           >
-                            {playerExpanded ? '景色' : '開く'}
+                            {playerExpanded ? '景色優先' : '詳細表示'}
                           </button>
                         ) : null}
                         <button
                           type="button"
                           className={`secondary-button space-settings-btn${spaceSettingsOpen ? ' is-active' : ''}`}
                           onClick={() => setSpaceSettingsOpen((current) => !current)}
-                          title="場所の設定"
+                          title={spaceSettingsOpen ? '場所の設定を閉じる' : '場所の設定を開く'}
                         >
-                          設定
+                          {spaceSettingsOpen ? '設定を閉じる' : '場所設定'}
                         </button>
                         <button
                           type="button"
