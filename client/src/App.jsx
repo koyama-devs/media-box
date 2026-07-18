@@ -2,58 +2,58 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
 import {
-    deleteMediaItem,
-    getFirebaseErrorMessage,
-    loadMediaBlobUrl,
-    MAX_FILE_SIZE,
-    recordAccessVisit,
-    saveSharedPlaylists,
-    sortMediaItems,
-    subscribeToMediaItems,
-    subscribeToSharedPlaylists,
-    updateMediaCover,
-    updateMediaJacket,
-    updateMediaJacketStyle,
-    updateMediaLyrics,
-    updateMediaName,
-    updatePlaylistOrder,
-    uploadMediaFile,
+  deleteMediaItem,
+  getFirebaseErrorMessage,
+  loadMediaBlobUrl,
+  MAX_FILE_SIZE,
+  recordAccessVisit,
+  saveSharedPlaylists,
+  sortMediaItems,
+  subscribeToMediaItems,
+  subscribeToSharedPlaylists,
+  updateMediaCover,
+  updateMediaJacket,
+  updateMediaJacketStyle,
+  updateMediaLyrics,
+  updateMediaName,
+  updatePlaylistOrder,
+  uploadMediaFile,
 } from './firebase'
 import ListeningPostcard from './ListeningPostcard'
 import ListeningSpace, { ListeningSpaceSettings } from './ListeningSpace'
 import {
-    listeningSpaceStyleVars,
-    loadAmbientSettings,
-    loadSavedListeningSpaceId,
-    loadSpaceBackgrounds,
-    resolveTodayJacketStyleId,
-    saveListeningSpaceId,
-    suggestListeningSpace,
+  listeningSpaceStyleVars,
+  loadAmbientSettings,
+  loadSavedListeningSpaceId,
+  loadSpaceBackgrounds,
+  resolveTodayJacketStyleId,
+  saveListeningSpaceId,
+  suggestListeningSpace,
 } from './listeningSpaces'
 import { pickPostcardLyric } from './lyrics'
 import LyricsPanel from './LyricsPanel'
 import {
-    appendTodayRecordHistory,
-    formatTodayDateLabel,
-    getTodayShuffleRemaining,
-    isTodayRecordShown,
-    loadTodayRecordHistory,
-    markTodayRecordShown,
-    pickTodayAudioItem,
-    resolveJacketUrl,
-    resolveTodayReveal,
-    useTodayShuffle,
+  appendTodayRecordHistory,
+  formatTodayDateLabel,
+  getTodayShuffleRemaining,
+  isTodayRecordShown,
+  loadTodayRecordHistory,
+  markTodayRecordShown,
+  pickTodayAudioItem,
+  resolveJacketUrl,
+  resolveTodayReveal,
+  useTodayShuffle,
 } from './todayPick'
 import TodayRecord from './TodayRecord'
 import { useFloatingPanel } from './useFloatingPanel'
 import {
-    createPlaylistId,
-    loadCustomPlaylists,
-    loadFavoriteIds,
-    loadListFilter,
-    saveCustomPlaylists,
-    saveFavoriteIds,
-    saveListFilter,
+  createPlaylistId,
+  loadCustomPlaylists,
+  loadFavoriteIds,
+  loadListFilter,
+  saveCustomPlaylists,
+  saveFavoriteIds,
+  saveListFilter,
 } from './userPlaylists'
 import VinylPlayer from './VinylPlayer'
 
@@ -89,11 +89,26 @@ function getMediaKind(fileType, fileName = '') {
   if (type.startsWith('audio/')) return 'audio'
   if (type.startsWith('image/')) return 'image'
 
-  if (['mp4', 'mov', 'avi', 'mkv', 'webm', 'ogg'].includes(extension)) return 'video'
-  if (['mp3', 'wav', 'm4a', 'aac', 'flac'].includes(extension)) return 'audio'
+  if (['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'].includes(extension)) return 'video'
+  if (['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'oga', 'opus', 'wma', 'aiff', 'aif', 'weba', 'caf'].includes(extension)) {
+    return 'audio'
+  }
   if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(extension)) return 'image'
 
   return 'file'
+}
+
+/** Prefer MIME/extension; fall back to stored kind for older uploads. */
+function resolveMediaKind(item) {
+  const derived = getMediaKind(item?.type, item?.originalName || item?.name || '')
+  if (derived !== 'file') return derived
+  if (item?.kind === 'audio' || item?.kind === 'video' || item?.kind === 'image') return item.kind
+  return 'file'
+}
+
+function normalizeMediaItem(item) {
+  if (!item) return item
+  return { ...item, kind: resolveMediaKind(item) }
 }
 
 function getFileExtension(fileName = '') {
@@ -369,6 +384,38 @@ function App() {
   const playableItems = useMemo(
     () => items.filter((item) => item.kind === 'audio' || item.kind === 'video'),
     [items],
+  )
+
+  const playableIdSet = useMemo(
+    () => new Set(playableItems.map((item) => item.id)),
+    [playableItems],
+  )
+
+  const mediaCounts = useMemo(() => {
+    let audio = 0
+    let video = 0
+    let image = 0
+    let totalSize = 0
+    for (const item of items) {
+      totalSize += item.size || 0
+      if (item.kind === 'audio') audio += 1
+      else if (item.kind === 'video') video += 1
+      else if (item.kind === 'image') image += 1
+    }
+    return { audio, video, image, totalSize }
+  }, [items])
+
+  const playlistLiveCounts = useMemo(() => {
+    const map = {}
+    for (const playlist of customPlaylists) {
+      map[playlist.id] = playlist.trackIds.filter((id) => playableIdSet.has(id)).length
+    }
+    return map
+  }, [customPlaylists, playableIdSet])
+
+  const favoriteLiveCount = useMemo(
+    () => favoriteIds.filter((id) => playableIdSet.has(id)).length,
+    [favoriteIds, playableIdSet],
   )
 
   const todayBaseItem = useMemo(() => {
@@ -1287,12 +1334,13 @@ const playPrevious = useCallback(() => {
 
     const unsubscribe = subscribeToMediaItems(
       (nextItems) => {
-        setItems(nextItems)
+        setItems(nextItems.map(normalizeMediaItem))
         setSelectedItemId((currentId) => {
           if (currentId && nextItems.some((item) => item.id === currentId)) {
             return currentId
           }
-          const firstPlayable = nextItems.find(
+          const normalized = nextItems.map(normalizeMediaItem)
+          const firstPlayable = normalized.find(
             (item) => item.kind === 'audio' || item.kind === 'video',
           )
           return firstPlayable?.id || null
@@ -2099,8 +2147,12 @@ const playPrevious = useCallback(() => {
               <h2>メディア共有</h2>
             </div>
             <div className="topbar-stats">
-              <span className="stat-badge">{playableItems.length} 件</span>
-              <span className="stat-badge">{playableItems.reduce((sum, item) => sum + (item.size || 0), 0) ? formatSize(playableItems.reduce((sum, item) => sum + (item.size || 0), 0)) : '0 MB'}</span>
+              <span className="stat-badge stat-badge--audio" title="音声ファイル数">音声 {mediaCounts.audio}</span>
+              <span className="stat-badge stat-badge--video" title="動画ファイル数">動画 {mediaCounts.video}</span>
+              <span className="stat-badge stat-badge--image" title="画像ファイル数">画像 {mediaCounts.image}</span>
+              <span className="stat-badge" title="全メディアの合計サイズ">
+                {mediaCounts.totalSize ? formatSize(mediaCounts.totalSize) : '0 MB'}
+              </span>
               <button type="button" className="secondary-button" onClick={handleLogout}>
                 ログアウト
               </button>
@@ -2489,8 +2541,8 @@ const playPrevious = useCallback(() => {
                   onClick={() => setListFilter('favorites')}
                 >
                   お気に入り
-                  {favoriteIds.length > 0 ? (
-                    <span className="list-filter-count">{favoriteIds.length}</span>
+                  {favoriteLiveCount > 0 ? (
+                    <span className="list-filter-count">{favoriteLiveCount}</span>
                   ) : null}
                 </button>
                 {customPlaylists.map((playlist) => (
@@ -2538,8 +2590,8 @@ const playPrevious = useCallback(() => {
                     title="ダブルクリックで名前変更"
                   >
                     {playlist.name}
-                    {playlist.trackIds.length > 0 ? (
-                      <span className="list-filter-count">{playlist.trackIds.length}</span>
+                    {(playlistLiveCounts[playlist.id] || 0) > 0 ? (
+                      <span className="list-filter-count">{playlistLiveCounts[playlist.id]}</span>
                     ) : null}
                   </button>
                 ))}
