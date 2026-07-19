@@ -831,7 +831,11 @@ function App() {
 
   const openListeningSpace = useCallback(
     (spaceIdOverride = null) => {
-      const nextId = spaceIdOverride || suggestedListeningSpaceId
+      // Keep the user's last choice when reopening; only fall back to suggestion
+      // when there is no valid saved space (e.g. deleted custom space).
+      const nextId =
+        spaceIdOverride
+        || (isKnownSpaceId(listeningSpaceId, customSpaces) ? listeningSpaceId : suggestedListeningSpaceId)
       const shouldResume = Boolean(mediaRef.current && !mediaRef.current.paused)
       setListeningSpaceId(nextId)
       saveListeningSpaceId(nextId, customSpaces)
@@ -842,7 +846,7 @@ function App() {
       resetPlayerPanelPosition()
       if (shouldResume) resumePlaybackSoon()
     },
-    [suggestedListeningSpaceId, resetPlayerPanelPosition, resumePlaybackSoon, customSpaces],
+    [listeningSpaceId, suggestedListeningSpaceId, resetPlayerPanelPosition, resumePlaybackSoon, customSpaces],
   )
 
   const closeListeningSpace = useCallback(() => {
