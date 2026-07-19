@@ -20,7 +20,7 @@ function seedParticles(type, width, height, count) {
         x: Math.random() * (width + 80) - 40,
         y: Math.random() * height,
         len: near ? Math.random() * 8 + 14 : mid ? Math.random() * 6 + 10 : Math.random() * 5 + 6,
-        speed: near ? Math.random() * 3.5 + 6.5 : mid ? Math.random() * 2.5 + 4.5 : Math.random() * 1.8 + 3.2,
+        speed: near ? Math.random() * 6 + 12 : mid ? Math.random() * 4.5 + 8.5 : Math.random() * 3 + 6,
         drift: 0,
         width: near ? 1.3 : mid ? 1 : 0.8,
         a: near ? Math.random() * 0.15 + 0.4 : mid ? Math.random() * 0.15 + 0.26 : Math.random() * 0.12 + 0.16,
