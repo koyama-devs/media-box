@@ -329,6 +329,7 @@ function App() {
   const [coverPreviewUrl, setCoverPreviewUrl] = useState(null)
   const [jacketPreviewUrl, setJacketPreviewUrl] = useState(null)
   const [libraryThumbUrls, setLibraryThumbUrls] = useState({})
+  const [libraryViewerItemId, setLibraryViewerItemId] = useState(null)
   const [coverBusy, setCoverBusy] = useState(false)
   const [jacketBusy, setJacketBusy] = useState(false)
   const [editingItemId, setEditingItemId] = useState(null)
@@ -527,6 +528,32 @@ function App() {
     () => items.filter((item) => item.kind === 'image' && item.inLibrary !== false),
     [items],
   )
+
+  const libraryViewerIndex = useMemo(
+    () => imageItems.findIndex((item) => item.id === libraryViewerItemId),
+    [imageItems, libraryViewerItemId],
+  )
+  const libraryViewerItem = libraryViewerIndex >= 0 ? imageItems[libraryViewerIndex] : null
+
+  const stepLibraryViewer = useCallback((offset) => {
+    setLibraryViewerItemId((currentId) => {
+      const currentIndex = imageItems.findIndex((item) => item.id === currentId)
+      if (currentIndex < 0 || imageItems.length === 0) return currentId
+      const nextIndex = (currentIndex + offset + imageItems.length) % imageItems.length
+      return imageItems[nextIndex]?.id || currentId
+    })
+  }, [imageItems])
+
+  useEffect(() => {
+    if (!libraryViewerItem) return undefined
+    const onKey = (event) => {
+      if (event.key === 'Escape') setLibraryViewerItemId(null)
+      if (event.key === 'ArrowRight') stepLibraryViewer(1)
+      if (event.key === 'ArrowLeft') stepLibraryViewer(-1)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [libraryViewerItem, stepLibraryViewer])
 
   const selectedItem = useMemo(
     () => items.find((item) => item.id === selectedItemId) || visiblePlayableItems[0] || playableItems[0] || null,
@@ -3209,27 +3236,25 @@ const playPrevious = useCallback(() => {
 
               {imageItems.length > 0 ? (
                 <div className="cover-library">
-                  <div className="list-header">
-                    <h3>画像ライブラリ</h3>
-                    <span>{imageItems.length} 件</span>
+                  <div className="list-header image-library-header">
+                    <h3>フォトライブラリ</h3>
+                    <span className="image-library-count">{imageItems.length}枚の思い出</span>
                   </div>
-                  <p className="cover-library-hint">
-                    クリックで現在の曲のラベルに設定できます
-                  </p>
                   <ul className="image-library-grid">
-                    {imageItems.map((item) => {
+                    {imageItems.map((item, index) => {
                       const inUse = selectedItem?.coverId === item.id
                       const thumbUrl = libraryThumbUrls[item.id] || null
+                      const featured = index % 7 === 0
                       return (
                         <li
                           key={item.id}
-                          className={`image-library-card${inUse ? ' is-active' : ''}`}
+                          className={`image-library-card${inUse ? ' is-active' : ''}${featured ? ' is-featured' : ''}`}
+                          style={{ '--library-delay': `${Math.min(index, 12) * 45}ms` }}
                         >
                           <button
                             type="button"
                             className="image-library-thumb"
-                            onClick={() => handleAssignCoverFromLibrary(item.id)}
-                            disabled={coverBusy || selectedItem?.kind !== 'audio'}
+                            onClick={() => setLibraryViewerItemId(item.id)}
                             title={getDisplayName(item.name)}
                           >
                             {thumbUrl ? (
@@ -3238,19 +3263,6 @@ const playPrevious = useCallback(() => {
                               <span className="image-library-loading" aria-hidden="true" />
                             )}
                             {inUse ? <span className="image-library-badge">使用中</span> : null}
-                            <span className="image-library-meta">
-                              <strong>{getDisplayName(item.name)}</strong>
-                              <span>{formatSize(item.size)}</span>
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            className="icon-button danger image-library-delete"
-                            title="削除"
-                            aria-label="削除"
-                            onClick={() => requestDelete(item.id)}
-                          >
-                            ×
                           </button>
                         </li>
                       )
@@ -3319,6 +3331,94 @@ const playPrevious = useCallback(() => {
               : null
           }
         />
+      ) : null}
+
+      {libraryViewerItem ? (
+        <div
+          className="image-viewer-overlay"
+          role="presentation"
+          onClick={() => setLibraryViewerItemId(null)}
+        >
+          <div
+            className="image-viewer"
+            role="dialog"
+            aria-modal="true"
+            aria-label={getDisplayName(libraryViewerItem.name)}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="icon-button image-viewer-close"
+              onClick={() => setLibraryViewerItemId(null)}
+              aria-label="閉じる"
+              title="閉じる"
+            >
+              ×
+            </button>
+
+            {imageItems.length > 1 ? (
+              <>
+                <button
+                  type="button"
+                  className="image-viewer-nav image-viewer-nav--prev"
+                  onClick={() => stepLibraryViewer(-1)}
+                  aria-label="前の画像"
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  className="image-viewer-nav image-viewer-nav--next"
+                  onClick={() => stepLibraryViewer(1)}
+                  aria-label="次の画像"
+                >
+                  ›
+                </button>
+              </>
+            ) : null}
+
+            <div className="image-viewer-stage">
+              {libraryThumbUrls[libraryViewerItem.id] ? (
+                <img
+                  key={libraryViewerItem.id}
+                  src={libraryThumbUrls[libraryViewerItem.id]}
+                  alt={getDisplayName(libraryViewerItem.name)}
+                />
+              ) : (
+                <span className="image-library-loading" aria-hidden="true" />
+              )}
+            </div>
+
+            <div className="image-viewer-footer">
+              <div className="image-viewer-info">
+                <strong>{getDisplayName(libraryViewerItem.name)}</strong>
+                <span>
+                  {libraryViewerIndex + 1} / {imageItems.length} · {formatSize(libraryViewerItem.size)}
+                </span>
+              </div>
+              <div className="image-viewer-actions">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={coverBusy || selectedItem?.kind !== 'audio' || selectedItem?.coverId === libraryViewerItem.id}
+                  onClick={() => void handleAssignCoverFromLibrary(libraryViewerItem.id)}
+                >
+                  {selectedItem?.coverId === libraryViewerItem.id ? 'ラベル使用中' : 'ラベルに設定'}
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button image-viewer-delete"
+                  onClick={() => {
+                    setLibraryViewerItemId(null)
+                    requestDelete(libraryViewerItem.id)
+                  }}
+                >
+                  削除
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {pendingDeleteId ? (
