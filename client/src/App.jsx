@@ -328,6 +328,7 @@ function App() {
   const [lyricsBusy, setLyricsBusy] = useState(false)
   const [coverPreviewUrl, setCoverPreviewUrl] = useState(null)
   const [jacketPreviewUrl, setJacketPreviewUrl] = useState(null)
+  const [libraryThumbUrls, setLibraryThumbUrls] = useState({})
   const [coverBusy, setCoverBusy] = useState(false)
   const [jacketBusy, setJacketBusy] = useState(false)
   const [editingItemId, setEditingItemId] = useState(null)
@@ -412,7 +413,9 @@ function App() {
       totalSize += item.size || 0
       if (item.kind === 'audio') audio += 1
       else if (item.kind === 'video') video += 1
-      else if (item.kind === 'image') image += 1
+      // Only count images in the shared library; jacket/cover/space
+      // background uploads are private assets.
+      else if (item.kind === 'image' && item.inLibrary !== false) image += 1
     }
     return { audio, video, image, totalSize }
   }, [items])
@@ -699,6 +702,30 @@ function App() {
     return url
   }, [])
 
+  // Load thumbnails for the image library grid.
+  useEffect(() => {
+    if (!isLoggedIn || imageItems.length === 0) return undefined
+    let cancelled = false
+    const load = async () => {
+      for (const item of imageItems) {
+        if (cancelled) return
+        try {
+          const url = await ensureMediaUrl(item.id, item.type || 'image/jpeg')
+          if (cancelled) return
+          setLibraryThumbUrls((current) => (
+            current[item.id] === url ? current : { ...current, [item.id]: url }
+          ))
+        } catch {
+          /* skip broken thumbnails */
+        }
+      }
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [isLoggedIn, imageItems, ensureMediaUrl])
+
   useEffect(() => {
     if (!showTodayHero) {
       setTodaySpaceBackgroundUrl(null)
@@ -886,7 +913,7 @@ function App() {
 
   const uploadSpaceBackgroundImage = useCallback(async (file) => {
     const jpegFile = await compressImageFileToJpegFile(file)
-    const metadata = createMediaMetadata(jpegFile, { inLibrary: true })
+    const metadata = createMediaMetadata(jpegFile, { inLibrary: false, usage: 'space-background' })
     return uploadMediaFile(jpegFile, metadata)
   }, [])
 
@@ -3189,35 +3216,45 @@ const playPrevious = useCallback(() => {
                   <p className="cover-library-hint">
                     クリックで現在の曲のラベルに設定できます
                   </p>
-                  <ul className="video-list">
-                    {imageItems.map((item) => (
-                      <li
-                        key={item.id}
-                        className={`video-item cover-item ${selectedItem?.coverId === item.id ? 'active' : ''}`}
-                      >
-                        <button
-                          type="button"
-                          className="video-title"
-                          onClick={() => handleAssignCoverFromLibrary(item.id)}
-                          disabled={coverBusy || selectedItem?.kind !== 'audio'}
+                  <ul className="image-library-grid">
+                    {imageItems.map((item) => {
+                      const inUse = selectedItem?.coverId === item.id
+                      const thumbUrl = libraryThumbUrls[item.id] || null
+                      return (
+                        <li
+                          key={item.id}
+                          className={`image-library-card${inUse ? ' is-active' : ''}`}
                         >
-                          <strong>{getDisplayName(item.name)}</strong>
-                          <span>
-                            {selectedItem?.coverId === item.id ? '使用中 · ' : ''}
-                            {formatSize(item.size)}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-button danger item-delete-btn"
-                          title="削除"
-                          aria-label="削除"
-                          onClick={() => requestDelete(item.id)}
-                        >
-                          ×
-                        </button>
-                      </li>
-                    ))}
+                          <button
+                            type="button"
+                            className="image-library-thumb"
+                            onClick={() => handleAssignCoverFromLibrary(item.id)}
+                            disabled={coverBusy || selectedItem?.kind !== 'audio'}
+                            title={getDisplayName(item.name)}
+                          >
+                            {thumbUrl ? (
+                              <img src={thumbUrl} alt={getDisplayName(item.name)} loading="lazy" />
+                            ) : (
+                              <span className="image-library-loading" aria-hidden="true" />
+                            )}
+                            {inUse ? <span className="image-library-badge">使用中</span> : null}
+                            <span className="image-library-meta">
+                              <strong>{getDisplayName(item.name)}</strong>
+                              <span>{formatSize(item.size)}</span>
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-button danger image-library-delete"
+                            title="削除"
+                            aria-label="削除"
+                            onClick={() => requestDelete(item.id)}
+                          >
+                            ×
+                          </button>
+                        </li>
+                      )
+                    })}
                   </ul>
                 </div>
               ) : null}
