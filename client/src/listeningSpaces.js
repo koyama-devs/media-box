@@ -9,6 +9,26 @@ const MAX_BACKGROUND_EDGE = 1600
 const MAX_BACKGROUND_DATA_URL_CHARS = 1_500_000
 const JPEG_QUALITY = 0.78
 
+export const MAX_CUSTOM_SPACES = 12
+export const MAX_SPACE_LABEL_LENGTH = 20
+
+export const PARTICLE_OPTIONS = [
+  { id: 'stars', label: '星' },
+  { id: 'rain', label: '雨' },
+  { id: 'mist', label: '霧' },
+  { id: 'petals', label: '花びら' },
+]
+
+export const AMBIENT_OPTIONS = [
+  { id: 'ocean', label: '海' },
+  { id: 'rain', label: '雨' },
+  { id: 'wind', label: '風' },
+  { id: 'room', label: '部屋' },
+]
+
+const PARTICLE_IDS = new Set(PARTICLE_OPTIONS.map((option) => option.id))
+const AMBIENT_IDS = new Set(AMBIENT_OPTIONS.map((option) => option.id))
+
 export const LISTENING_SPACES = [
   {
     id: 'ocean-night',
@@ -72,6 +92,20 @@ const JACKET_TO_SPACE = Object.fromEntries(
   LISTENING_SPACES.map((space) => [space.jacketStyleId, space.id]),
 )
 
+const TEMPLATE_BY_PARTICLE = {
+  stars: 'ocean-night',
+  rain: 'rainy-city',
+  mist: 'mountain-morning',
+  petals: 'sakura-room',
+}
+
+const TEMPLATE_BY_AMBIENT = {
+  ocean: 'ocean-night',
+  rain: 'rainy-city',
+  wind: 'mountain-morning',
+  room: 'sakura-room',
+}
+
 function readJson(key, fallback) {
   try {
     const raw = window.localStorage.getItem(key)
@@ -90,28 +124,124 @@ function writeJson(key, value) {
   }
 }
 
-export function resolveListeningSpace(spaceId) {
+export function isBuiltInSpaceId(spaceId) {
+  return LISTENING_SPACES.some((space) => space.id === spaceId)
+}
+
+export function isCustomSpaceId(spaceId) {
+  return typeof spaceId === 'string' && spaceId.startsWith('custom-')
+}
+
+export function getBuiltInListeningSpace(spaceId) {
   return LISTENING_SPACES.find((space) => space.id === spaceId) || LISTENING_SPACES[0]
+}
+
+export function spaceVisualTemplate(particle, ambient) {
+  const templateId =
+    TEMPLATE_BY_PARTICLE[particle]
+    || TEMPLATE_BY_AMBIENT[ambient]
+    || 'ocean-night'
+  return getBuiltInListeningSpace(templateId)
+}
+
+export function hydrateCustomSpace(raw) {
+  const particle = PARTICLE_IDS.has(raw?.particle) ? raw.particle : 'stars'
+  const ambient = AMBIENT_IDS.has(raw?.ambient) ? raw.ambient : 'ocean'
+  const template = spaceVisualTemplate(particle, ambient)
+  const label = String(raw?.label || '新しい場所').trim().slice(0, MAX_SPACE_LABEL_LENGTH) || '新しい場所'
+  const tagline = String(raw?.tagline || `${label}で、この一曲を。`).trim().slice(0, 40)
+  return {
+    id: String(raw?.id || ''),
+    label,
+    labelShort: label.slice(0, 8),
+    jacketStyleId: template.jacketStyleId,
+    gradient: template.gradient,
+    glow: template.glow,
+    horizon: template.horizon,
+    particle,
+    ambient,
+    tagline,
+    postcardGradient: template.postcardGradient,
+    postcardGlow: template.postcardGlow,
+    backgroundItemId: typeof raw?.backgroundItemId === 'string' && raw.backgroundItemId
+      ? raw.backgroundItemId
+      : null,
+    custom: true,
+    templateId: template.id,
+  }
+}
+
+export function toSharedSpaceRecord(space) {
+  return {
+    id: space.id,
+    label: space.label,
+    particle: space.particle,
+    ambient: space.ambient,
+    backgroundItemId: space.backgroundItemId || null,
+    tagline: space.tagline || '',
+  }
+}
+
+export function createCustomSpaceDraft({
+  label,
+  particle = 'stars',
+  ambient = 'ocean',
+  backgroundItemId = null,
+  tagline = '',
+} = {}) {
+  const id = `custom-${globalThis.crypto?.randomUUID?.() || `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`}`
+  return hydrateCustomSpace({
+    id,
+    label,
+    particle,
+    ambient,
+    backgroundItemId,
+    tagline,
+  })
+}
+
+export function getAllListeningSpaces(customSpaces = []) {
+  const hydrated = (Array.isArray(customSpaces) ? customSpaces : [])
+    .map((space) => (space?.custom ? space : hydrateCustomSpace(space)))
+    .filter((space) => isCustomSpaceId(space.id))
+  return [...LISTENING_SPACES, ...hydrated]
+}
+
+export function isKnownSpaceId(spaceId, customSpaces = []) {
+  return getAllListeningSpaces(customSpaces).some((space) => space.id === spaceId)
+}
+
+export function resolveListeningSpace(spaceId, customSpaces = []) {
+  return getAllListeningSpaces(customSpaces).find((space) => space.id === spaceId) || LISTENING_SPACES[0]
 }
 
 export function spaceForJacketStyle(jacketStyleId) {
   if (!jacketStyleId) return null
   const spaceId = JACKET_TO_SPACE[jacketStyleId]
-  return spaceId ? resolveListeningSpace(spaceId) : null
+  return spaceId ? getBuiltInListeningSpace(spaceId) : null
 }
 
-export function loadSavedListeningSpaceId() {
+export function loadSavedListeningSpaceId(customSpaces = []) {
   try {
     const saved = window.localStorage.getItem(SPACE_STORAGE_KEY)
-    if (saved && LISTENING_SPACES.some((space) => space.id === saved)) return saved
+    if (!saved) return LISTENING_SPACES[0].id
+    if (isBuiltInSpaceId(saved)) return saved
+    if (isCustomSpaceId(saved)) {
+      if (!customSpaces.length || isKnownSpaceId(saved, customSpaces)) return saved
+    }
   } catch {
     /* ignore */
   }
   return LISTENING_SPACES[0].id
 }
 
-export function saveListeningSpaceId(spaceId) {
-  if (!LISTENING_SPACES.some((space) => space.id === spaceId)) return
+export function saveListeningSpaceId(spaceId, customSpaces = []) {
+  if (!spaceId) return
+  const allowed =
+    isBuiltInSpaceId(spaceId)
+    || isCustomSpaceId(spaceId)
+    || isKnownSpaceId(spaceId, customSpaces)
+  if (!allowed) return
   try {
     window.localStorage.setItem(SPACE_STORAGE_KEY, spaceId)
   } catch {
@@ -177,7 +307,7 @@ export function getSpaceBackground(spaceId) {
 }
 
 export function saveSpaceBackground(spaceId, entry) {
-  if (!LISTENING_SPACES.some((space) => space.id === spaceId)) return
+  if (!isBuiltInSpaceId(spaceId)) return
   const current = loadSpaceBackgrounds()
   if (entry == null) {
     delete current[spaceId]
@@ -187,6 +317,20 @@ export function saveSpaceBackground(spaceId, entry) {
     return
   }
   writeJson(SPACE_IMAGES_STORAGE_KEY, current)
+}
+
+/** Merge local built-in backgrounds with custom space library backgrounds. */
+export function buildEffectiveSpaceBackgrounds(spaceBackgrounds = {}, customSpaces = []) {
+  const next = { ...spaceBackgrounds }
+  for (const space of getAllListeningSpaces(customSpaces)) {
+    if (!space.custom || !space.backgroundItemId) continue
+    next[space.id] = {
+      source: 'library',
+      itemId: space.backgroundItemId,
+      mimeType: 'image/jpeg',
+    }
+  }
+  return next
 }
 
 /**
@@ -245,6 +389,21 @@ export function compressImageFileToDataUrl(file, {
   })
 }
 
+/**
+ * Compress an image File to a JPEG Blob for media library upload.
+ * @returns {Promise<File>}
+ */
+export async function compressImageFileToJpegFile(file, {
+  maxEdge = MAX_BACKGROUND_EDGE,
+  quality = JPEG_QUALITY,
+} = {}) {
+  const dataUrl = await compressImageFileToDataUrl(file, { maxEdge, quality })
+  const response = await fetch(dataUrl)
+  const blob = await response.blob()
+  const baseName = String(file.name || 'space-bg').replace(/\.[^.]+$/, '')
+  return new File([blob], `${baseName || 'space-bg'}.jpg`, { type: 'image/jpeg' })
+}
+
 function hashString(value) {
   let hash = 2166136261
   const text = String(value || '')
@@ -287,6 +446,7 @@ export function suggestListeningSpace({
   jacketStyleId = null,
   playlistName = '',
   savedSpaceId = null,
+  customSpaces = [],
 } = {}) {
   const styleId = jacketStyleId || resolveTodayJacketStyleId(item, date)
   const fromJacket = styleId ? JACKET_TO_SPACE[styleId] : null
@@ -298,15 +458,15 @@ export function suggestListeningSpace({
   const fromHour = spaceFromHour(date.getHours())
   if (fromHour) return fromHour
 
-  if (savedSpaceId && LISTENING_SPACES.some((space) => space.id === savedSpaceId)) {
+  if (savedSpaceId && isKnownSpaceId(savedSpaceId, customSpaces)) {
     return savedSpaceId
   }
 
   return LISTENING_SPACES[0].id
 }
 
-export function listeningSpaceStyleVars(spaceId) {
-  const space = resolveListeningSpace(spaceId)
+export function listeningSpaceStyleVars(spaceId, customSpaces = []) {
+  const space = resolveListeningSpace(spaceId, customSpaces)
   return {
     '--space-gradient-0': space.gradient[0],
     '--space-gradient-1': space.gradient[1],
@@ -316,8 +476,8 @@ export function listeningSpaceStyleVars(spaceId) {
   }
 }
 
-export function getPostcardThemeFromSpace(spaceId) {
-  const space = resolveListeningSpace(spaceId)
+export function getPostcardThemeFromSpace(spaceId, customSpaces = []) {
+  const space = resolveListeningSpace(spaceId, customSpaces)
   return {
     id: space.id,
     label: space.labelShort,

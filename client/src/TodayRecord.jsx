@@ -10,6 +10,7 @@ export default function TodayRecord({
   jacketUrl = '',
   spaceId = 'ocean-night',
   backgroundUrl = null,
+  customSpaces = [],
   onPlay,
   onShuffle,
   onSkip,
@@ -25,20 +26,26 @@ export default function TodayRecord({
   }, [])
 
   const quoteLinesFiltered = Array.isArray(quoteLines) ? quoteLines.filter(Boolean) : []
-  const space = resolveListeningSpace(spaceId)
+  const space = resolveListeningSpace(spaceId, customSpaces)
 
   return (
     <section
       className={`today-record today-record--space${visible ? ' is-visible' : ''}`}
       aria-label="今日の一曲"
       style={{
-        ...listeningSpaceStyleVars(spaceId),
+        ...listeningSpaceStyleVars(spaceId, customSpaces),
         ...(jacketUrl ? { '--today-jacket': `url("${jacketUrl}")` } : {}),
       }}
     >
       <div className="today-record-plane" aria-hidden="true" />
       <div className="today-record-space-veil" aria-hidden="true" />
-      <SpaceScenery spaceId={spaceId} className="today-record-scenery" variant="hero" backgroundUrl={backgroundUrl || null} />
+      <SpaceScenery
+        spaceId={spaceId}
+        className="today-record-scenery"
+        variant="hero"
+        backgroundUrl={backgroundUrl || null}
+        customSpaces={customSpaces}
+      />
       <div className="today-record-veil" aria-hidden="true" />
 
       <div className="today-record-stage">

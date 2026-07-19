@@ -8,9 +8,11 @@ import {
   MAX_FILE_SIZE,
   recordAccessVisit,
   saveSharedPlaylists,
+  saveSharedSpaces,
   sortMediaItems,
   subscribeToMediaItems,
   subscribeToSharedPlaylists,
+  subscribeToSharedSpaces,
   updateMediaCover,
   updateMediaJacket,
   updateMediaJacketStyle,
@@ -22,13 +24,20 @@ import {
 import ListeningPostcard from './ListeningPostcard'
 import ListeningSpace, { ListeningSpaceSettings } from './ListeningSpace'
 import {
+  compressImageFileToJpegFile,
+  createCustomSpaceDraft,
+  hydrateCustomSpace,
+  isKnownSpaceId,
+  LISTENING_SPACES,
   listeningSpaceStyleVars,
   loadAmbientSettings,
   loadSavedListeningSpaceId,
   loadSpaceBackgrounds,
+  MAX_CUSTOM_SPACES,
   resolveTodayJacketStyleId,
   saveListeningSpaceId,
   suggestListeningSpace,
+  toSharedSpaceRecord,
 } from './listeningSpaces'
 import { pickPostcardLyric } from './lyrics'
 import LyricsPanel from './LyricsPanel'
@@ -302,6 +311,8 @@ function App() {
   const [favoriteIds, setFavoriteIds] = useState(() => loadFavoriteIds())
   const [customPlaylists, setCustomPlaylists] = useState(() => loadCustomPlaylists())
   const [playlistSyncReady, setPlaylistSyncReady] = useState(false)
+  const [customSpaces, setCustomSpaces] = useState([])
+  const [spacesSyncReady, setSpacesSyncReady] = useState(false)
   const [listFilter, setListFilter] = useState(() => loadListFilter())
   const [playlistMenuItemId, setPlaylistMenuItemId] = useState(null)
   const [playlistMenuPos, setPlaylistMenuPos] = useState(null)
@@ -366,6 +377,7 @@ function App() {
   const mediaRef = useRef(null)
   const initialLocalPlaylistsRef = useRef(loadCustomPlaylists())
   const remotePlaylistsHashRef = useRef('')
+  const remoteSpacesHashRef = useRef('')
   
   // Có cần autoplay sau khi đổi bài không
   const shouldAutoPlayRef = useRef(false)
@@ -466,8 +478,9 @@ function App() {
         item: todayItem,
         jacketStyleId: resolveTodayJacketStyleId(todayItem),
         savedSpaceId: listeningSpaceId,
+        customSpaces,
       }),
-    [todayItem, listeningSpaceId],
+    [todayItem, listeningSpaceId, customSpaces],
   )
 
   const postcardSpaceId = useMemo(
@@ -476,15 +489,16 @@ function App() {
         item: postcardItemId ? items.find((item) => item.id === postcardItemId) : null,
         jacketStyleId: items.find((item) => item.id === postcardItemId)?.jacketStyle || null,
         savedSpaceId: listeningSpaceId,
+        customSpaces,
       }),
-    [postcardItemId, items, listeningSpaceId],
+    [postcardItemId, items, listeningSpaceId, customSpaces],
   )
 
   const shellSpaceStyle = useMemo(() => {
-    if (showTodayHero) return listeningSpaceStyleVars(todaySpaceId)
-    if (listeningSpaceOpen) return listeningSpaceStyleVars(listeningSpaceId)
+    if (showTodayHero) return listeningSpaceStyleVars(todaySpaceId, customSpaces)
+    if (listeningSpaceOpen) return listeningSpaceStyleVars(listeningSpaceId, customSpaces)
     return undefined
-  }, [showTodayHero, todaySpaceId, listeningSpaceOpen, listeningSpaceId])
+  }, [showTodayHero, todaySpaceId, listeningSpaceOpen, listeningSpaceId, customSpaces])
 
   const reducedMotion = useMemo(
     () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
@@ -523,8 +537,9 @@ function App() {
         jacketStyleId: selectedItem?.jacketStyle || null,
         playlistName: activePlaylistName,
         savedSpaceId: listeningSpaceId,
+        customSpaces,
       }),
-    [selectedItem, activePlaylistName, listeningSpaceId],
+    [selectedItem, activePlaylistName, listeningSpaceId, customSpaces],
   )
 
   const selectedPlayableIndex = useMemo(
@@ -819,7 +834,7 @@ function App() {
       const nextId = spaceIdOverride || suggestedListeningSpaceId
       const shouldResume = Boolean(mediaRef.current && !mediaRef.current.paused)
       setListeningSpaceId(nextId)
-      saveListeningSpaceId(nextId)
+      saveListeningSpaceId(nextId, customSpaces)
       setListeningSpaceOpen(true)
       setFocusMode(true)
       setPlayerExpanded(false)
@@ -827,7 +842,7 @@ function App() {
       resetPlayerPanelPosition()
       if (shouldResume) resumePlaybackSoon()
     },
-    [suggestedListeningSpaceId, resetPlayerPanelPosition, resumePlaybackSoon],
+    [suggestedListeningSpaceId, resetPlayerPanelPosition, resumePlaybackSoon, customSpaces],
   )
 
   const closeListeningSpace = useCallback(() => {
@@ -862,7 +877,55 @@ function App() {
 
   const handleListeningSpaceChange = useCallback((nextId) => {
     setListeningSpaceId(nextId)
-    saveListeningSpaceId(nextId)
+    saveListeningSpaceId(nextId, customSpaces)
+  }, [customSpaces])
+
+  const uploadSpaceBackgroundImage = useCallback(async (file) => {
+    const jpegFile = await compressImageFileToJpegFile(file)
+    const metadata = createMediaMetadata(jpegFile, { inLibrary: true })
+    return uploadMediaFile(jpegFile, metadata)
+  }, [])
+
+  const createCustomListeningSpace = useCallback(async ({
+    label,
+    particle,
+    ambient,
+    backgroundItemId = null,
+  }) => {
+    if (customSpaces.length >= MAX_CUSTOM_SPACES) {
+      throw new Error(`場所は最大${MAX_CUSTOM_SPACES}個までです。`)
+    }
+    const draft = createCustomSpaceDraft({
+      label,
+      particle,
+      ambient,
+      backgroundItemId,
+    })
+    setCustomSpaces((current) => [...current, draft])
+    return draft
+  }, [customSpaces.length])
+
+  const updateCustomListeningSpace = useCallback(async (spaceId, patch = {}) => {
+    setCustomSpaces((current) =>
+      current.map((space) => {
+        if (space.id !== spaceId) return space
+        return hydrateCustomSpace({
+          ...toSharedSpaceRecord(space),
+          ...patch,
+          id: spaceId,
+        })
+      }),
+    )
+  }, [])
+
+  const deleteCustomListeningSpace = useCallback(async (spaceId) => {
+    setCustomSpaces((current) => current.filter((space) => space.id !== spaceId))
+    setListeningSpaceId((current) => {
+      if (current !== spaceId) return current
+      const fallback = LISTENING_SPACES[0].id
+      saveListeningSpaceId(fallback)
+      return fallback
+    })
   }, [])
 
   const shuffleTodayRecord = useCallback(() => {
@@ -1405,6 +1468,56 @@ const playPrevious = useCallback(() => {
         setError(getFirebaseErrorMessage(syncError))
       })
   }, [customPlaylists, isLoggedIn, playlistSyncReady])
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setCustomSpaces([])
+      setSpacesSyncReady(false)
+      remoteSpacesHashRef.current = ''
+      return undefined
+    }
+
+    const unsubscribe = subscribeToSharedSpaces(
+      (remoteSpaces) => {
+        const hydrated = remoteSpaces.map((space) => hydrateCustomSpace(space))
+        const remoteHash = JSON.stringify(hydrated.map(toSharedSpaceRecord))
+        remoteSpacesHashRef.current = remoteHash
+        setCustomSpaces(hydrated)
+        setSpacesSyncReady(true)
+      },
+      (loadError) => {
+        console.error(loadError)
+        setError(getFirebaseErrorMessage(loadError))
+        setSpacesSyncReady(true)
+      },
+    )
+
+    return unsubscribe
+  }, [isLoggedIn])
+
+  useEffect(() => {
+    if (!isLoggedIn || !spacesSyncReady) return
+    const records = customSpaces.map(toSharedSpaceRecord)
+    const localHash = JSON.stringify(records)
+    if (localHash === remoteSpacesHashRef.current) return
+
+    saveSharedSpaces(records)
+      .then(() => {
+        remoteSpacesHashRef.current = localHash
+      })
+      .catch((syncError) => {
+        console.error(syncError)
+        setError(getFirebaseErrorMessage(syncError))
+      })
+  }, [customSpaces, isLoggedIn, spacesSyncReady])
+
+  useEffect(() => {
+    if (!spacesSyncReady) return
+    if (isKnownSpaceId(listeningSpaceId, customSpaces)) return
+    const fallback = LISTENING_SPACES[0].id
+    setListeningSpaceId(fallback)
+    saveListeningSpaceId(fallback)
+  }, [spacesSyncReady, customSpaces, listeningSpaceId])
 
   useEffect(() => {
     const currentUrls = new Set([
@@ -2132,6 +2245,7 @@ const playPrevious = useCallback(() => {
           jacketUrl={todayJacketUrl || resolveJacketUrl(null, todayItem.jacketStyle || resolveTodayJacketStyleId(todayItem) || null)}
           spaceId={todaySpaceId}
           backgroundUrl={todaySpaceBackgroundUrl}
+          customSpaces={customSpaces}
           onPlay={playTodayRecord}
           onShuffle={shuffleTodayRecord}
           shuffleRemaining={todayShuffleRemaining}
@@ -2358,6 +2472,11 @@ const playPrevious = useCallback(() => {
                       suggestedSpaceId={suggestedListeningSpaceId}
                       backgrounds={spaceBackgrounds}
                       onBackgroundsChange={setSpaceBackgrounds}
+                      customSpaces={customSpaces}
+                      onCreateCustomSpace={createCustomListeningSpace}
+                      onUpdateCustomSpace={updateCustomListeningSpace}
+                      onDeleteCustomSpace={deleteCustomListeningSpace}
+                      onUploadSpaceBackground={uploadSpaceBackgroundImage}
                       libraryImages={imageItems}
                       loadLibraryImageUrl={ensureMediaUrl}
                     />
@@ -3130,6 +3249,7 @@ const playPrevious = useCallback(() => {
           ambientEnabled={ambientEnabled}
           ambientVolume={ambientVolume}
           backgrounds={spaceBackgrounds}
+          customSpaces={customSpaces}
           loadLibraryImageUrl={ensureMediaUrl}
           reducedMotion={reducedMotion}
         />
@@ -3147,6 +3267,7 @@ const playPrevious = useCallback(() => {
           jacketStyleId={postcardItem.jacketStyle || null}
           coverSrc={postcardCoverUrl}
           initialSpaceId={postcardSpaceId}
+          customSpaces={customSpaces}
           onClose={closeListeningPostcard}
           onShareFile={
             postcardMode === 'share'

@@ -2,8 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AmbientEngine, getFullscreenElement, tryEnterFullscreen, tryExitFullscreen } from './ambientAudio'
 import {
-    LISTENING_SPACES,
+    AMBIENT_OPTIONS,
+    MAX_CUSTOM_SPACES,
+    MAX_SPACE_LABEL_LENGTH,
+    PARTICLE_OPTIONS,
+    buildEffectiveSpaceBackgrounds,
     compressImageFileToDataUrl,
+    getAllListeningSpaces,
+    hydrateCustomSpace,
+    isBuiltInSpaceId,
+    isCustomSpaceId,
     listeningSpaceStyleVars,
     loadSpaceBackgrounds,
     resolveListeningSpace,
@@ -91,6 +99,7 @@ export default function ListeningSpace({
   ambientVolume,
   reducedMotion = false,
   backgrounds = {},
+  customSpaces = [],
   loadLibraryImageUrl = null,
 }) {
   const [displaySpaceId, setDisplaySpaceId] = useState(spaceId)
@@ -101,9 +110,17 @@ export default function ListeningSpace({
   const [fullscreenToast, setFullscreenToast] = useState(null)
   const { isFullscreen, toggleFullscreen } = useDocumentFullscreen()
 
-  const activeSpace = useMemo(() => resolveListeningSpace(displaySpaceId), [displaySpaceId])
-  const displayBgUrl = useResolvedBackgroundUrl(backgrounds[displaySpaceId] || null, loadLibraryImageUrl)
-  const prevBgUrl = useResolvedBackgroundUrl(backgrounds[prevSpaceId] || null, loadLibraryImageUrl)
+  const effectiveBackgrounds = useMemo(
+    () => buildEffectiveSpaceBackgrounds(backgrounds, customSpaces),
+    [backgrounds, customSpaces],
+  )
+
+  const activeSpace = useMemo(
+    () => resolveListeningSpace(displaySpaceId, customSpaces),
+    [displaySpaceId, customSpaces],
+  )
+  const displayBgUrl = useResolvedBackgroundUrl(effectiveBackgrounds[displaySpaceId] || null, loadLibraryImageUrl)
+  const prevBgUrl = useResolvedBackgroundUrl(effectiveBackgrounds[prevSpaceId] || null, loadLibraryImageUrl)
 
   useEffect(() => {
     if (isFullscreen && !wasFullscreenRef.current) {
@@ -180,21 +197,21 @@ export default function ListeningSpace({
       <div className="listening-space-root" aria-hidden="true">
         <div
           className={`listening-space-layer${crossfading ? ' is-fading' : ''}`}
-          style={listeningSpaceStyleVars(prevSpaceId)}
+          style={listeningSpaceStyleVars(prevSpaceId, customSpaces)}
         >
           <div className="listening-space-sky" />
-          <SpaceScenery spaceId={prevSpaceId} backgroundUrl={prevBgUrl} />
+          <SpaceScenery spaceId={prevSpaceId} backgroundUrl={prevBgUrl} customSpaces={customSpaces} />
           <div className="listening-space-horizon" />
-          <SpaceParticles spaceId={prevSpaceId} reducedMotion={reducedMotion} />
+          <SpaceParticles spaceId={prevSpaceId} reducedMotion={reducedMotion} customSpaces={customSpaces} />
         </div>
         <div
           className={`listening-space-layer is-front${crossfading ? ' is-active' : ''}`}
-          style={listeningSpaceStyleVars(displaySpaceId)}
+          style={listeningSpaceStyleVars(displaySpaceId, customSpaces)}
         >
           <div className="listening-space-sky" />
-          <SpaceScenery spaceId={displaySpaceId} backgroundUrl={displayBgUrl} />
+          <SpaceScenery spaceId={displaySpaceId} backgroundUrl={displayBgUrl} customSpaces={customSpaces} />
           <div className="listening-space-horizon" />
-          <SpaceParticles spaceId={displaySpaceId} reducedMotion={reducedMotion} />
+          <SpaceParticles spaceId={displaySpaceId} reducedMotion={reducedMotion} customSpaces={customSpaces} />
         </div>
       </div>
 
@@ -240,6 +257,11 @@ export function ListeningSpaceSettings({
   suggestedSpaceId = null,
   backgrounds = {},
   onBackgroundsChange,
+  customSpaces = [],
+  onCreateCustomSpace,
+  onUpdateCustomSpace,
+  onDeleteCustomSpace,
+  onUploadSpaceBackground,
   libraryImages = [],
   loadLibraryImageUrl = null,
 }) {
@@ -247,12 +269,28 @@ export function ListeningSpaceSettings({
   const [bgError, setBgError] = useState(null)
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [libraryThumbs, setLibraryThumbs] = useState({})
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [editorMode, setEditorMode] = useState('create')
+  const [draftLabel, setDraftLabel] = useState('')
+  const [draftParticle, setDraftParticle] = useState('stars')
+  const [draftAmbient, setDraftAmbient] = useState('ocean')
+  const [draftBackgroundItemId, setDraftBackgroundItemId] = useState(null)
+  const [formBusy, setFormBusy] = useState(false)
+  const [formError, setFormError] = useState(null)
   const fileInputRef = useRef(null)
+  const formFileInputRef = useRef(null)
   const { isFullscreen, toggleFullscreen } = useDocumentFullscreen()
 
-  const activeSpace = resolveListeningSpace(spaceId)
-  const activeEntry = backgrounds[spaceId] || null
+  const allSpaces = useMemo(() => getAllListeningSpaces(customSpaces), [customSpaces])
+  const effectiveBackgrounds = useMemo(
+    () => buildEffectiveSpaceBackgrounds(backgrounds, customSpaces),
+    [backgrounds, customSpaces],
+  )
+  const activeSpace = resolveListeningSpace(spaceId, customSpaces)
+  const activeEntry = effectiveBackgrounds[spaceId] || null
   const activeBgUrl = useResolvedBackgroundUrl(activeEntry, loadLibraryImageUrl)
+  const isCustomActive = isCustomSpaceId(spaceId)
+  const canAddSpace = customSpaces.length < MAX_CUSTOM_SPACES
 
   useEffect(() => {
     if (!libraryOpen || !loadLibraryImageUrl || libraryImages.length === 0) return undefined
@@ -282,8 +320,8 @@ export function ListeningSpaceSettings({
     if (!loadLibraryImageUrl) return undefined
     let cancelled = false
     const load = async () => {
-      for (const space of LISTENING_SPACES) {
-        const entry = backgrounds[space.id]
+      for (const space of allSpaces) {
+        const entry = effectiveBackgrounds[space.id]
         if (entry?.source !== 'library' || !entry.itemId) continue
         try {
           const url = await loadLibraryImageUrl(entry.itemId, entry.mimeType || 'image/jpeg')
@@ -301,20 +339,41 @@ export function ListeningSpaceSettings({
     return () => {
       cancelled = true
     }
-  }, [backgrounds, loadLibraryImageUrl])
+  }, [allSpaces, effectiveBackgrounds, loadLibraryImageUrl])
 
   const chipPreviewUrl = (id) => {
-    const entry = backgrounds[id]
+    const entry = effectiveBackgrounds[id]
     if (entry?.source === 'upload' && entry.dataUrl) return entry.dataUrl
     if (entry?.source === 'library' && entry.itemId) return libraryThumbs[entry.itemId] || null
     return null
   }
 
+  const draftPreviewUrl = draftBackgroundItemId
+    ? libraryThumbs[draftBackgroundItemId] || null
+    : null
+
+  const draftPreviewSpace = useMemo(
+    () => hydrateCustomSpace({
+      id: 'custom-draft-preview',
+      label: draftLabel || '新しい場所',
+      particle: draftParticle,
+      ambient: draftAmbient,
+      backgroundItemId: draftBackgroundItemId,
+    }),
+    [draftLabel, draftParticle, draftAmbient, draftBackgroundItemId],
+  )
+
+  const editorPreviewSpaces = useMemo(
+    () => (editorOpen ? [...customSpaces, draftPreviewSpace] : customSpaces),
+    [editorOpen, customSpaces, draftPreviewSpace],
+  )
+
   const handleSpacePick = (nextId) => {
-    saveListeningSpaceId(nextId)
+    saveListeningSpaceId(nextId, customSpaces)
     onSpaceChange?.(nextId)
     setLibraryOpen(false)
     setBgError(null)
+    setFormError(null)
   }
 
   const handleAmbientToggle = () => {
@@ -335,10 +394,23 @@ export function ListeningSpaceSettings({
     saveFocusModePreference(next)
   }
 
-  const applyBackground = (entry) => {
+  const applyBuiltInBackground = (entry) => {
     saveSpaceBackground(spaceId, entry)
     onBackgroundsChange?.(loadSpaceBackgrounds())
     setBgError(null)
+  }
+
+  const applyCustomBackground = async (itemId) => {
+    if (!isCustomActive) return
+    setBgBusy(true)
+    setBgError(null)
+    try {
+      await onUpdateCustomSpace?.(spaceId, { backgroundItemId: itemId })
+    } catch (error) {
+      setBgError(error?.message || '背景の更新に失敗しました。')
+    } finally {
+      setBgBusy(false)
+    }
   }
 
   const handleUploadPick = async (event) => {
@@ -348,8 +420,16 @@ export function ListeningSpaceSettings({
     setBgBusy(true)
     setBgError(null)
     try {
-      const dataUrl = await compressImageFileToDataUrl(file)
-      applyBackground({ source: 'upload', dataUrl })
+      if (isCustomActive) {
+        if (!onUploadSpaceBackground) {
+          throw new Error('背景のアップロードに対応していません。')
+        }
+        const itemId = await onUploadSpaceBackground(file)
+        await onUpdateCustomSpace?.(spaceId, { backgroundItemId: itemId })
+      } else {
+        const dataUrl = await compressImageFileToDataUrl(file)
+        applyBuiltInBackground({ source: 'upload', dataUrl })
+      }
     } catch (error) {
       setBgError(error?.message || '画像の設定に失敗しました。')
     } finally {
@@ -357,18 +437,148 @@ export function ListeningSpaceSettings({
     }
   }
 
-  const handleLibraryPick = (item) => {
-    applyBackground({
-      source: 'library',
-      itemId: item.id,
-      mimeType: item.type || 'image/jpeg',
-    })
+  const handleLibraryPick = async (item) => {
+    if (editorOpen) {
+      setDraftBackgroundItemId(item.id)
+      setLibraryThumbs((current) => (
+        current[item.id] ? current : { ...current, [item.id]: libraryThumbs[item.id] }
+      ))
+      if (loadLibraryImageUrl && !libraryThumbs[item.id]) {
+        loadLibraryImageUrl(item.id, item.type || 'image/jpeg')
+          .then((url) => {
+            setLibraryThumbs((current) => ({ ...current, [item.id]: url }))
+          })
+          .catch(() => {})
+      }
+      setLibraryOpen(false)
+      return
+    }
+
+    if (isCustomActive) {
+      await applyCustomBackground(item.id)
+    } else {
+      applyBuiltInBackground({
+        source: 'library',
+        itemId: item.id,
+        mimeType: item.type || 'image/jpeg',
+      })
+    }
     setLibraryOpen(false)
   }
 
-  const handleResetBackground = () => {
-    applyBackground(null)
+  const handleResetBackground = async () => {
+    if (isCustomActive) {
+      await applyCustomBackground(null)
+    } else {
+      applyBuiltInBackground(null)
+    }
     setLibraryOpen(false)
+  }
+
+  const openCreateEditor = () => {
+    if (!canAddSpace) {
+      setFormError(`場所は最大${MAX_CUSTOM_SPACES}個までです。`)
+      return
+    }
+    setEditorMode('create')
+    setDraftLabel('')
+    setDraftParticle('stars')
+    setDraftAmbient('ocean')
+    setDraftBackgroundItemId(null)
+    setFormError(null)
+    setEditorOpen(true)
+    setLibraryOpen(false)
+  }
+
+  const openEditEditor = () => {
+    if (!isCustomActive) return
+    setEditorMode('edit')
+    setDraftLabel(activeSpace.label)
+    setDraftParticle(activeSpace.particle)
+    setDraftAmbient(activeSpace.ambient)
+    setDraftBackgroundItemId(activeSpace.backgroundItemId || null)
+    setFormError(null)
+    setEditorOpen(true)
+    setLibraryOpen(false)
+  }
+
+  const closeEditor = () => {
+    setEditorOpen(false)
+    setFormError(null)
+    setFormBusy(false)
+  }
+
+  const handleFormUpload = async (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !onUploadSpaceBackground) return
+    setFormBusy(true)
+    setFormError(null)
+    try {
+      const itemId = await onUploadSpaceBackground(file)
+      setDraftBackgroundItemId(itemId)
+      if (loadLibraryImageUrl) {
+        const url = await loadLibraryImageUrl(itemId, 'image/jpeg')
+        setLibraryThumbs((current) => ({ ...current, [itemId]: url }))
+      }
+    } catch (error) {
+      setFormError(error?.message || '画像のアップロードに失敗しました。')
+    } finally {
+      setFormBusy(false)
+    }
+  }
+
+  const handleSubmitEditor = async (event) => {
+    event.preventDefault()
+    const label = draftLabel.trim().slice(0, MAX_SPACE_LABEL_LENGTH)
+    if (!label) {
+      setFormError('場所の名前を入力してください。')
+      return
+    }
+
+    setFormBusy(true)
+    setFormError(null)
+    try {
+      if (editorMode === 'create') {
+        const created = await onCreateCustomSpace?.({
+          label,
+          particle: draftParticle,
+          ambient: draftAmbient,
+          backgroundItemId: draftBackgroundItemId,
+        })
+        if (created?.id) {
+          handleSpacePick(created.id)
+        }
+      } else {
+        await onUpdateCustomSpace?.(spaceId, {
+          label,
+          particle: draftParticle,
+          ambient: draftAmbient,
+          backgroundItemId: draftBackgroundItemId,
+        })
+      }
+      closeEditor()
+    } catch (error) {
+      setFormError(error?.message || '場所の保存に失敗しました。')
+    } finally {
+      setFormBusy(false)
+    }
+  }
+
+  const handleDeleteCustom = async () => {
+    if (!isCustomActive) return
+    const confirmed = window.confirm(`「${activeSpace.label}」を削除しますか？`)
+    if (!confirmed) return
+    setFormBusy(true)
+    setFormError(null)
+    try {
+      await onDeleteCustomSpace?.(spaceId)
+      closeEditor()
+    } catch (error) {
+      setFormError(error?.message || '場所の削除に失敗しました。')
+    } finally {
+      setFormBusy(false)
+    }
   }
 
   return (
@@ -384,65 +594,204 @@ export function ListeningSpaceSettings({
             className="listening-space-suggest"
             onClick={() => handleSpacePick(suggestedSpaceId)}
           >
-            おすすめ: {resolveListeningSpace(suggestedSpaceId).labelShort}
+            おすすめ: {resolveListeningSpace(suggestedSpaceId, customSpaces).labelShort}
           </button>
         ) : null}
       </div>
 
       <div className="listening-space-chips" role="group" aria-label="場所を選ぶ">
-        {LISTENING_SPACES.map((space) => (
+        {allSpaces.map((space) => (
           <button
             key={space.id}
             type="button"
-            className={`listening-space-chip${space.id === spaceId ? ' is-active' : ''}`}
+            className={`listening-space-chip${space.id === spaceId ? ' is-active' : ''}${space.custom ? ' is-custom' : ''}`}
             onClick={() => handleSpacePick(space.id)}
           >
-            <SpaceSceneryPreview spaceId={space.id} backgroundUrl={chipPreviewUrl(space.id)} />
+            <SpaceSceneryPreview
+              spaceId={space.id}
+              backgroundUrl={chipPreviewUrl(space.id)}
+              customSpaces={customSpaces}
+            />
             <span>{space.labelShort}</span>
           </button>
         ))}
       </div>
 
-      <div className="listening-space-bg-controls">
-        <span className="listening-space-bg-label">背景</span>
-        <SpaceSceneryPreview
-          spaceId={spaceId}
-          backgroundUrl={activeBgUrl || chipPreviewUrl(spaceId)}
-          className="listening-space-bg-thumb"
-        />
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          className="sr-only"
-          onChange={handleUploadPick}
-        />
+      <div className="listening-space-manage">
         <button
           type="button"
           className="secondary-button"
-          disabled={bgBusy}
-          onClick={() => fileInputRef.current?.click()}
+          disabled={!canAddSpace || formBusy}
+          onClick={openCreateEditor}
         >
-          {bgBusy ? '処理中…' : '画像を選ぶ'}
+          場所を追加
         </button>
-        <button
-          type="button"
-          className={`secondary-button${libraryOpen ? ' is-active' : ''}`}
-          disabled={bgBusy}
-          onClick={() => setLibraryOpen((current) => !current)}
-        >
-          ライブラリ
-        </button>
-        <button
-          type="button"
-          className="secondary-button"
-          disabled={bgBusy || !activeEntry}
-          onClick={handleResetBackground}
-        >
-          リセット
-        </button>
+        {isCustomActive ? (
+          <>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={formBusy}
+              onClick={openEditEditor}
+            >
+              編集
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={formBusy}
+              onClick={() => void handleDeleteCustom()}
+            >
+              削除
+            </button>
+          </>
+        ) : null}
       </div>
-      {bgError ? <p className="listening-space-bg-error">{bgError}</p> : null}
+
+      {editorOpen ? (
+        <form className="listening-space-editor" onSubmit={handleSubmitEditor}>
+          <p className="listening-space-editor-title">
+            {editorMode === 'create' ? '新しい場所' : '場所を編集'}
+          </p>
+          <label className="listening-space-editor-field">
+            <span>名前</span>
+            <input
+              type="text"
+              value={draftLabel}
+              maxLength={MAX_SPACE_LABEL_LENGTH}
+              placeholder="例：静かな夜"
+              onChange={(event) => setDraftLabel(event.target.value)}
+              disabled={formBusy}
+            />
+          </label>
+          <label className="listening-space-editor-field">
+            <span>雰囲気</span>
+            <select
+              value={draftAmbient}
+              onChange={(event) => setDraftAmbient(event.target.value)}
+              disabled={formBusy}
+            >
+              {AMBIENT_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="listening-space-editor-field">
+            <span>エフェクト</span>
+            <select
+              value={draftParticle}
+              onChange={(event) => setDraftParticle(event.target.value)}
+              disabled={formBusy}
+            >
+              {PARTICLE_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <div className="listening-space-editor-bg">
+            <span className="listening-space-bg-label">背景</span>
+            <SpaceSceneryPreview
+              spaceId={editorMode === 'edit' ? spaceId : draftPreviewSpace.id}
+              backgroundUrl={draftPreviewUrl}
+              customSpaces={editorPreviewSpaces}
+              className="listening-space-bg-thumb"
+            />
+            <input
+              ref={formFileInputRef}
+              type="file"
+              accept="image/*"
+              className="sr-only"
+              onChange={(event) => void handleFormUpload(event)}
+            />
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={formBusy}
+              onClick={() => formFileInputRef.current?.click()}
+            >
+              画像を選ぶ
+            </button>
+            <button
+              type="button"
+              className={`secondary-button${libraryOpen ? ' is-active' : ''}`}
+              disabled={formBusy}
+              onClick={() => setLibraryOpen((current) => !current)}
+            >
+              ライブラリ
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={formBusy || !draftBackgroundItemId}
+              onClick={() => setDraftBackgroundItemId(null)}
+            >
+              クリア
+            </button>
+          </div>
+          {formError ? <p className="listening-space-bg-error">{formError}</p> : null}
+          <div className="listening-space-editor-actions">
+            <button type="submit" className="primary-button" disabled={formBusy}>
+              {formBusy ? '保存中…' : editorMode === 'create' ? '追加する' : '保存する'}
+            </button>
+            <button type="button" className="secondary-button" disabled={formBusy} onClick={closeEditor}>
+              キャンセル
+            </button>
+          </div>
+        </form>
+      ) : null}
+
+      {!editorOpen ? (
+        <>
+          <div className="listening-space-bg-controls">
+            <span className="listening-space-bg-label">背景</span>
+            <SpaceSceneryPreview
+              spaceId={spaceId}
+              backgroundUrl={activeBgUrl || chipPreviewUrl(spaceId)}
+              customSpaces={customSpaces}
+              className="listening-space-bg-thumb"
+            />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="sr-only"
+              onChange={(event) => void handleUploadPick(event)}
+            />
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={bgBusy}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {bgBusy ? '処理中…' : '画像を選ぶ'}
+            </button>
+            <button
+              type="button"
+              className={`secondary-button${libraryOpen ? ' is-active' : ''}`}
+              disabled={bgBusy}
+              onClick={() => setLibraryOpen((current) => !current)}
+            >
+              ライブラリ
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={bgBusy || !activeEntry}
+              onClick={() => void handleResetBackground()}
+            >
+              リセット
+            </button>
+          </div>
+          {bgError ? <p className="listening-space-bg-error">{bgError}</p> : null}
+          {isBuiltInSpaceId(spaceId) ? null : (
+            <p className="listening-space-custom-hint">
+              雰囲気: {AMBIENT_OPTIONS.find((option) => option.id === activeSpace.ambient)?.label || activeSpace.ambient}
+              {' / '}
+              エフェクト: {PARTICLE_OPTIONS.find((option) => option.id === activeSpace.particle)?.label || activeSpace.particle}
+            </p>
+          )}
+        </>
+      ) : null}
 
       {libraryOpen ? (
         <div className="listening-space-library" role="listbox" aria-label="ライブラリから背景を選ぶ">
@@ -453,8 +802,12 @@ export function ListeningSpaceSettings({
               <button
                 key={item.id}
                 type="button"
-                className={`listening-space-library-item${activeEntry?.source === 'library' && activeEntry.itemId === item.id ? ' is-active' : ''}`}
-                onClick={() => handleLibraryPick(item)}
+                className={`listening-space-library-item${(
+                  editorOpen
+                    ? draftBackgroundItemId === item.id
+                    : activeEntry?.source === 'library' && activeEntry.itemId === item.id
+                ) ? ' is-active' : ''}`}
+                onClick={() => void handleLibraryPick(item)}
                 title={item.name || item.id}
               >
                 {libraryThumbs[item.id] ? (

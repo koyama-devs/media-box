@@ -4,6 +4,11 @@ import rainyCityBackground from './assets/space-rainy-city.png'
 import sakuraRoomBackground from './assets/space-sakura-room.png'
 import { resolveListeningSpace } from './listeningSpaces'
 
+function scenerySpaceId(spaceId, customSpaces = []) {
+  const space = resolveListeningSpace(spaceId, customSpaces)
+  return space.templateId || space.id
+}
+
 function OceanScene() {
   return (
     <svg className="space-scenery-svg" viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
@@ -167,11 +172,12 @@ const DEFAULT_BACKGROUND_MAP = {
   'sakura-room': sakuraRoomBackground,
 }
 
-export function SpaceSceneryPreview({ spaceId, className = '', backgroundUrl = null }) {
-  const Scene = SCENE_MAP[spaceId] || OceanScene
-  const resolvedBackgroundUrl = backgroundUrl || DEFAULT_BACKGROUND_MAP[spaceId]
+export function SpaceSceneryPreview({ spaceId, className = '', backgroundUrl = null, customSpaces = [] }) {
+  const visualId = scenerySpaceId(spaceId, customSpaces)
+  const Scene = SCENE_MAP[visualId] || OceanScene
+  const resolvedBackgroundUrl = backgroundUrl || DEFAULT_BACKGROUND_MAP[visualId]
   return (
-    <span className={`space-scenery-preview space-scenery-preview--${spaceId} ${className}`.trim()}>
+    <span className={`space-scenery-preview space-scenery-preview--${visualId} ${className}`.trim()}>
       {resolvedBackgroundUrl ? (
         <img className="space-scenery-photo space-scenery-photo--preview" src={resolvedBackgroundUrl} alt="" />
       ) : (
@@ -181,14 +187,20 @@ export function SpaceSceneryPreview({ spaceId, className = '', backgroundUrl = n
   )
 }
 
-export default function SpaceScenery({ spaceId, className = '', variant = 'full', backgroundUrl = null }) {
-  resolveListeningSpace(spaceId)
-  const Scene = SCENE_MAP[spaceId] || OceanScene
-  const resolvedBackgroundUrl = backgroundUrl || DEFAULT_BACKGROUND_MAP[spaceId]
+export default function SpaceScenery({
+  spaceId,
+  className = '',
+  variant = 'full',
+  backgroundUrl = null,
+  customSpaces = [],
+}) {
+  const visualId = scenerySpaceId(spaceId, customSpaces)
+  const Scene = SCENE_MAP[visualId] || OceanScene
+  const resolvedBackgroundUrl = backgroundUrl || DEFAULT_BACKGROUND_MAP[visualId]
 
   return (
     <div
-      className={`space-scenery space-scenery--${spaceId} space-scenery--${variant}${resolvedBackgroundUrl ? ' has-photo' : ''} ${className}`.trim()}
+      className={`space-scenery space-scenery--${visualId} space-scenery--${variant}${resolvedBackgroundUrl ? ' has-photo' : ''} ${className}`.trim()}
       aria-hidden="true"
     >
       {resolvedBackgroundUrl ? (

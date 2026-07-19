@@ -7,8 +7,8 @@ import jacketPaperUrl from './assets/vinyl-jacket-3-paper.svg?url'
 import jacketPetalUrl from './assets/vinyl-jacket-4-petal.svg?url'
 import defaultLabelUrl from './assets/vinyl-label-default.svg?url'
 import {
+    getAllListeningSpaces,
     getPostcardThemeFromSpace,
-    LISTENING_SPACES,
     loadSavedListeningSpaceId,
 } from './listeningSpaces'
 import SpaceScenery, { SpaceSceneryPreview } from './SpaceScenery'
@@ -87,6 +87,7 @@ async function renderPostcardCanvas({
   shareUrl,
   spaceId = 'ocean-night',
   spaceTagline = '',
+  customSpaces = [],
 }) {
   if (document.fonts?.ready) {
     try {
@@ -104,7 +105,7 @@ async function renderPostcardCanvas({
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('canvas unavailable')
 
-  const theme = getPostcardThemeFromSpace(spaceId)
+  const theme = getPostcardThemeFromSpace(spaceId, customSpaces)
   const gradient = ctx.createLinearGradient(0, 0, width, height)
   gradient.addColorStop(0, theme.gradient[0])
   gradient.addColorStop(0.45, theme.gradient[1])
@@ -268,14 +269,16 @@ export default function ListeningPostcard({
   jacketStyleId = null,
   coverSrc = null,
   initialSpaceId = null,
+  customSpaces = [],
   onClose,
   onShareFile = null,
 }) {
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
   const [localError, setLocalError] = useState('')
-  const [spaceId, setSpaceId] = useState(initialSpaceId || loadSavedListeningSpaceId())
+  const [spaceId, setSpaceId] = useState(initialSpaceId || loadSavedListeningSpaceId(customSpaces))
   const cardRef = useRef(null)
+  const allSpaces = useMemo(() => getAllListeningSpaces(customSpaces), [customSpaces])
 
   const jacketUrl = useMemo(
     () => resolveJacketUrl(jacketSrc, jacketStyleId),
@@ -287,17 +290,17 @@ export default function ListeningPostcard({
     setBusy(false)
     setStatus('')
     setLocalError('')
-    setSpaceId(initialSpaceId || loadSavedListeningSpaceId())
+    setSpaceId(initialSpaceId || loadSavedListeningSpaceId(customSpaces))
     const onKey = (event) => {
       if (event.key === 'Escape') onClose?.()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose, initialSpaceId])
+  }, [open, onClose, initialSpaceId, customSpaces])
 
   if (!open || typeof document === 'undefined') return null
 
-  const activeTheme = getPostcardThemeFromSpace(spaceId)
+  const activeTheme = getPostcardThemeFromSpace(spaceId, customSpaces)
 
   const buildCanvas = () =>
     renderPostcardCanvas({
@@ -309,6 +312,7 @@ export default function ListeningPostcard({
       shareUrl,
       spaceId,
       spaceTagline: activeTheme.tagline,
+      customSpaces,
     })
 
   const handleCopyLink = async () => {
@@ -418,7 +422,7 @@ export default function ListeningPostcard({
             '--postcard-glow': activeTheme.glow,
           }}
         >
-          <SpaceScenery spaceId={spaceId} className="postcard-card-scenery" variant="card" />
+          <SpaceScenery spaceId={spaceId} className="postcard-card-scenery" variant="card" customSpaces={customSpaces} />
           <div className="postcard-card-content">
           <div className="postcard-card-top">
             <span>Hana Media Box</span>
@@ -449,14 +453,14 @@ export default function ListeningPostcard({
 
         {mode === 'share' ? (
           <div className="postcard-theme-picker" role="group" aria-label="聴く場所">
-            {LISTENING_SPACES.map((space) => (
+            {allSpaces.map((space) => (
               <button
                 key={space.id}
                 type="button"
                 className={`postcard-theme-chip${space.id === spaceId ? ' is-active' : ''}`}
                 onClick={() => setSpaceId(space.id)}
               >
-                <SpaceSceneryPreview spaceId={space.id} />
+                <SpaceSceneryPreview spaceId={space.id} customSpaces={customSpaces} />
                 <span>{space.labelShort}</span>
               </button>
             ))}

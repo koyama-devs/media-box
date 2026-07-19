@@ -54,6 +54,11 @@ const MEDIA_COLLECTION = 'media-items'
 const ACCESS_LOGS_COLLECTION = 'access-logs'
 const SHARED_STATE_COLLECTION = 'shared-state'
 const SHARED_PLAYLISTS_DOC = 'playlists'
+const SHARED_SPACES_DOC = 'spaces'
+const SPACE_PARTICLE_TYPES = new Set(['stars', 'rain', 'mist', 'petals'])
+const SPACE_AMBIENT_TYPES = new Set(['ocean', 'rain', 'wind', 'room'])
+const MAX_SHARED_CUSTOM_SPACES = 12
+const MAX_SHARED_SPACE_LABEL = 20
 const CHUNK_SIZE = 700_000
 export const MAX_FILE_SIZE = 10 * 1024 * 1024
 const ACCESS_LOG_SESSION_KEY = 'hana-mediabox-access-logged'
@@ -318,6 +323,54 @@ export async function saveSharedPlaylists(playlists) {
     doc(db, SHARED_STATE_COLLECTION, SHARED_PLAYLISTS_DOC),
     {
       playlists: normalizeSharedPlaylists(playlists),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+}
+
+function normalizeSharedSpaces(spaces) {
+  if (!Array.isArray(spaces)) return []
+  return spaces
+    .filter((item) => item && typeof item === 'object')
+    .map((item) => {
+      const id = String(item.id || '')
+      const particle = SPACE_PARTICLE_TYPES.has(item.particle) ? item.particle : 'stars'
+      const ambient = SPACE_AMBIENT_TYPES.has(item.ambient) ? item.ambient : 'ocean'
+      const backgroundItemId =
+        typeof item.backgroundItemId === 'string' && item.backgroundItemId
+          ? item.backgroundItemId
+          : null
+      return {
+        id,
+        label: String(item.label || '新しい場所').trim().slice(0, MAX_SHARED_SPACE_LABEL) || '新しい場所',
+        particle,
+        ambient,
+        backgroundItemId,
+        tagline: String(item.tagline || '').trim().slice(0, 40),
+      }
+    })
+    .filter((item) => item.id.startsWith('custom-'))
+    .slice(0, MAX_SHARED_CUSTOM_SPACES)
+}
+
+export function subscribeToSharedSpaces(onData, onError) {
+  return onSnapshot(
+    doc(db, SHARED_STATE_COLLECTION, SHARED_SPACES_DOC),
+    (snapshot) => {
+      const data = snapshot.data() || {}
+      const spaces = normalizeSharedSpaces(data.spaces)
+      onData(spaces, snapshot.exists())
+    },
+    onError,
+  )
+}
+
+export async function saveSharedSpaces(spaces) {
+  await setDoc(
+    doc(db, SHARED_STATE_COLLECTION, SHARED_SPACES_DOC),
+    {
+      spaces: normalizeSharedSpaces(spaces),
       updatedAt: serverTimestamp(),
     },
     { merge: true },

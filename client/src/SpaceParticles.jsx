@@ -48,10 +48,11 @@ function seedParticles(type, width, height, count) {
   return particles
 }
 
-export default function SpaceParticles({ spaceId, reducedMotion = false }) {
+export default function SpaceParticles({ spaceId, reducedMotion = false, customSpaces = [] }) {
   const canvasRef = useRef(null)
   const frameRef = useRef(0)
-  const isRain = spaceId === 'rainy-city'
+  const space = resolveListeningSpace(spaceId, customSpaces)
+  const isRain = space.particle === 'rain'
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -60,7 +61,6 @@ export default function SpaceParticles({ spaceId, reducedMotion = false }) {
     const ctx = canvas.getContext('2d', { alpha: true })
     if (!ctx) return undefined
 
-    const space = resolveListeningSpace(spaceId)
     const type = space.particle
 
     let particles = []
@@ -196,7 +196,7 @@ export default function SpaceParticles({ spaceId, reducedMotion = false }) {
       window.removeEventListener('resize', resize)
       window.cancelAnimationFrame(frameRef.current)
     }
-  }, [spaceId, reducedMotion])
+  }, [spaceId, reducedMotion, space.particle])
 
   if (reducedMotion) return null
 
