@@ -3020,7 +3020,9 @@ body.is-listening-space-open.is-focus-mode-off .upload-card {
   content: '';
   position: absolute;
   inset: 0;
+  z-index: 2;
   background: radial-gradient(circle at 72% 18%, var(--space-glow, rgba(56, 189, 248, 0.22)), transparent 42%);
+  pointer-events: none;
 }
 
 .listening-space-particles {
@@ -3029,8 +3031,16 @@ body.is-listening-space-open.is-focus-mode-off .upload-card {
   width: 100%;
   height: 100%;
   opacity: 0.85;
-  z-index: 3;
+  z-index: 5;
+  pointer-events: none;
 }
+
+.listening-space-particles.is-rain {
+  opacity: 1;
+  z-index: 6;
+  mix-blend-mode: screen;
+}
+
 
 .player-card.is-in-space.is-dragging {
   cursor: grabbing;

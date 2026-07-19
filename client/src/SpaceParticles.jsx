@@ -13,12 +13,17 @@ function seedParticles(type, width, height, count) {
         tw: Math.random() * Math.PI * 2,
       })
     } else if (type === 'rain') {
+      const layer = Math.random()
+      const near = layer > 0.78
+      const mid = layer > 0.4
       particles.push({
-        x: Math.random() * width,
+        x: Math.random() * (width + 80) - 40,
         y: Math.random() * height,
-        len: Math.random() * 14 + 8,
-        speed: Math.random() * 6 + 8,
-        a: Math.random() * 0.35 + 0.15,
+        len: near ? Math.random() * 8 + 14 : mid ? Math.random() * 6 + 10 : Math.random() * 5 + 6,
+        speed: near ? Math.random() * 3.5 + 6.5 : mid ? Math.random() * 2.5 + 4.5 : Math.random() * 1.8 + 3.2,
+        drift: 0,
+        width: near ? 1.3 : mid ? 1 : 0.8,
+        a: near ? Math.random() * 0.15 + 0.4 : mid ? Math.random() * 0.15 + 0.26 : Math.random() * 0.12 + 0.16,
       })
     } else if (type === 'petals') {
       particles.push({
@@ -46,12 +51,13 @@ function seedParticles(type, width, height, count) {
 export default function SpaceParticles({ spaceId, reducedMotion = false }) {
   const canvasRef = useRef(null)
   const frameRef = useRef(0)
+  const isRain = spaceId === 'rainy-city'
 
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || reducedMotion) return undefined
 
-    const ctx = canvas.getContext('2d')
+    const ctx = canvas.getContext('2d', { alpha: true })
     if (!ctx) return undefined
 
     const space = resolveListeningSpace(spaceId)
@@ -62,19 +68,27 @@ export default function SpaceParticles({ spaceId, reducedMotion = false }) {
     let height = 0
 
     const resize = () => {
-      width = canvas.clientWidth
-      height = canvas.clientHeight
+      // Prefer viewport size so rain never seeds against a 0×0 canvas.
+      width = Math.max(canvas.clientWidth, window.innerWidth, 1)
+      height = Math.max(canvas.clientHeight, window.innerHeight, 1)
       const dpr = Math.min(window.devicePixelRatio || 1, 2)
       canvas.width = Math.floor(width * dpr)
       canvas.height = Math.floor(height * dpr)
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      const count = type === 'mist' ? 18 : type === 'stars' ? 80 : 60
+      const area = width * height
+      const rainCount = Math.min(700, Math.max(350, Math.round(area / 2200)))
+      const count =
+        type === 'mist' ? 18
+          : type === 'stars' ? 80
+            : type === 'rain' ? rainCount
+              : 60
       particles = seedParticles(type, width, height, count)
     }
 
     resize()
     const observer = new ResizeObserver(resize)
     observer.observe(canvas)
+    window.addEventListener('resize', resize)
 
     const draw = (time) => {
       ctx.clearRect(0, 0, width, height)
@@ -88,21 +102,55 @@ export default function SpaceParticles({ spaceId, reducedMotion = false }) {
           ctx.fill()
         }
       } else if (type === 'rain') {
-        ctx.strokeStyle = 'rgba(191, 219, 254, 0.35)'
+        // Batch by opacity bands so dense rain stays readable over photo BG.
+        ctx.lineCap = 'round'
+        ctx.strokeStyle = '#e8f4ff'
+
+        // Far drizzle
+        ctx.globalAlpha = 0.1
+        ctx.lineWidth = 0.8
+        ctx.beginPath()
         for (const p of particles) {
-          ctx.globalAlpha = p.a
-          ctx.beginPath()
+          if (p.width > 0.9) continue
           ctx.moveTo(p.x, p.y)
-          ctx.lineTo(p.x - 2, p.y + p.len)
-          ctx.stroke()
-          p.y += p.speed
-          p.x -= 1.2
-          if (p.y > height + 20) {
-            p.y = -20
-            p.x = Math.random() * width
-          }
+          ctx.lineTo(p.x - p.drift * 1.5, p.y + p.len)
         }
+        ctx.stroke()
+
+        // Mid rain
+        ctx.globalAlpha = 0.18
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        for (const p of particles) {
+          if (p.width <= 0.9 || p.width > 1.1) continue
+          ctx.moveTo(p.x, p.y)
+          ctx.lineTo(p.x - p.drift * 1.5, p.y + p.len)
+        }
+        ctx.stroke()
+
+        // Near streaks
+        ctx.globalAlpha = 0.28
+        ctx.lineWidth = 1.3
+        ctx.beginPath()
+        for (const p of particles) {
+          if (p.width <= 1.1) continue
+          ctx.moveTo(p.x, p.y)
+          ctx.lineTo(p.x - p.drift * 1.6, p.y + p.len)
+        }
+        ctx.stroke()
+
+        for (const p of particles) {
+          p.y += p.speed
+          p.x -= p.drift
+          if (p.y > height + 30) {
+            p.y = -Math.random() * 80 - 10
+            p.x = Math.random() * (width + 100) - 40
+          }
+          if (p.x < -40) p.x = width + 40
+        }
+
         ctx.globalAlpha = 1
+        ctx.lineWidth = 1
       } else if (type === 'petals') {
         for (const p of particles) {
           ctx.save()
@@ -145,11 +193,18 @@ export default function SpaceParticles({ spaceId, reducedMotion = false }) {
 
     return () => {
       observer.disconnect()
+      window.removeEventListener('resize', resize)
       window.cancelAnimationFrame(frameRef.current)
     }
   }, [spaceId, reducedMotion])
 
   if (reducedMotion) return null
 
-  return <canvas ref={canvasRef} className="listening-space-particles" aria-hidden="true" />
+  return (
+    <canvas
+      ref={canvasRef}
+      className={`listening-space-particles${isRain ? ' is-rain' : ''}`}
+      aria-hidden="true"
+    />
+  )
 }
