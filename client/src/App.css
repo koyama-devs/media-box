@@ -283,6 +283,10 @@
   color: #86efac;
 }
 
+.stat-badge--book {
+  color: #fcd34d;
+}
+
 .content-grid {
   display: grid;
   grid-template-columns: 1.6fr 1fr;
@@ -1751,6 +1755,296 @@
   border-top: 1px solid var(--border);
   container-type: inline-size;
   container-name: photo-lib;
+}
+
+.bookshelf {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.bookshelf-hint {
+  margin: 0 0 12px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.bookshelf-grid {
+  list-style: none;
+  margin: 0;
+  padding: 14px 12px 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  border-radius: 14px;
+  background:
+    linear-gradient(to top, rgba(68, 42, 24, 0.55) 0 12px, transparent 12px),
+    linear-gradient(160deg, rgba(30, 20, 14, 0.65), rgba(15, 23, 42, 0.4));
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  min-height: 150px;
+}
+
+.bookshelf-spine {
+  position: relative;
+  width: 52px;
+  height: 128px;
+}
+
+.bookshelf-book {
+  width: 100%;
+  height: 100%;
+  padding: 10px 6px;
+  border: none;
+  border-radius: 4px 6px 6px 4px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  color: #fff7ed;
+  text-align: left;
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, 0.28), transparent 18%, transparent 82%, rgba(255, 255, 255, 0.12)),
+    linear-gradient(180deg, hsl(var(--spine-hue, 24), 42%, 38%), hsl(var(--spine-hue, 24), 48%, 26%));
+  box-shadow:
+    inset 2px 0 0 rgba(255, 255, 255, 0.15),
+    3px 6px 14px rgba(0, 0, 0, 0.35);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.bookshelf-book:hover:not(:disabled) {
+  transform: translateY(-8px) rotate(-2deg);
+  box-shadow:
+    inset 2px 0 0 rgba(255, 255, 255, 0.2),
+    6px 14px 24px rgba(0, 0, 0, 0.45);
+}
+
+.bookshelf-book:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.bookshelf-book-title {
+  writing-mode: vertical-rl;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  max-height: 78px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookshelf-book-meta {
+  font-size: 0.58rem;
+  opacity: 0.75;
+  writing-mode: horizontal-tb;
+}
+
+.bookshelf-delete {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  width: 22px;
+  height: 22px;
+  font-size: 0.78rem;
+  border-radius: 50%;
+  background: rgba(2, 6, 23, 0.75);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.bookshelf-spine:hover .bookshelf-delete,
+.bookshelf-spine:focus-within .bookshelf-delete {
+  opacity: 1;
+}
+
+/* Book reader */
+.book-reader-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background:
+    radial-gradient(ellipse at center, rgba(60, 40, 24, 0.35), rgba(2, 6, 23, 0.92));
+  backdrop-filter: blur(10px);
+}
+
+.book-reader {
+  width: min(960px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.book-reader-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.book-reader-kicker {
+  margin: 0 0 2px;
+  font-size: 0.68rem;
+  letter-spacing: 0.18em;
+  color: #fcd34d;
+}
+
+.book-reader-title-block h2 {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.book-reader-close {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.book-reader-stage {
+  position: relative;
+  flex: 1;
+  min-height: 280px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px 12px 28px;
+  perspective: 1800px;
+}
+
+.book-reader-desk {
+  position: absolute;
+  inset: auto 8% 8px;
+  height: 28%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.35), transparent 70%);
+  pointer-events: none;
+}
+
+.book-reader-spread {
+  position: relative;
+  width: min(720px, 100%);
+  aspect-ratio: 3 / 4;
+  max-height: min(68vh, 760px);
+  transform-style: preserve-3d;
+}
+
+.book-reader-spine {
+  position: absolute;
+  left: 0;
+  top: 3%;
+  bottom: 3%;
+  width: 10px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #3f2a1d, #6b4423 40%, #2a1a12);
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.35);
+  z-index: 3;
+}
+
+.book-page {
+  position: absolute;
+  inset: 0;
+  border-radius: 0 12px 12px 0;
+  overflow: hidden;
+  background: #f8f4ec;
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.4),
+    inset 0 0 0 1px rgba(120, 90, 60, 0.18);
+  transform-origin: left center;
+  backface-visibility: hidden;
+}
+
+.book-page img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #f8f4ec;
+  display: block;
+}
+
+.book-page-empty {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: #78716c;
+  font-size: 0.92rem;
+}
+
+.book-page--back {
+  z-index: 1;
+}
+
+.book-page--front {
+  z-index: 2;
+  transition: transform 0.7s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.book-reader-spread.is-flipping-next .book-page--front {
+  transform: rotateY(-168deg);
+  box-shadow: -8px 12px 28px rgba(0, 0, 0, 0.35);
+}
+
+.book-reader-spread.is-flipping-prev .book-page--front {
+  animation: book-flip-prev 0.7s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+@keyframes book-flip-prev {
+  0% { transform: rotateY(-168deg); }
+  100% { transform: rotateY(0deg); }
+}
+
+.book-reader-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.book-reader-page-indicator {
+  margin: 0;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  letter-spacing: 0.04em;
+}
+
+.book-reader-error {
+  margin: 0;
+  color: #fca5a5;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .bookshelf-grid {
+    gap: 8px;
+    padding: 12px 10px 8px;
+  }
+
+  .bookshelf-spine {
+    width: 46px;
+    height: 116px;
+  }
+
+  .bookshelf-delete {
+    opacity: 1;
+  }
+
+  .book-reader-overlay {
+    padding: 10px;
+  }
+
+  .book-reader-spread {
+    max-height: min(62vh, 640px);
+  }
 }
 
 .cover-library-hint {

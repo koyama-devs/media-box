@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
+import BookReader from './BookReader'
 import {
   deleteMediaItem,
   getFirebaseErrorMessage,
@@ -97,12 +98,14 @@ function getMediaKind(fileType, fileName = '') {
   if (type.startsWith('video/')) return 'video'
   if (type.startsWith('audio/')) return 'audio'
   if (type.startsWith('image/')) return 'image'
+  if (type === 'application/pdf' || extension === 'pdf') return 'book'
 
   if (['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'].includes(extension)) return 'video'
   if (['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'oga', 'opus', 'wma', 'aiff', 'aif', 'weba', 'caf'].includes(extension)) {
     return 'audio'
   }
   if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(extension)) return 'image'
+  if (extension === 'pdf') return 'book'
 
   return 'file'
 }
@@ -111,7 +114,9 @@ function getMediaKind(fileType, fileName = '') {
 function resolveMediaKind(item) {
   const derived = getMediaKind(item?.type, item?.originalName || item?.name || '')
   if (derived !== 'file') return derived
-  if (item?.kind === 'audio' || item?.kind === 'video' || item?.kind === 'image') return item.kind
+  if (item?.kind === 'audio' || item?.kind === 'video' || item?.kind === 'image' || item?.kind === 'book') {
+    return item.kind
+  }
   return 'file'
 }
 
@@ -150,6 +155,7 @@ function getKindLabel(kind) {
   if (kind === 'audio') return '音声'
   if (kind === 'video') return '動画'
   if (kind === 'image') return '画像'
+  if (kind === 'book') return '本'
   return 'ファイル'
 }
 
@@ -332,6 +338,9 @@ function App() {
   const [libraryViewerItemId, setLibraryViewerItemId] = useState(null)
   const [librarySlideshowIndex, setLibrarySlideshowIndex] = useState(0)
   const [librarySlideshowPaused, setLibrarySlideshowPaused] = useState(false)
+  const [readingBookId, setReadingBookId] = useState(null)
+  const [readingBookUrl, setReadingBookUrl] = useState(null)
+  const [readingBookBusy, setReadingBookBusy] = useState(false)
   const [coverBusy, setCoverBusy] = useState(false)
   const [jacketBusy, setJacketBusy] = useState(false)
   const [editingItemId, setEditingItemId] = useState(null)
@@ -411,6 +420,7 @@ function App() {
     let audio = 0
     let video = 0
     let image = 0
+    let book = 0
     let totalSize = 0
     for (const item of items) {
       totalSize += item.size || 0
@@ -419,8 +429,9 @@ function App() {
       // Only count images in the shared library; jacket/cover/space
       // background uploads are private assets.
       else if (item.kind === 'image' && item.inLibrary !== false) image += 1
+      else if (item.kind === 'book') book += 1
     }
-    return { audio, video, image, totalSize }
+    return { audio, video, image, book, totalSize }
   }, [items])
 
   const playlistLiveCounts = useMemo(() => {
@@ -528,6 +539,11 @@ function App() {
 
   const imageItems = useMemo(
     () => items.filter((item) => item.kind === 'image' && item.inLibrary !== false),
+    [items],
+  )
+
+  const bookItems = useMemo(
+    () => items.filter((item) => item.kind === 'book'),
     [items],
   )
 
@@ -884,6 +900,28 @@ function App() {
     syncTrackQuery(itemId)
 
 }, [])
+
+  const openBook = useCallback(async (bookId) => {
+    const book = items.find((item) => item.id === bookId && item.kind === 'book')
+    if (!book) return
+    setReadingBookBusy(true)
+    setError('')
+    try {
+      const url = await ensureMediaUrl(book.id, book.type || 'application/pdf')
+      setReadingBookUrl(url)
+      setReadingBookId(book.id)
+    } catch (bookError) {
+      console.error(bookError)
+      setError(getFirebaseErrorMessage(bookError) || '本を開けませんでした。')
+    } finally {
+      setReadingBookBusy(false)
+    }
+  }, [items, ensureMediaUrl])
+
+  const closeBook = useCallback(() => {
+    setReadingBookId(null)
+    setReadingBookUrl(null)
+  }, [])
 
   const skipTodayHero = useCallback(() => {
     markTodayRecordShown()
@@ -1877,7 +1915,7 @@ const playPrevious = useCallback(() => {
       setError(
         skipped.length > 0
           ? `アップロードできませんでした: ${skipped.join('、')}`
-          : '動画・音声・画像ファイルのみ対応しています。',
+          : '動画・音声・画像・PDFファイルのみ対応しています。',
       )
       event.target.value = ''
       return
@@ -1902,6 +1940,7 @@ const playPrevious = useCallback(() => {
         -1,
       ) + 1
     let lastPlayableId = null
+    let lastBookId = null
 
     try {
       for (let index = 0; index < validFiles.length; index += 1) {
@@ -1911,22 +1950,26 @@ const playPrevious = useCallback(() => {
         setUploadingFileName(file.name)
         setUploadProgress(0)
 
+        const isShelfAsset = kind === 'image' || kind === 'book'
         const metadata = createMediaMetadata(file, {
           inLibrary: kind === 'image',
-          ...(kind === 'image'
+          ...(isShelfAsset
             ? {}
             : {
                 order: nextOrder,
               }),
         })
-        if (kind !== 'image') {
+        if (!isShelfAsset) {
           nextOrder += 1
         }
 
         const id = await uploadMediaFile(file, metadata, setUploadProgress)
-        if (kind !== 'image') {
+        if (kind === 'audio' || kind === 'video') {
           uploadedPlayableIds.push(id)
           lastPlayableId = id
+        }
+        if (kind === 'book') {
+          lastBookId = id
         }
       }
 
@@ -1937,6 +1980,8 @@ const playPrevious = useCallback(() => {
 
       if (lastPlayableId) {
         setSelectedItemId(lastPlayableId)
+      } else if (lastBookId) {
+        void openBook(lastBookId)
       }
       setLoadingItems(false)
     } catch (uploadError) {
@@ -2357,6 +2402,7 @@ const playPrevious = useCallback(() => {
               <span className="stat-badge stat-badge--audio" title="音声ファイル数">音声 {mediaCounts.audio}</span>
               <span className="stat-badge stat-badge--video" title="動画ファイル数">動画 {mediaCounts.video}</span>
               <span className="stat-badge stat-badge--image" title="画像ファイル数">画像 {mediaCounts.image}</span>
+              <span className="stat-badge stat-badge--book" title="本（PDF）数">本 {mediaCounts.book}</span>
               <span className="stat-badge" title="全メディアの合計サイズ">
                 {mediaCounts.totalSize ? formatSize(mediaCounts.totalSize) : '0 MB'}
               </span>
@@ -2371,7 +2417,7 @@ const playPrevious = useCallback(() => {
               <p className="eyebrow">すぐアップロード</p>
               <h3>メディアを共有ボックスへ追加</h3>
               <p className="hint">
-                複数選択可・1ファイル最大 {formatSize(MAX_FILE_SIZE)}。画像は画像ライブラリへ。
+                複数選択可・1ファイル最大 {formatSize(MAX_FILE_SIZE)}。画像はフォトライブラリ、PDFは本棚へ。
                 プレイリスト未選択時は再生リスト（すべて）へ入ります。
               </p>
               {uploading ? (
@@ -2474,7 +2520,7 @@ const playPrevious = useCallback(() => {
               <input
                 id="video-upload"
                 type="file"
-                accept="video/*,audio/*,image/*"
+                accept="video/*,audio/*,image/*,application/pdf,.pdf"
                 multiple
                 disabled={uploading || uploadCreatingPlaylist}
                 onChange={handleUpload}
@@ -3269,6 +3315,41 @@ const playPrevious = useCallback(() => {
                 </ul>
               )}
 
+              {bookItems.length > 0 ? (
+                <div className="bookshelf">
+                  <div className="list-header image-library-header">
+                    <h3>本棚</h3>
+                    <span className="image-library-count">{bookItems.length}冊</span>
+                  </div>
+                  <p className="bookshelf-hint">PDFを開いて、ページをめくりながら読めます</p>
+                  <ul className="bookshelf-grid">
+                    {bookItems.map((item, index) => (
+                      <li key={item.id} className="bookshelf-spine" style={{ '--spine-hue': `${(index * 47) % 360}` }}>
+                        <button
+                          type="button"
+                          className="bookshelf-book"
+                          onClick={() => void openBook(item.id)}
+                          disabled={readingBookBusy}
+                          title={getDisplayName(item.name)}
+                        >
+                          <span className="bookshelf-book-title">{getDisplayName(item.name)}</span>
+                          <span className="bookshelf-book-meta">{formatSize(item.size)}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button danger bookshelf-delete"
+                          title="削除"
+                          aria-label="削除"
+                          onClick={() => requestDelete(item.id)}
+                        >
+                          ×
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
               {imageItems.length > 0 ? (
                 <div className="cover-library">
                   <div className="list-header image-library-header">
@@ -3443,6 +3524,15 @@ const playPrevious = useCallback(() => {
                 }
               : null
           }
+        />
+      ) : null}
+
+      {readingBookId && readingBookUrl ? (
+        <BookReader
+          open
+          title={getDisplayName(items.find((item) => item.id === readingBookId)?.name || '無題の本')}
+          pdfUrl={readingBookUrl}
+          onClose={closeBook}
         />
       ) : null}
 
