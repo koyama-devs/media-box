@@ -330,6 +330,8 @@ function App() {
   const [jacketPreviewUrl, setJacketPreviewUrl] = useState(null)
   const [libraryThumbUrls, setLibraryThumbUrls] = useState({})
   const [libraryViewerItemId, setLibraryViewerItemId] = useState(null)
+  const [librarySlideshowIndex, setLibrarySlideshowIndex] = useState(0)
+  const [librarySlideshowPaused, setLibrarySlideshowPaused] = useState(false)
   const [coverBusy, setCoverBusy] = useState(false)
   const [jacketBusy, setJacketBusy] = useState(false)
   const [editingItemId, setEditingItemId] = useState(null)
@@ -535,6 +537,10 @@ function App() {
   )
   const libraryViewerItem = libraryViewerIndex >= 0 ? imageItems[libraryViewerIndex] : null
 
+  const librarySlideshowItem = imageItems.length > 0
+    ? imageItems[librarySlideshowIndex % imageItems.length]
+    : null
+
   const stepLibraryViewer = useCallback((offset) => {
     setLibraryViewerItemId((currentId) => {
       const currentIndex = imageItems.findIndex((item) => item.id === currentId)
@@ -543,6 +549,29 @@ function App() {
       return imageItems[nextIndex]?.id || currentId
     })
   }, [imageItems])
+
+  const stepLibrarySlideshow = useCallback((offset) => {
+    setLibrarySlideshowIndex((current) => {
+      if (imageItems.length === 0) return 0
+      return (current + offset + imageItems.length) % imageItems.length
+    })
+  }, [imageItems.length])
+
+  useEffect(() => {
+    if (imageItems.length === 0) {
+      setLibrarySlideshowIndex(0)
+      return
+    }
+    setLibrarySlideshowIndex((current) => current % imageItems.length)
+  }, [imageItems.length])
+
+  useEffect(() => {
+    if (imageItems.length < 2 || librarySlideshowPaused || libraryViewerItem) return undefined
+    const timer = window.setInterval(() => {
+      setLibrarySlideshowIndex((current) => (current + 1) % imageItems.length)
+    }, 4500)
+    return () => window.clearInterval(timer)
+  }, [imageItems.length, librarySlideshowPaused, libraryViewerItem])
 
   useEffect(() => {
     if (!libraryViewerItem) return undefined
@@ -554,6 +583,12 @@ function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [libraryViewerItem, stepLibraryViewer])
+
+  const getLibraryTileShape = useCallback((index) => {
+    // Varied aspect ratios for masonry columns — no empty grid holes.
+    const pattern = ['hero', 'tall', 'sq', 'wide', 'tall', 'sq', 'portrait', 'wide', 'sq', 'tall', 'hero', 'sq']
+    return pattern[index % pattern.length]
+  }, [])
 
   const selectedItem = useMemo(
     () => items.find((item) => item.id === selectedItemId) || visiblePlayableItems[0] || playableItems[0] || null,
@@ -3240,21 +3275,99 @@ const playPrevious = useCallback(() => {
                     <h3>フォトライブラリ</h3>
                     <span className="image-library-count">{imageItems.length}枚の思い出</span>
                   </div>
+
+                  {librarySlideshowItem ? (
+                    <div
+                      className="photo-showroom"
+                      onMouseEnter={() => setLibrarySlideshowPaused(true)}
+                      onMouseLeave={() => setLibrarySlideshowPaused(false)}
+                    >
+                      <button
+                        type="button"
+                        className="photo-showroom-stage"
+                        onClick={() => setLibraryViewerItemId(librarySlideshowItem.id)}
+                        title="クリックで拡大"
+                      >
+                        {libraryThumbUrls[librarySlideshowItem.id] ? (
+                          <img
+                            key={librarySlideshowItem.id}
+                            className="photo-showroom-image"
+                            src={libraryThumbUrls[librarySlideshowItem.id]}
+                            alt={getDisplayName(librarySlideshowItem.name)}
+                          />
+                        ) : (
+                          <span className="image-library-loading" aria-hidden="true" />
+                        )}
+                        <span className="photo-showroom-veil" aria-hidden="true" />
+                        <span className="photo-showroom-kicker">SHOWROOM</span>
+                        <span className="photo-showroom-counter">
+                          {librarySlideshowIndex % imageItems.length + 1} / {imageItems.length}
+                        </span>
+                        {selectedItem?.coverId === librarySlideshowItem.id ? (
+                          <span className="image-library-badge photo-showroom-badge">使用中</span>
+                        ) : null}
+                      </button>
+
+                      {imageItems.length > 1 ? (
+                        <>
+                          <button
+                            type="button"
+                            className="photo-showroom-nav photo-showroom-nav--prev"
+                            onClick={() => stepLibrarySlideshow(-1)}
+                            aria-label="前の画像"
+                          >
+                            ‹
+                          </button>
+                          <button
+                            type="button"
+                            className="photo-showroom-nav photo-showroom-nav--next"
+                            onClick={() => stepLibrarySlideshow(1)}
+                            aria-label="次の画像"
+                          >
+                            ›
+                          </button>
+                          <div className="photo-showroom-dots" role="tablist" aria-label="スライド">
+                            {imageItems.length <= 12
+                              ? imageItems.map((item, index) => (
+                                <button
+                                  key={item.id}
+                                  type="button"
+                                  role="tab"
+                                  aria-selected={index === librarySlideshowIndex % imageItems.length}
+                                  className={`photo-showroom-dot${index === librarySlideshowIndex % imageItems.length ? ' is-active' : ''}`}
+                                  onClick={() => setLibrarySlideshowIndex(index)}
+                                />
+                              ))
+                              : null}
+                          </div>
+                          <div
+                            key={librarySlideshowIndex}
+                            className={`photo-showroom-progress${librarySlideshowPaused ? ' is-paused' : ''}`}
+                            aria-hidden="true"
+                          />
+                        </>
+                      ) : null}
+                    </div>
+                  ) : null}
+
                   <ul className="image-library-grid">
                     {imageItems.map((item, index) => {
                       const inUse = selectedItem?.coverId === item.id
                       const thumbUrl = libraryThumbUrls[item.id] || null
-                      const featured = index % 7 === 0
+                      const shape = getLibraryTileShape(index)
                       return (
                         <li
                           key={item.id}
-                          className={`image-library-card${inUse ? ' is-active' : ''}${featured ? ' is-featured' : ''}`}
+                          className={`image-library-card tile-${shape}${inUse ? ' is-active' : ''}${librarySlideshowItem?.id === item.id ? ' is-showing' : ''}`}
                           style={{ '--library-delay': `${Math.min(index, 12) * 45}ms` }}
                         >
                           <button
                             type="button"
                             className="image-library-thumb"
-                            onClick={() => setLibraryViewerItemId(item.id)}
+                            onClick={() => {
+                              setLibrarySlideshowIndex(index)
+                              setLibraryViewerItemId(item.id)
+                            }}
                             title={getDisplayName(item.name)}
                           >
                             {thumbUrl ? (
