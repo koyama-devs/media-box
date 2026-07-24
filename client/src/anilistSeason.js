@@ -453,17 +453,79 @@ export function loadWatchProgress() {
   }
 }
 
+const LIBRARY_KEY = 'hana-anime-library'
+
+/** Keep a slim copy of anime metadata for list filters (search / off-season). */
+function slimAnimeMedia(media) {
+  if (!media?.id) return null
+  return {
+    id: media.id,
+    title: media.title || null,
+    coverImage: media.coverImage || null,
+    averageScore: media.averageScore ?? null,
+    popularity: media.popularity ?? null,
+    episodes: media.episodes ?? null,
+    siteUrl: media.siteUrl || null,
+    format: media.format || null,
+    status: media.status || null,
+    season: media.season || null,
+    seasonYear: media.seasonYear ?? null,
+    genres: Array.isArray(media.genres) ? media.genres : [],
+    description: media.description || null,
+    startDate: media.startDate || null,
+    endDate: media.endDate || null,
+    nextAiringEpisode: media.nextAiringEpisode || null,
+    trailer: media.trailer || null,
+  }
+}
+
+/** @returns {Record<string, object>} */
+export function loadAnimeLibrary() {
+  try {
+    const raw = localStorage.getItem(LIBRARY_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+/** @returns {object[]} */
+export function listAnimeLibrary() {
+  return Object.values(loadAnimeLibrary()).filter((item) => item?.id != null)
+}
+
+function upsertAnimeLibrary(media) {
+  const slim = slimAnimeMedia(media)
+  if (!slim) return
+  const next = { ...loadAnimeLibrary(), [String(slim.id)]: slim }
+  localStorage.setItem(LIBRARY_KEY, JSON.stringify(next))
+}
+
+function removeAnimeFromLibrary(animeId) {
+  const key = String(animeId)
+  const current = loadAnimeLibrary()
+  if (!(key in current)) return
+  const next = { ...current }
+  delete next[key]
+  localStorage.setItem(LIBRARY_KEY, JSON.stringify(next))
+}
+
 /**
  * @param {number|string} animeId
  * @param {'want'|'watching'|'done'|null} status
+ * @param {object|null} [media] full/partial AniList media when adding/updating
  */
-export function setWatchStatus(animeId, status) {
+export function setWatchStatus(animeId, status, media = null) {
   const key = String(animeId)
   const next = { ...loadWatchProgress() }
   if (!status) {
     delete next[key]
+    removeAnimeFromLibrary(animeId)
   } else {
     next[key] = { status, updatedAt: Date.now() }
+    if (media) upsertAnimeLibrary(media)
   }
   localStorage.setItem(PROGRESS_KEY, JSON.stringify(next))
   return next
@@ -474,3 +536,4 @@ export const WATCH_STATUS_LABEL = {
   watching: '視聴中',
   done: '視聴済',
 }
+

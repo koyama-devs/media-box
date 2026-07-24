@@ -271,6 +271,7 @@ export default function ListeningPostcard({
   initialSpaceId = null,
   customSpaces = [],
   onClose,
+  onListen = null,
   onShareFile = null,
 }) {
   const [busy, setBusy] = useState(false)
@@ -472,7 +473,17 @@ export default function ListeningPostcard({
 
         <div className="postcard-actions">
           {mode === 'welcome' ? (
-            <button type="button" className="primary-button" onClick={onClose}>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => {
+                if (typeof onListen === 'function') {
+                  onListen(spaceId)
+                  return
+                }
+                onClose?.()
+              }}
+            >
               聴く
             </button>
           ) : (

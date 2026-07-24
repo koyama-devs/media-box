@@ -9,6 +9,7 @@ import {
     getBroadcastSchedule,
     getPreviousSeason,
     getYoutubeTrailer,
+    listAnimeLibrary,
     loadWatchProgress,
     localizeAnimeGenres,
     pickAnimeTitle,
@@ -35,6 +36,7 @@ export default function SeasonalAnime({ hidden = false }) {
   const [seasonMedia, setSeasonMedia] = useState([])
   const [searchMedia, setSearchMedia] = useState([])
   const [progress, setProgress] = useState(() => loadWatchProgress())
+  const [libraryMedia, setLibraryMedia] = useState(() => listAnimeLibrary())
   const [loading, setLoading] = useState(true)
   const [searching, setSearching] = useState(false)
   const [error, setError] = useState('')
@@ -201,30 +203,60 @@ export default function SeasonalAnime({ hidden = false }) {
 
   if (hidden) return null
 
-  const sourceMedia = isSearching ? searchMedia : seasonMedia
+  const mergeById = (...lists) => {
+    const map = new Map()
+    for (const list of lists) {
+      for (const item of list) {
+        if (item?.id == null || map.has(item.id)) continue
+        map.set(item.id, item)
+      }
+    }
+    return Array.from(map.values())
+  }
 
-  const visible = sourceMedia.filter((item) => {
-    if (filter === 'all') return true
-    return progress[String(item.id)]?.status === filter
-  })
+  // Status filters include saved anime from search / other seasons.
+  const sourceMedia = isSearching
+    ? (filter === 'all' ? searchMedia : mergeById(searchMedia, libraryMedia))
+    : (filter === 'all' ? seasonMedia : mergeById(seasonMedia, libraryMedia))
 
-  const counts = sourceMedia.reduce(
-    (acc, item) => {
-      const s = progress[String(item.id)]?.status
-      if (s === 'want') acc.want += 1
-      else if (s === 'watching') acc.watching += 1
-      else if (s === 'done') acc.done += 1
+  const visible = sourceMedia
+    .filter((item) => {
+      if (filter === 'all') return true
+      return progress[String(item.id)]?.status === filter
+    })
+    .sort((a, b) => {
+      if (filter === 'all') return 0
+      const aTime = progress[String(a.id)]?.updatedAt || 0
+      const bTime = progress[String(b.id)]?.updatedAt || 0
+      return bTime - aTime
+    })
+
+  const counts = Object.values(progress).reduce(
+    (acc, entry) => {
+      if (entry?.status === 'want') acc.want += 1
+      else if (entry?.status === 'watching') acc.watching += 1
+      else if (entry?.status === 'done') acc.done += 1
       return acc
     },
     { want: 0, watching: 0, done: 0 },
   )
 
-  const cycleStatus = (animeId) => {
-    const key = String(animeId)
+  const cycleStatus = (item) => {
+    const key = String(item.id)
     const currentStatus = progress[key]?.status || null
     const idx = STATUS_CYCLE.indexOf(currentStatus)
     const nextStatus = STATUS_CYCLE[(idx + 1) % STATUS_CYCLE.length]
-    setProgress(setWatchStatus(animeId, nextStatus))
+    const nextProgress = setWatchStatus(item.id, nextStatus, nextStatus ? item : null)
+    setProgress(nextProgress)
+    setLibraryMedia(listAnimeLibrary())
+
+    // After adding from search, jump to the matching list so it stays visible.
+    if (nextStatus && isSearching) {
+      setQuery('')
+      setDebouncedQuery('')
+      setSearchMedia([])
+      setFilter(nextStatus)
+    }
   }
 
   const clearLeaveTimer = () => {
@@ -334,7 +366,7 @@ export default function SeasonalAnime({ hidden = false }) {
 
       <div className="seasonal-anime-filters" role="group" aria-label="視聴フィルター">
         {[
-          { id: 'all', label: `すべて (${sourceMedia.length})` },
+          { id: 'all', label: `すべて (${isSearching ? searchMedia.length : seasonMedia.length})` },
           { id: 'want', label: `見たい (${counts.want})` },
           { id: 'watching', label: `視聴中 (${counts.watching})` },
           { id: 'done', label: `視聴済 (${counts.done})` },
@@ -389,8 +421,8 @@ export default function SeasonalAnime({ hidden = false }) {
                 openPreview(item, event.currentTarget)
               }}
             >
-              <span className="seasonal-anime-rank" aria-label={`順位 ${item.rank}`}>
-                {String(item.rank).padStart(2, '0')}
+              <span className="seasonal-anime-rank" aria-label={item.rank != null ? `順位 ${item.rank}` : 'リスト'}>
+                {item.rank != null ? String(item.rank).padStart(2, '0') : '・'}
               </span>
               <a
                 className="seasonal-anime-cover"
@@ -440,7 +472,7 @@ export default function SeasonalAnime({ hidden = false }) {
               <button
                 type="button"
                 className={`seasonal-anime-status-btn${status ? ` is-${status}` : ''}`}
-                onClick={() => cycleStatus(item.id)}
+                onClick={() => cycleStatus(item)}
                 title="タップで状態切替：未登録 → 見たい → 視聴中 → 視聴済"
               >
                 {status ? WATCH_STATUS_LABEL[status] : '＋リスト'}
@@ -539,7 +571,7 @@ export default function SeasonalAnime({ hidden = false }) {
                   <button
                     type="button"
                     className={`seasonal-anime-status-btn${previewStatus ? ` is-${previewStatus}` : ''}`}
-                    onClick={() => cycleStatus(preview.item.id)}
+                    onClick={() => cycleStatus(preview.item)}
                   >
                     {previewStatus ? WATCH_STATUS_LABEL[previewStatus] : '＋リスト'}
                   </button>

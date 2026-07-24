@@ -2202,6 +2202,47 @@ const playPrevious = useCallback(() => {
     setPostcardCoverUrl(null)
   }, [])
 
+  const handleWelcomeListen = useCallback((spaceId = null) => {
+    const itemId = postcardItemId
+    closeListeningPostcard()
+    if (!itemId) return
+
+    if (spaceId && isKnownSpaceId(spaceId, customSpaces)) {
+      openListeningSpace(spaceId)
+    }
+
+    // Same track is often already selected from the deep link without autoplay.
+    if (selectedItemId === itemId) {
+      shouldAutoPlayRef.current = true
+      const media = mediaRef.current
+      if (media && previewUrl && !loadingPreview) {
+        if (media.ended) media.currentTime = 0
+        const playPromise = media.play()
+        if (playPromise) {
+          playPromise
+            .then(() => {
+              shouldAutoPlayRef.current = false
+            })
+            .catch(() => {
+              /* browser may still block; canPlay handler may retry */
+            })
+        }
+        return
+      }
+    }
+
+    selectItem(itemId, true)
+  }, [
+    postcardItemId,
+    closeListeningPostcard,
+    customSpaces,
+    openListeningSpace,
+    selectedItemId,
+    previewUrl,
+    loadingPreview,
+    selectItem,
+  ])
+
   const openListeningPostcard = useCallback((item, mode = 'share') => {
     if (!item || item.kind !== 'audio') return
     setPostcardMode(mode)
@@ -3674,6 +3715,7 @@ const playPrevious = useCallback(() => {
           initialSpaceId={postcardSpaceId}
           customSpaces={customSpaces}
           onClose={closeListeningPostcard}
+          onListen={postcardMode === 'welcome' ? handleWelcomeListen : null}
           onShareFile={
             postcardMode === 'share'
               ? () => {
