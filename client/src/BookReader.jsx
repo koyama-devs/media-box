@@ -48,8 +48,8 @@ function toJapanesePageLabel(page, pageCount) {
 
 function fitBookFrame(stageWidth, stageHeight, aspect) {
   const safeAspect = aspect > 0.2 && aspect < 5 ? aspect : 0.707
-  const maxW = Math.max(240, stageWidth - 8)
-  const maxH = Math.max(240, stageHeight - 12)
+  const maxW = Math.max(240, (stageWidth || 640) - 8)
+  const maxH = Math.max(240, (stageHeight || 720) - 12)
   let width = maxW
   let height = width / safeAspect
   if (height > maxH) {
@@ -61,6 +61,10 @@ function fitBookFrame(stageWidth, stageHeight, aspect) {
     height: Math.floor(height),
     aspect: safeAspect,
   }
+}
+
+function framesEqual(a, b) {
+  return a.width === b.width && a.height === b.height
 }
 
 /**
@@ -76,6 +80,7 @@ export default function BookReader({
   const pdfRef = useRef(null)
   const pageCacheRef = useRef(new Map())
   const pageAspectRef = useRef(0.707)
+  const frameRef = useRef({ width: 420, height: 594, aspect: 0.707 })
   const [pageCount, setPageCount] = useState(0)
   const [page, setPage] = useState(1)
   const [frontUrl, setFrontUrl] = useState(null)
@@ -83,18 +88,24 @@ export default function BookReader({
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState('')
   const [flipping, setFlipping] = useState(null)
-  const [frame, setFrame] = useState({ width: 420, height: 594, aspect: 0.707 })
+  const [frame, setFrame] = useState(frameRef.current)
 
   const clearCache = useCallback(() => {
     pageCacheRef.current.forEach((url) => URL.revokeObjectURL(url))
     pageCacheRef.current.clear()
   }, [])
 
+  const updateFrame = useCallback((next) => {
+    if (framesEqual(frameRef.current, next)) return
+    frameRef.current = next
+    setFrame(next)
+  }, [])
+
   const measureFrame = useCallback(() => {
     const stage = stageRef.current
     if (!stage) return
-    setFrame(fitBookFrame(stage.clientWidth, stage.clientHeight, pageAspectRef.current))
-  }, [])
+    updateFrame(fitBookFrame(stage.clientWidth, stage.clientHeight, pageAspectRef.current))
+  }, [updateFrame])
 
   useLayoutEffect(() => {
     if (!open) return undefined
@@ -110,7 +121,7 @@ export default function BookReader({
     const cached = pageCacheRef.current.get(pageNumber)
     if (cached) return cached
 
-    const width = Math.max(320, Math.round(renderWidth || frame.width || 640))
+    const width = Math.max(320, Math.round(renderWidth || frameRef.current.width || 640))
     const dprBoost = typeof window !== 'undefined' && window.devicePixelRatio > 1.5 ? 1.35 : 1.1
     const { canvas } = await renderPageToCanvas(pdf, pageNumber, width * dprBoost)
     const url = await new Promise((resolve, reject) => {
@@ -124,7 +135,7 @@ export default function BookReader({
     })
     pageCacheRef.current.set(pageNumber, url)
     return url
-  }, [frame.width])
+  }, [])
 
   useEffect(() => {
     if (!open || !pdfUrl) return undefined
@@ -160,7 +171,7 @@ export default function BookReader({
           stage?.clientHeight || 720,
           pageAspectRef.current,
         )
-        setFrame(sized)
+        updateFrame(sized)
 
         const first = await getPageUrl(pdf, 1, sized.width)
         if (cancelled) return
@@ -187,7 +198,7 @@ export default function BookReader({
       pdfRef.current = null
       clearCache()
     }
-  }, [open, pdfUrl, clearCache, getPageUrl])
+  }, [open, pdfUrl, clearCache, getPageUrl, updateFrame])
 
   const turnPage = useCallback(async (direction) => {
     if (flipping || busy || !pdfRef.current) return
@@ -196,7 +207,7 @@ export default function BookReader({
 
     setBusy(true)
     try {
-      const nextUrl = await getPageUrl(pdfRef.current, nextPage, frame.width)
+      const nextUrl = await getPageUrl(pdfRef.current, nextPage, frameRef.current.width)
       setBackUrl(nextUrl)
       setFlipping(direction > 0 ? 'next' : 'prev')
 
@@ -208,7 +219,7 @@ export default function BookReader({
         setBusy(false)
         const prefetch = [nextPage - 1, nextPage + 1].filter((n) => n >= 1 && n <= pageCount)
         prefetch.forEach((n) => {
-          getPageUrl(pdfRef.current, n, frame.width).catch(() => {})
+          getPageUrl(pdfRef.current, n, frameRef.current.width).catch(() => {})
         })
       }, 780)
     } catch (turnError) {
@@ -217,7 +228,7 @@ export default function BookReader({
       setBusy(false)
       setFlipping(null)
     }
-  }, [flipping, busy, page, pageCount, getPageUrl, frame.width])
+  }, [flipping, busy, page, pageCount, getPageUrl])
 
   useEffect(() => {
     if (!open) return undefined
