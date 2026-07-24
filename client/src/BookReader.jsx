@@ -1,6 +1,6 @@
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
 import pdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 // Modern pdf.js expects Map.getOrInsertComputed (not in all browsers yet).
@@ -22,7 +22,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker
 async function renderPageToCanvas(pdf, pageNumber, targetWidth) {
   const page = await pdf.getPage(pageNumber)
   const unscaled = page.getViewport({ scale: 1 })
-  const scale = Math.min(2.2, Math.max(0.8, targetWidth / unscaled.width))
+  const scale = Math.min(2.4, Math.max(1, targetWidth / unscaled.width))
   const viewport = page.getViewport({ scale })
   const canvas = document.createElement('canvas')
   canvas.width = Math.floor(viewport.width)
@@ -30,7 +30,7 @@ async function renderPageToCanvas(pdf, pageNumber, targetWidth) {
   const ctx = canvas.getContext('2d', { alpha: false })
   if (!ctx) throw new Error('canvas unavailable')
   await page.render({ canvasContext: ctx, viewport, canvas }).promise
-  return canvas
+  return { canvas, aspect: unscaled.width / unscaled.height }
 }
 
 async function loadPdfSource(pdfUrl) {
@@ -46,8 +46,25 @@ function toJapanesePageLabel(page, pageCount) {
   return `${page} ／ ${pageCount} 頁`
 }
 
+function fitBookFrame(stageWidth, stageHeight, aspect) {
+  const safeAspect = aspect > 0.2 && aspect < 5 ? aspect : 0.707
+  const maxW = Math.max(240, stageWidth - 8)
+  const maxH = Math.max(240, stageHeight - 12)
+  let width = maxW
+  let height = width / safeAspect
+  if (height > maxH) {
+    height = maxH
+    width = height * safeAspect
+  }
+  return {
+    width: Math.floor(width),
+    height: Math.floor(height),
+    aspect: safeAspect,
+  }
+}
+
 /**
- * Japanese-bound reading room: 右開き spine, washi page, soft page-turn.
+ * Japanese-bound reading room: 右開き spine, page frame matches PDF size.
  */
 export default function BookReader({
   open,
@@ -58,25 +75,44 @@ export default function BookReader({
   const stageRef = useRef(null)
   const pdfRef = useRef(null)
   const pageCacheRef = useRef(new Map())
+  const pageAspectRef = useRef(0.707)
   const [pageCount, setPageCount] = useState(0)
   const [page, setPage] = useState(1)
   const [frontUrl, setFrontUrl] = useState(null)
   const [backUrl, setBackUrl] = useState(null)
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState('')
-  const [flipping, setFlipping] = useState(null) // 'next' | 'prev' | null
+  const [flipping, setFlipping] = useState(null)
+  const [frame, setFrame] = useState({ width: 420, height: 594, aspect: 0.707 })
 
   const clearCache = useCallback(() => {
     pageCacheRef.current.forEach((url) => URL.revokeObjectURL(url))
     pageCacheRef.current.clear()
   }, [])
 
-  const getPageUrl = useCallback(async (pdf, pageNumber) => {
+  const measureFrame = useCallback(() => {
+    const stage = stageRef.current
+    if (!stage) return
+    setFrame(fitBookFrame(stage.clientWidth, stage.clientHeight, pageAspectRef.current))
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!open) return undefined
+    measureFrame()
+    const stage = stageRef.current
+    if (!stage || typeof ResizeObserver === 'undefined') return undefined
+    const observer = new ResizeObserver(() => measureFrame())
+    observer.observe(stage)
+    return () => observer.disconnect()
+  }, [open, measureFrame])
+
+  const getPageUrl = useCallback(async (pdf, pageNumber, renderWidth) => {
     const cached = pageCacheRef.current.get(pageNumber)
     if (cached) return cached
 
-    const width = Math.min(920, Math.max(320, (stageRef.current?.clientWidth || 640) * 0.88))
-    const canvas = await renderPageToCanvas(pdf, pageNumber, width)
+    const width = Math.max(320, Math.round(renderWidth || frame.width || 640))
+    const dprBoost = typeof window !== 'undefined' && window.devicePixelRatio > 1.5 ? 1.35 : 1.1
+    const { canvas } = await renderPageToCanvas(pdf, pageNumber, width * dprBoost)
     const url = await new Promise((resolve, reject) => {
       canvas.toBlob((blob) => {
         if (!blob) {
@@ -84,11 +120,11 @@ export default function BookReader({
           return
         }
         resolve(URL.createObjectURL(blob))
-      }, 'image/jpeg', 0.9)
+      }, 'image/jpeg', 0.92)
     })
     pageCacheRef.current.set(pageNumber, url)
     return url
-  }, [])
+  }, [frame.width])
 
   useEffect(() => {
     if (!open || !pdfUrl) return undefined
@@ -100,6 +136,7 @@ export default function BookReader({
     setFrontUrl(null)
     setBackUrl(null)
     setFlipping(null)
+    pageAspectRef.current = 0.707
     clearCache()
 
     const load = async () => {
@@ -113,11 +150,23 @@ export default function BookReader({
         }
         pdfRef.current = pdf
         setPageCount(pdf.numPages || 0)
-        const first = await getPageUrl(pdf, 1)
+
+        const firstPage = await pdf.getPage(1)
+        const viewport = firstPage.getViewport({ scale: 1 })
+        pageAspectRef.current = viewport.width / viewport.height
+        const stage = stageRef.current
+        const sized = fitBookFrame(
+          stage?.clientWidth || 640,
+          stage?.clientHeight || 720,
+          pageAspectRef.current,
+        )
+        setFrame(sized)
+
+        const first = await getPageUrl(pdf, 1, sized.width)
         if (cancelled) return
         setFrontUrl(first)
         if (pdf.numPages > 1) {
-          getPageUrl(pdf, 2).catch(() => {})
+          getPageUrl(pdf, 2, sized.width).catch(() => {})
         }
       } catch (loadError) {
         console.error(loadError)
@@ -147,7 +196,7 @@ export default function BookReader({
 
     setBusy(true)
     try {
-      const nextUrl = await getPageUrl(pdfRef.current, nextPage)
+      const nextUrl = await getPageUrl(pdfRef.current, nextPage, frame.width)
       setBackUrl(nextUrl)
       setFlipping(direction > 0 ? 'next' : 'prev')
 
@@ -159,7 +208,7 @@ export default function BookReader({
         setBusy(false)
         const prefetch = [nextPage - 1, nextPage + 1].filter((n) => n >= 1 && n <= pageCount)
         prefetch.forEach((n) => {
-          getPageUrl(pdfRef.current, n).catch(() => {})
+          getPageUrl(pdfRef.current, n, frame.width).catch(() => {})
         })
       }, 780)
     } catch (turnError) {
@@ -168,13 +217,12 @@ export default function BookReader({
       setBusy(false)
       setFlipping(null)
     }
-  }, [flipping, busy, page, pageCount, getPageUrl])
+  }, [flipping, busy, page, pageCount, getPageUrl, frame.width])
 
   useEffect(() => {
     if (!open) return undefined
     const onKey = (event) => {
       if (event.key === 'Escape') onClose?.()
-      // 右開き: ← = 次の頁, → = 前の頁
       if (event.key === 'ArrowLeft') void turnPage(1)
       if (event.key === 'ArrowRight') void turnPage(-1)
     }
@@ -226,7 +274,13 @@ export default function BookReader({
 
           <div className="book-reader-stage" ref={stageRef}>
             <div className="book-reader-desk" aria-hidden="true" />
-            <div className={`book-reader-volume${flipping ? ` is-flipping-${flipping}` : ''}`}>
+            <div
+              className={`book-reader-volume${flipping ? ` is-flipping-${flipping}` : ''}`}
+              style={{
+                width: `${frame.width}px`,
+                height: `${frame.height}px`,
+              }}
+            >
               <div className="book-reader-cover-edge" aria-hidden="true" />
               <div className="book-reader-spine" aria-hidden="true">
                 <span className="book-reader-spine-thread" />
