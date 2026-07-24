@@ -15,8 +15,20 @@ async function renderPageToCanvas(pdf, pageNumber, targetWidth) {
   canvas.height = Math.floor(viewport.height)
   const ctx = canvas.getContext('2d', { alpha: false })
   if (!ctx) throw new Error('canvas unavailable')
+  // pdf.js v4+ prefers an explicit canvas alongside the 2d context.
   await page.render({ canvasContext: ctx, viewport, canvas }).promise
   return canvas
+}
+
+async function loadPdfSource(pdfUrl) {
+  // Always feed pdf.js raw bytes. Blob/object URLs from Firebase getBlob() are
+  // same-origin; remote Storage download URLs often fail CORS in the worker.
+  const response = await fetch(pdfUrl)
+  if (!response.ok) throw new Error(`PDF fetch failed (${response.status})`)
+  const bytes = new Uint8Array(await response.arrayBuffer())
+  if (bytes.byteLength < 5) throw new Error('PDF data is empty')
+  // pdf.js may transfer the buffer to the worker — keep a copy ownership-safe.
+  return { data: bytes.slice() }
 }
 
 /**
@@ -77,7 +89,8 @@ export default function BookReader({
 
     const load = async () => {
       try {
-        const loadingTask = pdfjs.getDocument({ url: pdfUrl })
+        const source = await loadPdfSource(pdfUrl)
+        const loadingTask = pdfjs.getDocument(source)
         const pdf = await loadingTask.promise
         if (cancelled) {
           pdf.destroy()
@@ -93,7 +106,10 @@ export default function BookReader({
         }
       } catch (loadError) {
         console.error(loadError)
-        if (!cancelled) setError('この本を開けませんでした。PDFを確認してください。')
+        if (!cancelled) {
+          const detail = loadError?.message ? `（${loadError.message}）` : ''
+          setError(`この本を開けませんでした。PDFを確認してください。${detail}`)
+        }
       } finally {
         if (!cancelled) setBusy(false)
       }

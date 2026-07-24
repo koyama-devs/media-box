@@ -27,7 +27,7 @@ import {
 } from 'firebase/firestore'
 import {
     deleteObject,
-    getDownloadURL,
+    getBlob,
     getStorage,
     ref as storageRef,
     uploadBytesResumable,
@@ -321,7 +321,13 @@ export async function loadMediaBlobUrl(itemId, mimeType) {
 
   const data = itemSnap.data() || {}
   if (data.storagePath) {
-    return getDownloadURL(storageRef(storage, data.storagePath))
+    // Fetch via the Storage SDK into a same-origin blob URL so pdf.js / <img>
+    // do not hit Firebase Storage CORS when reading cross-origin download URLs.
+    const remoteBlob = await getBlob(storageRef(storage, data.storagePath))
+    const typedBlob = remoteBlob.type
+      ? remoteBlob
+      : new Blob([remoteBlob], { type: mimeType || 'application/pdf' })
+    return URL.createObjectURL(typedBlob)
   }
 
   const { chunkCount = 1 } = data
