@@ -289,31 +289,53 @@ export default function BookReader({
     setBusy(true)
     try {
       const nextUrl = await getPageUrl(pdfRef.current, nextPage, frameRef.current.width)
-      setBackUrl(nextUrl)
-      setFlipping(direction > 0 ? 'next' : 'prev')
-
-      scheduleTimeout(() => {
-        setFrontUrl(nextUrl)
+      const finishTurn = () => {
         setPage(nextPage)
         pageRef.current = nextPage
-        setFlipping(null)
-        setBackUrl(null)
-        setBusy(false)
-        persistProgress(nextPage, pageCount)
-        setShioriPulse(true)
-        scheduleTimeout(() => setShioriPulse(false), 700)
-        const prefetch = [nextPage - 1, nextPage + 1].filter((n) => n >= 1 && n <= pageCount)
-        prefetch.forEach((n) => {
-          getPageUrl(pdfRef.current, n, frameRef.current.width).catch(() => {})
+        setFlipping('settle')
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            setFlipping(null)
+            setBackUrl(null)
+            setBusy(false)
+            persistProgress(nextPage, pageCount)
+            setShioriPulse(true)
+            scheduleTimeout(() => setShioriPulse(false), 700)
+            const prefetch = [nextPage - 1, nextPage + 1].filter((n) => n >= 1 && n <= pageCount)
+            prefetch.forEach((n) => {
+              getPageUrl(pdfRef.current, n, frameRef.current.width).catch(() => {})
+            })
+          })
         })
-      }, 780)
+      }
+
+      if (direction > 0) {
+        // 次へ: current page flips away, revealing the next page underneath.
+        setBackUrl(nextUrl)
+        setFlipping('next')
+        scheduleTimeout(() => {
+          setFrontUrl(nextUrl)
+          finishTurn()
+        }, 780)
+      } else {
+        // 前へ: place previous page already folded, then open it onto the desk.
+        setBackUrl(frontUrl)
+        setFrontUrl(nextUrl)
+        setFlipping('prep-prev')
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            setFlipping('prev')
+            scheduleTimeout(finishTurn, 780)
+          })
+        })
+      }
     } catch (turnError) {
       console.error(turnError)
       setError('ページの読み込みに失敗しました。')
       setBusy(false)
       setFlipping(null)
     }
-  }, [flipping, busy, page, pageCount, getPageUrl, persistProgress, scheduleTimeout])
+  }, [flipping, busy, page, pageCount, frontUrl, getPageUrl, persistProgress, scheduleTimeout])
 
   const handleClose = useCallback(() => {
     if (closedRef.current) return
