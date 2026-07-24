@@ -1877,11 +1877,78 @@
   transition: opacity 0.18s ease;
 }
 
-.bookshelf-spine:hover .bookshelf-delete,
-.bookshelf-spine:focus-within .bookshelf-delete {
-  opacity: 1;
+.bookshelf-rename {
+  position: absolute;
+  top: -6px;
+  left: -8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(2, 6, 23, 0.75);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  color: #e2e8f0;
 }
 
+.bookshelf-rename .action-icon {
+  width: 12px;
+  height: 12px;
+}
+
+.bookshelf-delete,
+.bookshelf-rename {
+  pointer-events: none;
+}
+
+.bookshelf-spine:hover .bookshelf-delete,
+.bookshelf-spine:hover .bookshelf-rename,
+.bookshelf-spine:focus-within .bookshelf-delete,
+.bookshelf-spine:focus-within .bookshelf-rename,
+.bookshelf-spine.is-editing .bookshelf-rename {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.bookshelf-spine.is-editing .bookshelf-book {
+  outline: 1px solid rgba(198, 163, 106, 0.55);
+  outline-offset: 2px;
+}
+
+.bookshelf-rename-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(198, 163, 106, 0.28);
+  background: rgba(12, 10, 16, 0.72);
+}
+
+.bookshelf-rename-label {
+  flex: 0 0 auto;
+  font-family: 'Shippori Mincho', 'Hiragino Mincho ProN', 'Yu Mincho', serif;
+  font-size: 0.78rem;
+  letter-spacing: 0.16em;
+  color: #c6a36a;
+}
+
+.bookshelf-rename-form input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.85);
+  color: #f8fafc;
+  padding: 8px 10px;
+  font-size: 0.92rem;
+}
+
+.bookshelf-rename-form .icon-button {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+}
 /* Book reader — Japanese 右開き reading room */
 .book-reader-overlay {
   --book-ink: #16131a;
@@ -2482,10 +2549,6 @@ body.is-book-reader-open {
   .bookshelf-spine {
     width: 46px;
     height: 116px;
-  }
-
-  .bookshelf-delete {
-    opacity: 1;
   }
 
   .book-reader-overlay {

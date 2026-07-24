@@ -3348,18 +3348,56 @@ const playPrevious = useCallback(() => {
                     <h3>本棚</h3>
                     <span className="image-library-count">{bookItems.length}冊</span>
                   </div>
-                  <p className="bookshelf-hint">PDFを開いて、しおりの頁から続きが読めます</p>
+                  <p className="bookshelf-hint">PDFを開いて、しおりの頁から続きが読めます。名前変更もできます。</p>
+                  {editingItemId && bookItems.some((book) => book.id === editingItemId) ? (
+                    <form
+                      className="bookshelf-rename-form"
+                      onSubmit={(event) => {
+                        event.preventDefault()
+                        void saveRename(editingItemId)
+                      }}
+                    >
+                      <label className="bookshelf-rename-label" htmlFor="bookshelf-rename-input">
+                        書名
+                      </label>
+                      <input
+                        id="bookshelf-rename-input"
+                        autoFocus
+                        value={editingName}
+                        placeholder="書名を入力"
+                        onChange={(event) => setEditingName(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape') {
+                            event.preventDefault()
+                            cancelRename()
+                          }
+                        }}
+                        aria-label="書名"
+                      />
+                      <button type="submit" className="icon-button" title="保存" aria-label="保存">
+                        ✓
+                      </button>
+                      <button type="button" className="icon-button" title="キャンセル" aria-label="キャンセル" onClick={cancelRename}>
+                        ×
+                      </button>
+                    </form>
+                  ) : null}
                   <ul className="bookshelf-grid">
                     {bookItems.map((item, index) => {
                       const bookmark = bookBookmarks[item.id]
                       const hasShiori = bookmark?.page > 1
+                      const isEditing = editingItemId === item.id
                       return (
-                      <li key={item.id} className="bookshelf-spine" style={{ '--spine-hue': `${(index * 47) % 360}` }}>
+                      <li
+                        key={item.id}
+                        className={`bookshelf-spine${isEditing ? ' is-editing' : ''}`}
+                        style={{ '--spine-hue': `${(index * 47) % 360}` }}
+                      >
                         <button
                           type="button"
                           className={`bookshelf-book${hasShiori ? ' has-shiori' : ''}`}
                           onClick={() => void openBook(item.id)}
-                          disabled={readingBookBusy}
+                          disabled={readingBookBusy || isEditing}
                           title={
                             hasShiori
                               ? `${getDisplayName(item.name)} · しおり ${bookmark.page}頁`
@@ -3371,6 +3409,15 @@ const playPrevious = useCallback(() => {
                           <span className="bookshelf-book-meta">
                             {hasShiori ? `続き ${bookmark.page}頁` : formatSize(item.size)}
                           </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button icon-button--rename bookshelf-rename"
+                          title="名前を変更"
+                          aria-label="名前を変更"
+                          onClick={(event) => startRename(item, event)}
+                        >
+                          <RenameIcon />
                         </button>
                         <button
                           type="button"
