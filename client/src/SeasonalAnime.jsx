@@ -241,17 +241,17 @@ export default function SeasonalAnime({ hidden = false }) {
     clearLeaveTimer()
     const rect = anchorEl.getBoundingClientRect()
     const margin = 16
-    const gap = 20
-    const nudgeRight = 28
+    const gap = 10
+    const nudgeRight = 4
     const nudgeUp = 56
     const cardWidth = Math.min(560, window.innerWidth - margin * 2)
     const hasTrailer = Boolean(getYoutubeTrailer(item))
     const estimatedHeight = hasTrailer ? 480 : 340
 
-    // Prefer the right side of the row so list titles stay visible.
+    // Prefer just past the row, slightly inward from the far-right edge.
     let left = rect.right + gap + nudgeRight
     if (left + cardWidth > window.innerWidth - margin) {
-      left = window.innerWidth - cardWidth - margin
+      left = window.innerWidth - cardWidth - margin - 24
     }
     left = Math.max(margin, left)
 
