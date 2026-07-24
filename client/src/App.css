@@ -2102,13 +2102,47 @@
 .seasonal-anime-list {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 6px 2px 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
   max-height: min(58vh, 520px);
   overflow-y: auto;
-  padding-right: 4px;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(142, 184, 212, 0.35) transparent;
+}
+
+.seasonal-anime-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.seasonal-anime-list::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 4px 0;
+}
+
+.seasonal-anime-list::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    rgba(142, 184, 212, 0.28),
+    rgba(110, 150, 180, 0.45)
+  );
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+
+.seasonal-anime-list::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    180deg,
+    rgba(142, 184, 212, 0.45),
+    rgba(130, 175, 210, 0.65)
+  );
+}
+
+.seasonal-anime-list::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .seasonal-anime-item {
@@ -2258,8 +2292,9 @@
 }
 
 .seasonal-anime-preview {
+  --anime-mincho: 'Shippori Mincho', 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
   position: fixed;
-  z-index: 80;
+  z-index: 1100;
   display: flex;
   flex-direction: column;
   gap: 14px;

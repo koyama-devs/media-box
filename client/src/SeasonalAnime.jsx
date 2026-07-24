@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
     ANIME_STATUS_LABEL,
     fetchJapaneseSynopsis,
@@ -404,128 +405,131 @@ export default function SeasonalAnime({ hidden = false }) {
         })}
       </ul>
 
-      {preview ? (
-        <aside
-          className={`seasonal-anime-preview${previewTrailer ? ' has-trailer' : ''}`}
-          style={{
-            top: preview.top,
-            left: preview.left,
-            width: preview.width,
-          }}
-          onMouseEnter={clearLeaveTimer}
-          onMouseLeave={scheduleClosePreview}
-        >
-          <div className="seasonal-anime-preview-main">
-            <div className="seasonal-anime-preview-cover">
-              {preview.item.coverImage?.large || preview.item.coverImage?.medium ? (
-                <img
-                  src={preview.item.coverImage.large || preview.item.coverImage.medium}
-                  alt=""
-                />
-              ) : null}
-            </div>
-            <div className="seasonal-anime-preview-body">
-              <p className="seasonal-anime-preview-kicker">
-                {[
-                  previewSeason,
-                  preview.item.format,
-                  ANIME_STATUS_LABEL[preview.item.status] || preview.item.status,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </p>
-              <h4 className="seasonal-anime-preview-title">{previewTitle}</h4>
-              {preview.item.title?.romaji && preview.item.title.romaji !== previewTitle ? (
-                <p className="seasonal-anime-preview-romaji">{preview.item.title.romaji}</p>
-              ) : null}
-              <p className="seasonal-anime-preview-stats">
-                {[
-                  preview.item.episodes ? `${preview.item.episodes}話` : null,
-                  preview.item.averageScore != null ? `平均 ★ ${preview.item.averageScore}` : null,
-                  preview.item.popularity != null
-                    ? `人気 ${preview.item.popularity.toLocaleString('ja-JP')}`
-                    : null,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </p>
-              {previewSchedule ? (
-                <p className="seasonal-anime-preview-airing">
-                  <span className="seasonal-anime-preview-airing-label">放送</span>
-                  {previewSchedule.detail}
+      {preview
+        ? createPortal(
+          <aside
+            className={`seasonal-anime-preview${previewTrailer ? ' has-trailer' : ''}`}
+            style={{
+              top: preview.top,
+              left: preview.left,
+              width: preview.width,
+            }}
+            onMouseEnter={clearLeaveTimer}
+            onMouseLeave={scheduleClosePreview}
+          >
+            <div className="seasonal-anime-preview-main">
+              <div className="seasonal-anime-preview-cover">
+                {preview.item.coverImage?.large || preview.item.coverImage?.medium ? (
+                  <img
+                    src={preview.item.coverImage.large || preview.item.coverImage.medium}
+                    alt=""
+                  />
+                ) : null}
+              </div>
+              <div className="seasonal-anime-preview-body">
+                <p className="seasonal-anime-preview-kicker">
+                  {[
+                    previewSeason,
+                    preview.item.format,
+                    ANIME_STATUS_LABEL[preview.item.status] || preview.item.status,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
                 </p>
-              ) : null}
-              {previewGenres.length > 0 ? (
-                <div className="seasonal-anime-preview-genres">
-                  {previewGenres.map((genre) => (
-                    <span key={genre}>{genre}</span>
-                  ))}
-                </div>
-              ) : null}
-              {previewSynopsisLoading ? (
-                <p className="seasonal-anime-preview-desc is-empty">あらすじを読み込み中…</p>
-              ) : previewSynopsis ? (
-                <p className="seasonal-anime-preview-desc">{previewSynopsis}</p>
-              ) : (
-                <p className="seasonal-anime-preview-desc is-empty">日本語あらすじが見つかりません</p>
-              )}
-              <div className="seasonal-anime-preview-actions">
-                <a
-                  className="seasonal-anime-preview-link"
-                  href={preview.item.siteUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  AniList
-                </a>
-                {previewTrailer ? (
+                <h4 className="seasonal-anime-preview-title">{previewTitle}</h4>
+                {preview.item.title?.romaji && preview.item.title.romaji !== previewTitle ? (
+                  <p className="seasonal-anime-preview-romaji">{preview.item.title.romaji}</p>
+                ) : null}
+                <p className="seasonal-anime-preview-stats">
+                  {[
+                    preview.item.episodes ? `${preview.item.episodes}話` : null,
+                    preview.item.averageScore != null ? `平均 ★ ${preview.item.averageScore}` : null,
+                    preview.item.popularity != null
+                      ? `人気 ${preview.item.popularity.toLocaleString('ja-JP')}`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </p>
+                {previewSchedule ? (
+                  <p className="seasonal-anime-preview-airing">
+                    <span className="seasonal-anime-preview-airing-label">放送</span>
+                    {previewSchedule.detail}
+                  </p>
+                ) : null}
+                {previewGenres.length > 0 ? (
+                  <div className="seasonal-anime-preview-genres">
+                    {previewGenres.map((genre) => (
+                      <span key={genre}>{genre}</span>
+                    ))}
+                  </div>
+                ) : null}
+                {previewSynopsisLoading ? (
+                  <p className="seasonal-anime-preview-desc is-empty">あらすじを読み込み中…</p>
+                ) : previewSynopsis ? (
+                  <p className="seasonal-anime-preview-desc">{previewSynopsis}</p>
+                ) : (
+                  <p className="seasonal-anime-preview-desc is-empty">日本語あらすじが見つかりません</p>
+                )}
+                <div className="seasonal-anime-preview-actions">
                   <a
                     className="seasonal-anime-preview-link"
-                    href={previewTrailer.watchUrl}
+                    href={preview.item.siteUrl}
                     target="_blank"
                     rel="noreferrer"
                   >
-                    YouTube
+                    AniList
                   </a>
-                ) : null}
-                <button
-                  type="button"
-                  className={`seasonal-anime-status-btn${previewStatus ? ` is-${previewStatus}` : ''}`}
-                  onClick={() => cycleStatus(preview.item.id)}
-                >
-                  {previewStatus ? WATCH_STATUS_LABEL[previewStatus] : '＋リスト'}
-                </button>
+                  {previewTrailer ? (
+                    <a
+                      className="seasonal-anime-preview-link"
+                      href={previewTrailer.watchUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      YouTube
+                    </a>
+                  ) : null}
+                  <button
+                    type="button"
+                    className={`seasonal-anime-status-btn${previewStatus ? ` is-${previewStatus}` : ''}`}
+                    onClick={() => cycleStatus(preview.item.id)}
+                  >
+                    {previewStatus ? WATCH_STATUS_LABEL[previewStatus] : '＋リスト'}
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
 
-          {previewTrailer ? (
-            <div className="seasonal-anime-preview-trailer">
-              {trailerPlaying ? (
-                <iframe
-                  src={`${previewTrailer.embedUrl}&autoplay=1`}
-                  title={`${previewTitle} トレーラー`}
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                  allowFullScreen
-                />
-              ) : (
-                <button
-                  type="button"
-                  className="seasonal-anime-preview-trailer-play"
-                  onClick={() => setTrailerPlaying(true)}
-                  aria-label="トレーラーを再生"
-                >
-                  <img src={previewTrailer.thumbnail} alt="" loading="lazy" />
-                  <span className="seasonal-anime-preview-trailer-icon" aria-hidden="true">
-                    ▶
-                  </span>
-                  <span className="seasonal-anime-preview-trailer-caption">トレーラー</span>
-                </button>
-              )}
-            </div>
-          ) : null}
-        </aside>
-      ) : null}
+            {previewTrailer ? (
+              <div className="seasonal-anime-preview-trailer">
+                {trailerPlaying ? (
+                  <iframe
+                    src={`${previewTrailer.embedUrl}&autoplay=1`}
+                    title={`${previewTitle} トレーラー`}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowFullScreen
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="seasonal-anime-preview-trailer-play"
+                    onClick={() => setTrailerPlaying(true)}
+                    aria-label="トレーラーを再生"
+                  >
+                    <img src={previewTrailer.thumbnail} alt="" loading="lazy" />
+                    <span className="seasonal-anime-preview-trailer-icon" aria-hidden="true">
+                      ▶
+                    </span>
+                    <span className="seasonal-anime-preview-trailer-caption">トレーラー</span>
+                  </button>
+                )}
+              </div>
+            ) : null}
+          </aside>,
+          document.body,
+        )
+        : null}
     </section>
   )
 }
