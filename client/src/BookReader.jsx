@@ -23,7 +23,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker
 async function renderPageToCanvas(pdf, pageNumber, targetWidth) {
   const page = await pdf.getPage(pageNumber)
   const unscaled = page.getViewport({ scale: 1 })
-  const scale = Math.min(2.4, Math.max(1, targetWidth / unscaled.width))
+  const scale = Math.min(2, Math.max(0.9, targetWidth / unscaled.width))
   const viewport = page.getViewport({ scale })
   const canvas = document.createElement('canvas')
   canvas.width = Math.floor(viewport.width)
@@ -34,12 +34,17 @@ async function renderPageToCanvas(pdf, pageNumber, targetWidth) {
   return { canvas, aspect: unscaled.width / unscaled.height }
 }
 
-async function loadPdfSource(pdfUrl) {
+async function loadPdfSource(pdfUrl, pdfData) {
+  if (pdfData && pdfData.byteLength > 4) {
+    // Copy once — pdf.js may transfer the buffer to the worker.
+    return { data: pdfData.slice ? pdfData.slice() : new Uint8Array(pdfData) }
+  }
+  if (!pdfUrl) throw new Error('PDF source missing')
   const response = await fetch(pdfUrl)
   if (!response.ok) throw new Error(`PDF fetch failed (${response.status})`)
   const bytes = new Uint8Array(await response.arrayBuffer())
   if (bytes.byteLength < 5) throw new Error('PDF data is empty')
-  return { data: bytes.slice() }
+  return { data: bytes }
 }
 
 function toJapanesePageLabel(page, pageCount) {
@@ -81,6 +86,7 @@ export default function BookReader({
   bookId = '',
   title = '無題の本',
   pdfUrl,
+  pdfData = null,
   initialPage = 1,
   onClose,
   onProgressChange,
@@ -179,7 +185,7 @@ export default function BookReader({
     if (cached) return cached
 
     const width = Math.max(320, Math.round(renderWidth || frameRef.current.width || 640))
-    const dprBoost = typeof window !== 'undefined' && window.devicePixelRatio > 1.5 ? 1.35 : 1.1
+    const dprBoost = typeof window !== 'undefined' && window.devicePixelRatio > 1.5 ? 1.15 : 1
     const { canvas } = await renderPageToCanvas(pdf, pageNumber, width * dprBoost)
     const url = await new Promise((resolve, reject) => {
       canvas.toBlob((blob) => {
@@ -195,7 +201,12 @@ export default function BookReader({
   }, [])
 
   useEffect(() => {
-    if (!open || !pdfUrl) return undefined
+    if (!open) return undefined
+    if (!pdfUrl && !pdfData) {
+      setBusy(true)
+      setError('')
+      return undefined
+    }
 
     let cancelled = false
     setBusy(true)
@@ -211,7 +222,7 @@ export default function BookReader({
 
     const load = async () => {
       try {
-        const source = await loadPdfSource(pdfUrl)
+        const source = await loadPdfSource(pdfUrl, pdfData)
         const loadingTask = pdfjs.getDocument(source)
         const pdf = await loadingTask.promise
         if (cancelled) {
@@ -279,7 +290,7 @@ export default function BookReader({
       pdfRef.current = null
       clearCache()
     }
-  }, [open, pdfUrl, bookId, clearCache, getPageUrl, updateFrame, persistProgress, scheduleTimeout])
+  }, [open, pdfUrl, pdfData, bookId, clearCache, getPageUrl, updateFrame, persistProgress, scheduleTimeout])
 
   const turnPage = useCallback(async (direction) => {
     if (flipping || busy || !pdfRef.current) return

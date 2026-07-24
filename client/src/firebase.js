@@ -321,15 +321,9 @@ export async function uploadMediaFile(file, metadata, onProgress) {
   return id
 }
 
-export async function loadMediaBlobUrl(itemId, mimeType) {
-  const itemSnap = await getDoc(doc(db, MEDIA_COLLECTION, itemId))
-  if (!itemSnap.exists()) {
-    throw new Error('メディアが見つかりません。')
-  }
-
-  const data = itemSnap.data() || {}
+export async function loadMediaBlobUrl(itemId, mimeType, hint = null) {
+  const data = await resolveMediaMeta(itemId, hint)
   if (data.storagePath) {
-    // Prefer SDK download into a same-origin blob URL for pdf.js / media elements.
     const objectRef = storageRef(storage, data.storagePath)
     const type = mimeType || data.type || 'application/pdf'
     try {
@@ -361,8 +355,70 @@ export async function loadMediaBlobUrl(itemId, mimeType) {
   }
 
   const parts = chunks.slice(0, chunkCount).map((chunk) => base64ToUint8Array(chunk.data))
-  const blob = new Blob(parts, { type: mimeType || 'application/octet-stream' })
+  const blob = new Blob(parts, { type: mimeType || data.type || 'application/octet-stream' })
   return URL.createObjectURL(blob)
+}
+
+/**
+ * Load media as bytes (avoids blob→fetch round-trip for PDF readers).
+ */
+export async function loadMediaBytes(itemId, mimeType, hint = null) {
+  const data = await resolveMediaMeta(itemId, hint)
+  const type = mimeType || data.type || 'application/octet-stream'
+
+  if (data.storagePath) {
+    const objectRef = storageRef(storage, data.storagePath)
+    try {
+      const bytes = await getBytes(objectRef)
+      return { bytes: bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), type }
+    } catch {
+      const remoteBlob = await getBlob(objectRef)
+      const buffer = await remoteBlob.arrayBuffer()
+      return { bytes: new Uint8Array(buffer), type: remoteBlob.type || type }
+    }
+  }
+
+  const { chunkCount = 1 } = data
+  const chunksSnap = await getDocs(collection(db, MEDIA_COLLECTION, itemId, 'chunks'))
+  const chunks = chunksSnap.docs
+    .map((document) => document.data())
+    .sort((a, b) => a.index - b.index)
+
+  if (chunks.length === 0) {
+    throw new Error('ファイルデータが見つかりません。')
+  }
+
+  const parts = chunks.slice(0, chunkCount).map((chunk) => base64ToUint8Array(chunk.data))
+  const total = parts.reduce((sum, part) => sum + part.byteLength, 0)
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  parts.forEach((part) => {
+    bytes.set(part, offset)
+    offset += part.byteLength
+  })
+  return { bytes, type }
+}
+
+async function resolveMediaMeta(itemId, hint = null) {
+  if (hint?.storagePath) {
+    return {
+      storagePath: hint.storagePath,
+      type: hint.type,
+      chunkCount: hint.chunkCount || 0,
+    }
+  }
+  if (hint && typeof hint.chunkCount === 'number' && !hint.storagePath) {
+    return {
+      type: hint.type,
+      chunkCount: hint.chunkCount,
+    }
+  }
+
+  const itemSnap = await getDoc(doc(db, MEDIA_COLLECTION, itemId))
+  if (!itemSnap.exists()) {
+    throw new Error('メディアが見つかりません。')
+  }
+  return itemSnap.data() || {}
 }
 
 export function subscribeToMediaItems(onData, onError) {

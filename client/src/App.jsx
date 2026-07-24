@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
 import { clearBookBookmark, getAllBookBookmarks, getBookBookmark } from './bookProgress'
-import BookReader from './BookReader'
 import {
   deleteMediaItem,
   getFirebaseErrorMessage,
   getMaxUploadBytes,
   loadMediaBlobUrl,
+  loadMediaBytes,
   MAX_BOOK_FILE_SIZE,
   MAX_FILE_SIZE,
   recordAccessVisit,
@@ -45,6 +45,7 @@ import {
 } from './listeningSpaces'
 import { pickPostcardLyric } from './lyrics'
 import LyricsPanel from './LyricsPanel'
+import { blobToThumbnailUrl, mapPool } from './mediaPerf'
 import {
   appendTodayRecordHistory,
   formatTodayDateLabel,
@@ -69,6 +70,8 @@ import {
   saveListFilter,
 } from './userPlaylists'
 import VinylPlayer from './VinylPlayer'
+
+const BookReader = lazy(() => import('./BookReader'))
 
 const AUTH_KEY = 'media-share-lite-auth'
 const PASSWORDS = new Set(['hiro', 'zen'])
@@ -343,6 +346,7 @@ function App() {
   const [librarySlideshowPaused, setLibrarySlideshowPaused] = useState(false)
   const [readingBookId, setReadingBookId] = useState(null)
   const [readingBookUrl, setReadingBookUrl] = useState(null)
+  const [readingBookBytes, setReadingBookBytes] = useState(null)
   const [readingBookBusy, setReadingBookBusy] = useState(false)
   const [readingBookStartPage, setReadingBookStartPage] = useState(1)
   const [bookBookmarks, setBookBookmarks] = useState(() => getAllBookBookmarks())
@@ -390,6 +394,11 @@ function App() {
   const swipeOffsetRef = useRef(0)
   const blobUrlsRef = useRef(new Set())
   const mediaUrlCacheRef = useRef(new Map())
+  const mediaLoadInflightRef = useRef(new Map())
+  const thumbUrlCacheRef = useRef(new Map())
+  const thumbLoadInflightRef = useRef(new Map())
+  const itemsRef = useRef(items)
+  itemsRef.current = items
 
   // Ref tới player hiện tại (audio hoặc video)
   const mediaRef = useRef(null)
@@ -775,39 +784,85 @@ function App() {
     )
   }, [])
 
-  const ensureMediaUrl = useCallback(async (itemId, mimeType) => {
+  const ensureMediaUrl = useCallback(async (itemId, mimeType, hint = null) => {
     const cached = mediaUrlCacheRef.current.get(itemId)
     if (cached) return cached
 
-    const url = await loadMediaBlobUrl(itemId, mimeType)
-    mediaUrlCacheRef.current.set(itemId, url)
-    blobUrlsRef.current.add(url)
-    return url
+    const inflight = mediaLoadInflightRef.current.get(itemId)
+    if (inflight) return inflight
+
+    const metaHint = hint || itemsRef.current.find((entry) => entry.id === itemId) || null
+    const request = loadMediaBlobUrl(itemId, mimeType, metaHint)
+      .then((url) => {
+        mediaUrlCacheRef.current.set(itemId, url)
+        blobUrlsRef.current.add(url)
+        return url
+      })
+      .finally(() => {
+        mediaLoadInflightRef.current.delete(itemId)
+      })
+
+    mediaLoadInflightRef.current.set(itemId, request)
+    return request
   }, [])
 
-  // Load thumbnails for the image library grid.
+  const ensureThumbUrl = useCallback(async (item) => {
+    if (!item?.id) return null
+    const cached = thumbUrlCacheRef.current.get(item.id)
+    if (cached) return cached
+
+    const inflight = thumbLoadInflightRef.current.get(item.id)
+    if (inflight) return inflight
+
+    const request = (async () => {
+      const fullUrl = await ensureMediaUrl(item.id, item.type || 'image/jpeg', item)
+      const response = await fetch(fullUrl)
+      if (!response.ok) throw new Error('thumb fetch failed')
+      const blob = await response.blob()
+      const thumbUrl = await blobToThumbnailUrl(blob, 560, 0.72)
+      thumbUrlCacheRef.current.set(item.id, thumbUrl)
+      if (thumbUrl.startsWith('blob:')) blobUrlsRef.current.add(thumbUrl)
+      return thumbUrl
+    })().finally(() => {
+      thumbLoadInflightRef.current.delete(item.id)
+    })
+
+    thumbLoadInflightRef.current.set(item.id, request)
+    return request
+  }, [ensureMediaUrl])
+
+  // Load photo-library thumbnails in parallel (not one-by-one).
   useEffect(() => {
     if (!isLoggedIn || imageItems.length === 0) return undefined
     let cancelled = false
     const load = async () => {
-      for (const item of imageItems) {
+      await mapPool(imageItems, 4, async (item) => {
         if (cancelled) return
+        if (thumbUrlCacheRef.current.has(item.id)) {
+          const existing = thumbUrlCacheRef.current.get(item.id)
+          if (existing && !cancelled) {
+            setLibraryThumbUrls((current) => (
+              current[item.id] === existing ? current : { ...current, [item.id]: existing }
+            ))
+          }
+          return
+        }
         try {
-          const url = await ensureMediaUrl(item.id, item.type || 'image/jpeg')
-          if (cancelled) return
+          const url = await ensureThumbUrl(item)
+          if (cancelled || !url) return
           setLibraryThumbUrls((current) => (
             current[item.id] === url ? current : { ...current, [item.id]: url }
           ))
         } catch {
           /* skip broken thumbnails */
         }
-      }
+      })
     }
     load()
     return () => {
       cancelled = true
     }
-  }, [isLoggedIn, imageItems, ensureMediaUrl])
+  }, [isLoggedIn, imageItems, ensureThumbUrl])
 
   useEffect(() => {
     if (!showTodayHero) {
@@ -913,22 +968,31 @@ function App() {
     setError('')
     try {
       const bookmark = getBookBookmark(book.id)
-      const url = await ensureMediaUrl(book.id, book.type || 'application/pdf')
       setReadingBookStartPage(bookmark?.page > 1 ? bookmark.page : 1)
-      setReadingBookUrl(url)
+      // Open shell immediately so the reading room appears while bytes download.
       setReadingBookId(book.id)
+      setReadingBookUrl(null)
+      setReadingBookBytes(null)
+
+      const { bytes } = await loadMediaBytes(book.id, book.type || 'application/pdf', book)
+      setReadingBookBytes(bytes)
+      setReadingBookUrl(null)
     } catch (bookError) {
       console.error(bookError)
+      setReadingBookId(null)
+      setReadingBookUrl(null)
+      setReadingBookBytes(null)
       setError(getFirebaseErrorMessage(bookError) || '本を開けませんでした。')
     } finally {
       setReadingBookBusy(false)
     }
-  }, [items, ensureMediaUrl])
+  }, [items])
 
   const closeBook = useCallback(() => {
     setReadingBookBusy(false)
     setReadingBookId(null)
     setReadingBookUrl(null)
+    setReadingBookBytes(null)
     setReadingBookStartPage(1)
     try {
       setBookBookmarks(getAllBookBookmarks())
@@ -1672,6 +1736,7 @@ const playPrevious = useCallback(() => {
     const currentUrls = new Set([
       ...(previewUrl?.startsWith('blob:') ? [previewUrl] : []),
       ...mediaUrlCacheRef.current.values(),
+      ...thumbUrlCacheRef.current.values(),
     ])
 
     blobUrlsRef.current.forEach((url) => {
@@ -2348,6 +2413,7 @@ const playPrevious = useCallback(() => {
       if (readingBookId === itemId) {
         setReadingBookId(null)
         setReadingBookUrl(null)
+        setReadingBookBytes(null)
         setReadingBookStartPage(1)
       }
       if (editingItemId === itemId) {
@@ -3612,16 +3678,19 @@ const playPrevious = useCallback(() => {
         />
       ) : null}
 
-      {readingBookId && readingBookUrl ? (
-        <BookReader
-          open
-          bookId={readingBookId}
-          title={getDisplayName(items.find((item) => item.id === readingBookId)?.name || '無題の本')}
-          pdfUrl={readingBookUrl}
-          initialPage={readingBookStartPage}
-          onClose={closeBook}
-          onProgressChange={handleBookProgress}
-        />
+      {readingBookId ? (
+        <Suspense fallback={null}>
+          <BookReader
+            open
+            bookId={readingBookId}
+            title={getDisplayName(items.find((item) => item.id === readingBookId)?.name || '無題の本')}
+            pdfUrl={readingBookUrl}
+            pdfData={readingBookBytes}
+            initialPage={readingBookStartPage}
+            onClose={closeBook}
+            onProgressChange={handleBookProgress}
+          />
+        </Suspense>
       ) : null}
 
       {libraryViewerItem ? (
