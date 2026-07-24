@@ -1902,7 +1902,11 @@
     radial-gradient(ellipse 70% 55% at 50% 42%, rgba(72, 52, 28, 0.28), transparent 62%),
     radial-gradient(ellipse at bottom, rgba(20, 28, 42, 0.9), transparent 55%),
     linear-gradient(165deg, #0c0d12 0%, #17131c 48%, #0a0b10 100%);
-  animation: book-room-in 0.55s ease both;
+  animation: book-room-in 0.4s ease;
+}
+
+body.is-book-reader-open {
+  overscroll-behavior: none;
 }
 
 .book-reader-atmosphere {
@@ -2078,7 +2082,7 @@
   max-width: 100%;
   max-height: 100%;
   transform-style: preserve-3d;
-  filter: drop-shadow(0 22px 40px rgba(0, 0, 0, 0.45));
+  box-shadow: 0 22px 40px rgba(0, 0, 0, 0.45);
 }
 
 .book-reader-cover-edge {

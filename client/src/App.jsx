@@ -926,10 +926,15 @@ function App() {
   }, [items, ensureMediaUrl])
 
   const closeBook = useCallback(() => {
+    setReadingBookBusy(false)
     setReadingBookId(null)
     setReadingBookUrl(null)
     setReadingBookStartPage(1)
-    setBookBookmarks(getAllBookBookmarks())
+    try {
+      setBookBookmarks(getAllBookBookmarks())
+    } catch {
+      setBookBookmarks({})
+    }
   }, [])
 
   const handleBookProgress = useCallback(() => {

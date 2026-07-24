@@ -10,15 +10,23 @@ function safeParse(json, fallback) {
 
 function loadAll() {
   if (typeof window === 'undefined') return {}
-  const raw = window.localStorage.getItem(BOOKMARKS_KEY)
-  const parsed = safeParse(raw, {})
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-  return parsed
+  try {
+    const raw = window.localStorage.getItem(BOOKMARKS_KEY)
+    const parsed = safeParse(raw, {})
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    return parsed
+  } catch {
+    return {}
+  }
 }
 
 function saveAll(bookmarks) {
   if (typeof window === 'undefined') return
-  window.localStorage.setItem(BOOKMARKS_KEY, JSON.stringify(bookmarks))
+  try {
+    window.localStorage.setItem(BOOKMARKS_KEY, JSON.stringify(bookmarks))
+  } catch (error) {
+    console.warn('Failed to save book bookmark', error)
+  }
 }
 
 /**

@@ -94,6 +94,8 @@ export default function BookReader({
   const pageCountRef = useRef(0)
   const onProgressChangeRef = useRef(onProgressChange)
   const startPageRef = useRef(initialPage)
+  const closedRef = useRef(false)
+  const timersRef = useRef([])
   const [pageCount, setPageCount] = useState(0)
   const [page, setPage] = useState(1)
   const [frontUrl, setFrontUrl] = useState(null)
@@ -110,8 +112,24 @@ export default function BookReader({
   }, [onProgressChange])
 
   useEffect(() => {
-    if (open) startPageRef.current = initialPage
+    if (open) {
+      closedRef.current = false
+      startPageRef.current = initialPage
+    }
   }, [open, initialPage])
+
+  useEffect(() => {
+    if (!open) return undefined
+    const previousOverflow = document.body.style.overflow
+    document.body.classList.add('is-book-reader-open')
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.classList.remove('is-book-reader-open')
+      document.body.style.overflow = previousOverflow
+      timersRef.current.forEach((id) => window.clearTimeout(id))
+      timersRef.current = []
+    }
+  }, [open])
 
   const clearCache = useCallback(() => {
     pageCacheRef.current.forEach((url) => URL.revokeObjectURL(url))
@@ -141,10 +159,20 @@ export default function BookReader({
   }, [open, measureFrame])
 
   const persistProgress = useCallback((nextPage, nextCount) => {
-    if (!bookId) return
-    setBookBookmark(bookId, nextPage, nextCount)
-    onProgressChangeRef.current?.(bookId, nextPage, nextCount)
+    if (!bookId || closedRef.current) return
+    try {
+      setBookBookmark(bookId, nextPage, nextCount)
+      onProgressChangeRef.current?.(bookId, nextPage, nextCount)
+    } catch (error) {
+      console.warn(error)
+    }
   }, [bookId])
+
+  const scheduleTimeout = useCallback((fn, ms) => {
+    const id = window.setTimeout(fn, ms)
+    timersRef.current.push(id)
+    return id
+  }, [])
 
   const getPageUrl = useCallback(async (pdf, pageNumber, renderWidth) => {
     const cached = pageCacheRef.current.get(pageNumber)
@@ -217,8 +245,8 @@ export default function BookReader({
         if (startPage > 1) {
           setResumeNotice(`しおり · ${startPage}頁から続き`)
           setShioriPulse(true)
-          window.setTimeout(() => setResumeNotice(''), 3200)
-          window.setTimeout(() => setShioriPulse(false), 1800)
+          scheduleTimeout(() => setResumeNotice(''), 3200)
+          scheduleTimeout(() => setShioriPulse(false), 1800)
         }
 
         const prefetch = [startPage - 1, startPage + 1].filter((n) => n >= 1 && n <= total)
@@ -240,15 +268,18 @@ export default function BookReader({
 
     return () => {
       cancelled = true
-      if (bookId && pageRef.current > 0) {
-        setBookBookmark(bookId, pageRef.current, pageCountRef.current)
-        onProgressChangeRef.current?.(bookId, pageRef.current, pageCountRef.current)
+      if (!closedRef.current && bookId && pageRef.current > 0) {
+        persistProgress(pageRef.current, pageCountRef.current)
       }
-      pdfRef.current?.destroy()
+      try {
+        pdfRef.current?.destroy()
+      } catch {
+        /* ignore worker teardown errors */
+      }
       pdfRef.current = null
       clearCache()
     }
-  }, [open, pdfUrl, bookId, clearCache, getPageUrl, updateFrame, persistProgress])
+  }, [open, pdfUrl, bookId, clearCache, getPageUrl, updateFrame, persistProgress, scheduleTimeout])
 
   const turnPage = useCallback(async (direction) => {
     if (flipping || busy || !pdfRef.current) return
@@ -261,7 +292,7 @@ export default function BookReader({
       setBackUrl(nextUrl)
       setFlipping(direction > 0 ? 'next' : 'prev')
 
-      window.setTimeout(() => {
+      scheduleTimeout(() => {
         setFrontUrl(nextUrl)
         setPage(nextPage)
         pageRef.current = nextPage
@@ -270,7 +301,7 @@ export default function BookReader({
         setBusy(false)
         persistProgress(nextPage, pageCount)
         setShioriPulse(true)
-        window.setTimeout(() => setShioriPulse(false), 700)
+        scheduleTimeout(() => setShioriPulse(false), 700)
         const prefetch = [nextPage - 1, nextPage + 1].filter((n) => n >= 1 && n <= pageCount)
         prefetch.forEach((n) => {
           getPageUrl(pdfRef.current, n, frameRef.current.width).catch(() => {})
@@ -282,12 +313,18 @@ export default function BookReader({
       setBusy(false)
       setFlipping(null)
     }
-  }, [flipping, busy, page, pageCount, getPageUrl, persistProgress])
+  }, [flipping, busy, page, pageCount, getPageUrl, persistProgress, scheduleTimeout])
 
   const handleClose = useCallback(() => {
-    if (bookId && pageRef.current > 0) {
-      setBookBookmark(bookId, pageRef.current, pageCountRef.current)
-      onProgressChangeRef.current?.(bookId, pageRef.current, pageCountRef.current)
+    if (closedRef.current) return
+    closedRef.current = true
+    try {
+      if (bookId && pageRef.current > 0) {
+        setBookBookmark(bookId, pageRef.current, pageCountRef.current)
+        onProgressChangeRef.current?.(bookId, pageRef.current, pageCountRef.current)
+      }
+    } catch (error) {
+      console.warn(error)
     }
     onClose?.()
   }, [bookId, onClose])
