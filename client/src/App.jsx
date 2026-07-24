@@ -5,7 +5,9 @@ import BookReader from './BookReader'
 import {
   deleteMediaItem,
   getFirebaseErrorMessage,
+  getMaxUploadBytes,
   loadMediaBlobUrl,
+  MAX_BOOK_FILE_SIZE,
   MAX_FILE_SIZE,
   recordAccessVisit,
   saveSharedPlaylists,
@@ -1904,8 +1906,9 @@ const playPrevious = useCallback(() => {
         skipped.push(`${file.name}（形式非対応）`)
         continue
       }
-      if (file.size > MAX_FILE_SIZE) {
-        skipped.push(`${file.name}（${formatSize(MAX_FILE_SIZE)}超）`)
+      if (file.size > getMaxUploadBytes(kind)) {
+        const limit = formatSize(getMaxUploadBytes(kind))
+        skipped.push(`${file.name}（${limit}超）`)
         continue
       }
       validFiles.push(file)
@@ -2417,7 +2420,8 @@ const playPrevious = useCallback(() => {
               <p className="eyebrow">すぐアップロード</p>
               <h3>メディアを共有ボックスへ追加</h3>
               <p className="hint">
-                複数選択可・1ファイル最大 {formatSize(MAX_FILE_SIZE)}。画像はフォトライブラリ、PDFは本棚へ。
+                複数選択可・音声/動画/画像は最大 {formatSize(MAX_FILE_SIZE)}、PDFは最大 {formatSize(MAX_BOOK_FILE_SIZE)}。
+                画像はフォトライブラリ、PDFは本棚へ。
                 プレイリスト未選択時は再生リスト（すべて）へ入ります。
               </p>
               {uploading ? (

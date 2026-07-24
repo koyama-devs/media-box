@@ -1,4 +1,4 @@
-// Firebase initialization — Firestore + Auth (admin); no Storage
+// Firebase initialization — Firestore + Auth + Storage (large PDFs)
 import { getAnalytics } from 'firebase/analytics'
 import { initializeApp } from 'firebase/app'
 import {
@@ -25,6 +25,13 @@ import {
     setDoc,
     writeBatch,
 } from 'firebase/firestore'
+import {
+    deleteObject,
+    getDownloadURL,
+    getStorage,
+    ref as storageRef,
+    uploadBytesResumable,
+} from 'firebase/storage'
 import { collectAccessLogPayload } from './accessLog'
 
 const firebaseConfig = {
@@ -47,6 +54,7 @@ try {
 
 const db = getFirestore(app)
 const auth = getAuth(app)
+const storage = getStorage(app)
 const googleProvider = new GoogleAuthProvider()
 googleProvider.setCustomParameters({ prompt: 'select_account' })
 
@@ -60,8 +68,24 @@ const SPACE_AMBIENT_TYPES = new Set(['ocean', 'rain', 'wind', 'room'])
 const MAX_SHARED_CUSTOM_SPACES = 12
 const MAX_SHARED_SPACE_LABEL = 20
 const CHUNK_SIZE = 700_000
+/** Firestore-chunked uploads (audio / video / images). */
 export const MAX_FILE_SIZE = 10 * 1024 * 1024
+/** Books/PDFs go to Firebase Storage and can be larger. */
+export const MAX_BOOK_FILE_SIZE = 80 * 1024 * 1024
 const ACCESS_LOG_SESSION_KEY = 'hana-mediabox-access-logged'
+
+export function getMaxUploadBytes(kind) {
+  return kind === 'book' ? MAX_BOOK_FILE_SIZE : MAX_FILE_SIZE
+}
+
+function shouldUseObjectStorage(file, metadata = {}) {
+  return metadata.kind === 'book' || file?.type === 'application/pdf'
+}
+
+function sanitizeStorageFileName(name = 'file') {
+  const base = String(name).split(/[/\\]/).pop() || 'file'
+  return base.replace(/[^\w.\-()\u3040-\u30ff\u3400-\u9fff]+/g, '_').slice(0, 120) || 'file'
+}
 
 /** Optional: only these emails may use /admin. Leave empty to allow any signed-in Firebase user. */
 export const ADMIN_EMAIL_ALLOWLIST = [
@@ -235,6 +259,38 @@ export function subscribeToAccessLogs(onData, onError, maxItems = 200) {
 
 export async function uploadMediaFile(file, metadata, onProgress) {
   const id = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`
+
+  // Large PDFs/books: Firebase Storage. Other media stays in Firestore chunks.
+  if (shouldUseObjectStorage(file, metadata)) {
+    const path = `uploads/${id}/${sanitizeStorageFileName(file.name || 'book.pdf')}`
+    const objectRef = storageRef(storage, path)
+    const task = uploadBytesResumable(objectRef, file, {
+      contentType: file.type || 'application/pdf',
+    })
+
+    await new Promise((resolve, reject) => {
+      task.on(
+        'state_changed',
+        (snapshot) => {
+          if (!snapshot.totalBytes) return
+          onProgress?.(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100))
+        },
+        reject,
+        resolve,
+      )
+    })
+
+    await setDoc(doc(db, MEDIA_COLLECTION, id), {
+      ...metadata,
+      size: file.size,
+      storagePath: path,
+      chunkCount: 0,
+      createdAt: new Date().toISOString(),
+    })
+    onProgress?.(100)
+    return id
+  }
+
   const buffer = await file.arrayBuffer()
   const totalChunks = Math.max(1, Math.ceil(buffer.byteLength / CHUNK_SIZE))
 
@@ -263,7 +319,12 @@ export async function loadMediaBlobUrl(itemId, mimeType) {
     throw new Error('メディアが見つかりません。')
   }
 
-  const { chunkCount = 1 } = itemSnap.data()
+  const data = itemSnap.data() || {}
+  if (data.storagePath) {
+    return getDownloadURL(storageRef(storage, data.storagePath))
+  }
+
+  const { chunkCount = 1 } = data
   const chunksSnap = await getDocs(collection(db, MEDIA_COLLECTION, itemId, 'chunks'))
   const chunks = chunksSnap.docs
     .map((document) => document.data())
@@ -438,6 +499,18 @@ export async function updatePlaylistOrder(orderedIds) {
 }
 
 export async function deleteMediaItem(itemId) {
+  const itemSnap = await getDoc(doc(db, MEDIA_COLLECTION, itemId))
+  const storagePath = itemSnap.exists() ? itemSnap.data()?.storagePath : null
+
+  if (storagePath) {
+    try {
+      await deleteObject(storageRef(storage, storagePath))
+    } catch (storageError) {
+      // Missing object should not block Firestore cleanup.
+      console.warn('Storage delete skipped:', storageError)
+    }
+  }
+
   const chunksSnap = await getDocs(collection(db, MEDIA_COLLECTION, itemId, 'chunks'))
   const batch = writeBatch(db)
 
@@ -449,5 +522,5 @@ export async function deleteMediaItem(itemId) {
   await batch.commit()
 }
 
-export { analytics, app, auth, db }
+export { analytics, app, auth, db, storage }
 
