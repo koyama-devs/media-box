@@ -28,6 +28,8 @@ import {
 import {
     deleteObject,
     getBlob,
+    getBytes,
+    getDownloadURL,
     getStorage,
     ref as storageRef,
     uploadBytesResumable,
@@ -170,6 +172,12 @@ export function getFirebaseErrorMessage(error) {
   }
   if (code === 'auth/admin-email-denied') {
     return error?.message || 'このアカウントには管理権限がありません。'
+  }
+  if (code === 'storage/retry-limit-exceeded') {
+    return 'ストレージからの読み込みに失敗しました。通信環境を確認して、もう一度開いてください。'
+  }
+  if (code === 'storage/unauthorized' || code === 'storage/object-not-found') {
+    return 'ファイルをストレージから取得できませんでした。再アップロードしてください。'
   }
 
   return error?.message || 'アップロードに失敗しました。'
@@ -321,13 +329,25 @@ export async function loadMediaBlobUrl(itemId, mimeType) {
 
   const data = itemSnap.data() || {}
   if (data.storagePath) {
-    // Fetch via the Storage SDK into a same-origin blob URL so pdf.js / <img>
-    // do not hit Firebase Storage CORS when reading cross-origin download URLs.
-    const remoteBlob = await getBlob(storageRef(storage, data.storagePath))
-    const typedBlob = remoteBlob.type
-      ? remoteBlob
-      : new Blob([remoteBlob], { type: mimeType || 'application/pdf' })
-    return URL.createObjectURL(typedBlob)
+    // Prefer SDK download into a same-origin blob URL for pdf.js / media elements.
+    const objectRef = storageRef(storage, data.storagePath)
+    const type = mimeType || data.type || 'application/pdf'
+    try {
+      const remoteBlob = await getBlob(objectRef)
+      const typedBlob = remoteBlob.type ? remoteBlob : new Blob([remoteBlob], { type })
+      return URL.createObjectURL(typedBlob)
+    } catch (blobError) {
+      try {
+        const bytes = await getBytes(objectRef)
+        return URL.createObjectURL(new Blob([bytes], { type }))
+      } catch {
+        const downloadUrl = await getDownloadURL(objectRef)
+        const response = await fetch(downloadUrl)
+        if (!response.ok) throw blobError
+        const fetched = await response.blob()
+        return URL.createObjectURL(new Blob([fetched], { type: fetched.type || type }))
+      }
+    }
   }
 
   const { chunkCount = 1 } = data
