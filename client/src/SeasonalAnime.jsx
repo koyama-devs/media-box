@@ -6,6 +6,7 @@ import {
     fetchSeasonalAnime,
     formatSeasonLabel,
     getAnimeSeason,
+    getAnimeWatchPageUrl,
     getBroadcastSchedule,
     getPreviousSeason,
     getYoutubeTrailer,
@@ -358,7 +359,7 @@ export default function SeasonalAnime({ hidden = false }) {
           type="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="タイトルで検索（AniList）…"
+          placeholder="タイトルで検索…"
           autoComplete="off"
           spellCheck={false}
         />
@@ -426,10 +427,10 @@ export default function SeasonalAnime({ hidden = false }) {
               </span>
               <a
                 className="seasonal-anime-cover"
-                href={item.siteUrl}
+                href={getAnimeWatchPageUrl(item) || item.siteUrl}
                 target="_blank"
                 rel="noreferrer"
-                title="AniListで開く"
+                title="dアニメストアで探す"
               >
                 {item.coverImage?.large || item.coverImage?.medium ? (
                   <img
@@ -445,9 +446,10 @@ export default function SeasonalAnime({ hidden = false }) {
               <div className="seasonal-anime-meta">
                 <a
                   className="seasonal-anime-title"
-                  href={item.siteUrl}
+                  href={getAnimeWatchPageUrl(item) || item.siteUrl}
                   target="_blank"
                   rel="noreferrer"
+                  title="dアニメストアで探す"
                 >
                   {title}
                 </a>
@@ -552,11 +554,11 @@ export default function SeasonalAnime({ hidden = false }) {
                 <div className="seasonal-anime-preview-actions">
                   <a
                     className="seasonal-anime-preview-link"
-                    href={preview.item.siteUrl}
+                    href={getAnimeWatchPageUrl(preview.item) || preview.item.siteUrl}
                     target="_blank"
                     rel="noreferrer"
                   >
-                    AniList
+                    dアニメ
                   </a>
                   {previewTrailer ? (
                     <a

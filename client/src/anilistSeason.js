@@ -232,6 +232,17 @@ export function pickAnimeTitle(media) {
   return t?.native || t?.romaji || t?.english || '無題'
 }
 
+/**
+ * Japanese watch/search page (dアニメストア) — preferred over English AniList.
+ * @param {{ title?: { native?: string, romaji?: string, english?: string }, siteUrl?: string }} media
+ */
+export function getAnimeWatchPageUrl(media) {
+  const title = media?.title?.native || media?.title?.romaji || media?.title?.english
+  if (!title) return media?.siteUrl || null
+  return `https://animestore.docomo.ne.jp/animestore/sch_pc?searchKey=${encodeURIComponent(title)}`
+}
+
+
 /** Plain text synopsis cleanup. */
 export function cleanAnimeDescription(raw, maxLen = 280) {
   if (!raw) return ''
