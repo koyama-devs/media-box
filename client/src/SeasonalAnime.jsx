@@ -44,6 +44,7 @@ export default function SeasonalAnime({ hidden = false }) {
   const [previewSynopsisLoading, setPreviewSynopsisLoading] = useState(false)
   const [trailerPlaying, setTrailerPlaying] = useState(false)
   const leaveTimerRef = useRef(null)
+  const previewRef = useRef(null)
 
   const seasonInfo = seasonKey === 'previous' ? previous : current
   const seasonLabel = formatSeasonLabel(seasonInfo)
@@ -157,6 +158,47 @@ export default function SeasonalAnime({ hidden = false }) {
     }
   }, [preview?.item?.id])
 
+  useEffect(() => {
+    if (!preview) return undefined
+
+    const clampPreviewToViewport = () => {
+      const el = previewRef.current
+      if (!el) return
+      const margin = 16
+      const box = el.getBoundingClientRect()
+      let top = box.top
+      let left = box.left
+      let changed = false
+
+      if (box.bottom > window.innerHeight - margin) {
+        top = Math.max(margin, window.innerHeight - box.height - margin)
+        changed = true
+      }
+      if (top < margin) {
+        top = margin
+        changed = true
+      }
+      if (box.right > window.innerWidth - margin) {
+        left = Math.max(margin, window.innerWidth - box.width - margin)
+        changed = true
+      }
+      if (left < margin) {
+        left = margin
+        changed = true
+      }
+
+      if (!changed) return
+      setPreview((current) => {
+        if (!current) return current
+        if (current.top === top && current.left === left) return current
+        return { ...current, top, left }
+      })
+    }
+
+    const frame = window.requestAnimationFrame(clampPreviewToViewport)
+    return () => window.cancelAnimationFrame(frame)
+  }, [preview?.item?.id, previewSynopsis, previewSynopsisLoading, trailerPlaying])
+
   if (hidden) return null
 
   const sourceMedia = isSearching ? searchMedia : seasonMedia
@@ -198,23 +240,26 @@ export default function SeasonalAnime({ hidden = false }) {
     if (!anchorEl) return
     clearLeaveTimer()
     const rect = anchorEl.getBoundingClientRect()
-    const cardWidth = Math.min(560, window.innerWidth - 24)
+    const margin = 16
+    const gap = 20
+    const nudgeRight = 28
+    const nudgeUp = 56
+    const cardWidth = Math.min(560, window.innerWidth - margin * 2)
     const hasTrailer = Boolean(getYoutubeTrailer(item))
-    const cardHeight = hasTrailer ? 460 : 320
-    const gap = 12
+    const estimatedHeight = hasTrailer ? 480 : 340
 
-    let left = rect.right + gap
-    if (left + cardWidth > window.innerWidth - 12) {
-      left = Math.max(12, rect.left - cardWidth - gap)
+    // Prefer the right side of the row so list titles stay visible.
+    let left = rect.right + gap + nudgeRight
+    if (left + cardWidth > window.innerWidth - margin) {
+      left = window.innerWidth - cardWidth - margin
     }
-    if (left + cardWidth > window.innerWidth - 12) {
-      left = Math.max(12, (window.innerWidth - cardWidth) / 2)
-    }
+    left = Math.max(margin, left)
 
-    let top = rect.top
-    if (top + cardHeight > window.innerHeight - 12) {
-      top = Math.max(12, window.innerHeight - cardHeight - 12)
-    }
+    // Sit a bit above the row so the hovered title remains readable.
+    let top = rect.top - nudgeUp
+    const maxTop = window.innerHeight - estimatedHeight - margin
+    if (top > maxTop) top = maxTop
+    if (top < margin) top = margin
 
     setPreview({ item, top, left, width: cardWidth })
   }
@@ -408,6 +453,7 @@ export default function SeasonalAnime({ hidden = false }) {
       {preview
         ? createPortal(
           <aside
+            ref={previewRef}
             className={`seasonal-anime-preview${previewTrailer ? ' has-trailer' : ''}`}
             style={{
               top: preview.top,
