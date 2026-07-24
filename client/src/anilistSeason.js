@@ -1,6 +1,6 @@
 const ANILIST_URL = 'https://graphql.anilist.co'
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000
-const CACHE_PREFIX = 'hana-seasonal-anime-v3:'
+const CACHE_PREFIX = 'hana-seasonal-anime-v4:'
 const PROGRESS_KEY = 'hana-anime-watch-progress'
 
 const SEASON_ORDER = ['WINTER', 'SPRING', 'SUMMER', 'FALL']
@@ -31,6 +31,11 @@ const MEDIA_CORE_FIELDS = `
     airingAt
     timeUntilAiring
     episode
+  }
+  trailer {
+    id
+    site
+    thumbnail
   }
 `
 
@@ -155,7 +160,7 @@ export function getBroadcastSchedule(media) {
       kind: 'next',
       weekly,
       short: `第${next.episode}話 ${when}`,
-      detail: `次回 第${next.episode}話 · ${when}${until ? `（${until}）` : ''} · ${weekly}（JST）`,
+      detail: `次回 第${next.episode}話 · ${when}${until ? `（${until}）` : ''} · ${weekly}`,
     }
   }
 
@@ -200,6 +205,23 @@ export function getBroadcastSchedule(media) {
   }
 
   return null
+}
+
+/**
+ * @param {object} media
+ * @returns {{ id: string, embedUrl: string, watchUrl: string, thumbnail: string } | null}
+ */
+export function getYoutubeTrailer(media) {
+  const trailer = media?.trailer
+  if (!trailer?.id) return null
+  const site = String(trailer.site || 'youtube').toLowerCase()
+  if (site !== 'youtube') return null
+  return {
+    id: trailer.id,
+    embedUrl: `https://www.youtube-nocookie.com/embed/${trailer.id}?rel=0&modestbranding=1`,
+    watchUrl: `https://www.youtube.com/watch?v=${trailer.id}`,
+    thumbnail: trailer.thumbnail || `https://i.ytimg.com/vi/${trailer.id}/hqdefault.jpg`,
+  }
 }
 
 /**

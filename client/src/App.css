@@ -2260,11 +2260,11 @@
 .seasonal-anime-preview {
   position: fixed;
   z-index: 80;
-  display: grid;
-  grid-template-columns: 118px 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 14px;
-  padding: 14px;
-  border-radius: 16px;
+  padding: 18px 20px;
+  border-radius: 18px;
   border: 1px solid rgba(142, 184, 212, 0.35);
   background:
     radial-gradient(ellipse at 0% 0%, rgba(90, 140, 180, 0.18), transparent 50%),
@@ -2274,10 +2274,17 @@
   animation: seasonal-anime-preview-in 0.18s ease both;
 }
 
+.seasonal-anime-preview-main {
+  display: grid;
+  grid-template-columns: 148px 1fr;
+  gap: 18px;
+  min-width: 0;
+}
+
 .seasonal-anime-preview-cover {
-  width: 118px;
-  height: 168px;
-  border-radius: 10px;
+  width: 148px;
+  height: 210px;
+  border-radius: 12px;
   overflow: hidden;
   background: rgba(30, 40, 55, 0.85);
 }
@@ -2307,10 +2314,10 @@
 .seasonal-anime-preview-title {
   margin: 0;
   font-family: var(--anime-mincho);
-  font-size: 1.05rem;
+  font-size: 1.18rem;
   font-weight: 600;
   letter-spacing: 0.04em;
-  line-height: 1.35;
+  line-height: 1.4;
   color: #f2f7fc;
 }
 
@@ -2367,11 +2374,11 @@
 
 .seasonal-anime-preview-desc {
   margin: 2px 0 0;
-  font-size: 0.78rem;
-  line-height: 1.55;
+  font-size: 0.82rem;
+  line-height: 1.65;
   color: rgba(210, 222, 236, 0.78);
   display: -webkit-box;
-  -webkit-line-clamp: 5;
+  -webkit-line-clamp: 6;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -2403,6 +2410,77 @@
 .seasonal-anime-preview-link:hover {
   border-color: rgba(142, 184, 212, 0.7);
   background: rgba(70, 110, 145, 0.25);
+}
+
+.seasonal-anime-preview-trailer {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0a0c10;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.seasonal-anime-preview-trailer iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+.seasonal-anime-preview-trailer-play {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  background: #0a0c10;
+  color: #f2f7fc;
+}
+
+.seasonal-anime-preview-trailer-play img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  opacity: 0.88;
+  transition: opacity 0.2s ease;
+}
+
+.seasonal-anime-preview-trailer-play:hover img {
+  opacity: 1;
+}
+
+.seasonal-anime-preview-trailer-icon {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(8, 12, 18, 0.72);
+  border: 1px solid rgba(242, 247, 252, 0.45);
+  font-size: 1rem;
+  padding-left: 3px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+}
+
+.seasonal-anime-preview-trailer-caption {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(8, 12, 18, 0.7);
+  border: 1px solid rgba(142, 184, 212, 0.35);
+  font-family: var(--anime-mincho);
+  font-size: 0.68rem;
+  letter-spacing: 0.16em;
+  color: #d5e8f6;
 }
 
 @keyframes seasonal-anime-preview-in {
@@ -2449,19 +2527,27 @@
   }
 
   .seasonal-anime-preview {
-    grid-template-columns: 88px 1fr;
-    gap: 10px;
-    padding: 12px;
+    gap: 12px;
+    padding: 14px;
     max-width: calc(100vw - 24px);
   }
 
+  .seasonal-anime-preview-main {
+    grid-template-columns: 100px 1fr;
+    gap: 12px;
+  }
+
   .seasonal-anime-preview-cover {
-    width: 88px;
-    height: 126px;
+    width: 100px;
+    height: 142px;
   }
 
   .seasonal-anime-preview-desc {
-    -webkit-line-clamp: 4;
+    -webkit-line-clamp: 3;
+  }
+
+  .seasonal-anime-preview.has-trailer .seasonal-anime-preview-desc {
+    -webkit-line-clamp: 2;
   }
 }
 
