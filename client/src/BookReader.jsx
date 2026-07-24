@@ -2,6 +2,7 @@ import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
 import pdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { setBookBookmark } from './bookProgress'
 
 // Modern pdf.js expects Map.getOrInsertComputed (not in all browsers yet).
 if (typeof Map.prototype.getOrInsertComputed !== 'function') {
@@ -67,20 +68,32 @@ function framesEqual(a, b) {
   return a.width === b.width && a.height === b.height
 }
 
+function clampPage(page, pageCount) {
+  if (!pageCount || pageCount < 1) return 1
+  return Math.min(pageCount, Math.max(1, Math.floor(page || 1)))
+}
+
 /**
- * Japanese-bound reading room: 右開き spine, page frame matches PDF size.
+ * Japanese-bound reading room with しおり resume.
  */
 export default function BookReader({
   open,
+  bookId = '',
   title = '無題の本',
   pdfUrl,
+  initialPage = 1,
   onClose,
+  onProgressChange,
 }) {
   const stageRef = useRef(null)
   const pdfRef = useRef(null)
   const pageCacheRef = useRef(new Map())
   const pageAspectRef = useRef(0.707)
   const frameRef = useRef({ width: 420, height: 594, aspect: 0.707 })
+  const pageRef = useRef(1)
+  const pageCountRef = useRef(0)
+  const onProgressChangeRef = useRef(onProgressChange)
+  const startPageRef = useRef(initialPage)
   const [pageCount, setPageCount] = useState(0)
   const [page, setPage] = useState(1)
   const [frontUrl, setFrontUrl] = useState(null)
@@ -89,6 +102,16 @@ export default function BookReader({
   const [error, setError] = useState('')
   const [flipping, setFlipping] = useState(null)
   const [frame, setFrame] = useState(frameRef.current)
+  const [resumeNotice, setResumeNotice] = useState('')
+  const [shioriPulse, setShioriPulse] = useState(false)
+
+  useEffect(() => {
+    onProgressChangeRef.current = onProgressChange
+  }, [onProgressChange])
+
+  useEffect(() => {
+    if (open) startPageRef.current = initialPage
+  }, [open, initialPage])
 
   const clearCache = useCallback(() => {
     pageCacheRef.current.forEach((url) => URL.revokeObjectURL(url))
@@ -117,6 +140,12 @@ export default function BookReader({
     return () => observer.disconnect()
   }, [open, measureFrame])
 
+  const persistProgress = useCallback((nextPage, nextCount) => {
+    if (!bookId) return
+    setBookBookmark(bookId, nextPage, nextCount)
+    onProgressChangeRef.current?.(bookId, nextPage, nextCount)
+  }, [bookId])
+
   const getPageUrl = useCallback(async (pdf, pageNumber, renderWidth) => {
     const cached = pageCacheRef.current.get(pageNumber)
     if (cached) return cached
@@ -144,9 +173,11 @@ export default function BookReader({
     setBusy(true)
     setError('')
     setPage(1)
+    pageRef.current = 1
     setFrontUrl(null)
     setBackUrl(null)
     setFlipping(null)
+    setResumeNotice('')
     pageAspectRef.current = 0.707
     clearCache()
 
@@ -160,7 +191,9 @@ export default function BookReader({
           return
         }
         pdfRef.current = pdf
-        setPageCount(pdf.numPages || 0)
+        const total = pdf.numPages || 0
+        pageCountRef.current = total
+        setPageCount(total)
 
         const firstPage = await pdf.getPage(1)
         const viewport = firstPage.getViewport({ scale: 1 })
@@ -173,12 +206,25 @@ export default function BookReader({
         )
         updateFrame(sized)
 
-        const first = await getPageUrl(pdf, 1, sized.width)
+        const startPage = clampPage(startPageRef.current, total)
+        const startUrl = await getPageUrl(pdf, startPage, sized.width)
         if (cancelled) return
-        setFrontUrl(first)
-        if (pdf.numPages > 1) {
-          getPageUrl(pdf, 2, sized.width).catch(() => {})
+        setFrontUrl(startUrl)
+        setPage(startPage)
+        pageRef.current = startPage
+        persistProgress(startPage, total)
+
+        if (startPage > 1) {
+          setResumeNotice(`しおり · ${startPage}頁から続き`)
+          setShioriPulse(true)
+          window.setTimeout(() => setResumeNotice(''), 3200)
+          window.setTimeout(() => setShioriPulse(false), 1800)
         }
+
+        const prefetch = [startPage - 1, startPage + 1].filter((n) => n >= 1 && n <= total)
+        prefetch.forEach((n) => {
+          getPageUrl(pdf, n, sized.width).catch(() => {})
+        })
       } catch (loadError) {
         console.error(loadError)
         if (!cancelled) {
@@ -194,11 +240,15 @@ export default function BookReader({
 
     return () => {
       cancelled = true
+      if (bookId && pageRef.current > 0) {
+        setBookBookmark(bookId, pageRef.current, pageCountRef.current)
+        onProgressChangeRef.current?.(bookId, pageRef.current, pageCountRef.current)
+      }
       pdfRef.current?.destroy()
       pdfRef.current = null
       clearCache()
     }
-  }, [open, pdfUrl, clearCache, getPageUrl, updateFrame])
+  }, [open, pdfUrl, bookId, clearCache, getPageUrl, updateFrame, persistProgress])
 
   const turnPage = useCallback(async (direction) => {
     if (flipping || busy || !pdfRef.current) return
@@ -214,9 +264,13 @@ export default function BookReader({
       window.setTimeout(() => {
         setFrontUrl(nextUrl)
         setPage(nextPage)
+        pageRef.current = nextPage
         setFlipping(null)
         setBackUrl(null)
         setBusy(false)
+        persistProgress(nextPage, pageCount)
+        setShioriPulse(true)
+        window.setTimeout(() => setShioriPulse(false), 700)
         const prefetch = [nextPage - 1, nextPage + 1].filter((n) => n >= 1 && n <= pageCount)
         prefetch.forEach((n) => {
           getPageUrl(pdfRef.current, n, frameRef.current.width).catch(() => {})
@@ -228,26 +282,35 @@ export default function BookReader({
       setBusy(false)
       setFlipping(null)
     }
-  }, [flipping, busy, page, pageCount, getPageUrl])
+  }, [flipping, busy, page, pageCount, getPageUrl, persistProgress])
+
+  const handleClose = useCallback(() => {
+    if (bookId && pageRef.current > 0) {
+      setBookBookmark(bookId, pageRef.current, pageCountRef.current)
+      onProgressChangeRef.current?.(bookId, pageRef.current, pageCountRef.current)
+    }
+    onClose?.()
+  }, [bookId, onClose])
 
   useEffect(() => {
     if (!open) return undefined
     const onKey = (event) => {
-      if (event.key === 'Escape') onClose?.()
+      if (event.key === 'Escape') handleClose()
       if (event.key === 'ArrowLeft') void turnPage(1)
       if (event.key === 'ArrowRight') void turnPage(-1)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose, turnPage])
+  }, [open, handleClose, turnPage])
 
   if (!open || typeof document === 'undefined') return null
 
   const canGoNext = !busy && !flipping && page < pageCount
   const canGoPrev = !busy && !flipping && page > 1
+  const progressRatio = pageCount > 0 ? page / pageCount : 0
 
   return createPortal(
-    <div className="book-reader-overlay" role="presentation" onClick={() => onClose?.()}>
+    <div className="book-reader-overlay" role="presentation" onClick={() => handleClose()}>
       <div className="book-reader-atmosphere" aria-hidden="true">
         <span className="book-reader-glow" />
         <span className="book-reader-shoji" />
@@ -275,7 +338,7 @@ export default function BookReader({
             <button
               type="button"
               className="book-reader-close"
-              onClick={() => onClose?.()}
+              onClick={handleClose}
               aria-label="閉じる"
               title="閉じる"
             >
@@ -292,6 +355,15 @@ export default function BookReader({
                 height: `${frame.height}px`,
               }}
             >
+              <div
+                className={`book-shiori${shioriPulse ? ' is-pulse' : ''}`}
+                aria-hidden="true"
+                title="しおり"
+              >
+                <span className="book-shiori-ribbon">しおり</span>
+                <span className="book-shiori-tail" />
+              </div>
+
               <div className="book-reader-cover-edge" aria-hidden="true" />
               <div className="book-reader-spine" aria-hidden="true">
                 <span className="book-reader-spine-thread" />
@@ -331,6 +403,7 @@ export default function BookReader({
             </div>
           </div>
 
+          {resumeNotice ? <p className="book-reader-resume">{resumeNotice}</p> : null}
           {error ? <p className="book-reader-error">{error}</p> : null}
 
           <footer className="book-reader-footer">
@@ -346,7 +419,13 @@ export default function BookReader({
 
             <div className="book-reader-pager">
               <span className="book-reader-seal" aria-hidden="true">頁</span>
-              <p className="book-reader-page-indicator">{toJapanesePageLabel(page, pageCount)}</p>
+              <div className="book-reader-page-block">
+                <p className="book-reader-page-indicator">{toJapanesePageLabel(page, pageCount)}</p>
+                <div className="book-reader-progress" aria-hidden="true">
+                  <span style={{ width: `${Math.min(100, progressRatio * 100)}%` }} />
+                </div>
+                <p className="book-reader-shiori-note">しおりをはさんでいます</p>
+              </div>
             </div>
 
             <button
@@ -360,7 +439,7 @@ export default function BookReader({
             </button>
           </footer>
 
-          <p className="book-reader-hint">左で次へ · 右で戻る · Escで閉じる</p>
+          <p className="book-reader-hint">左で次へ · 右で戻る · Escで閉じる · 頁は自動で覚えます</p>
         </div>
       </div>
     </div>,

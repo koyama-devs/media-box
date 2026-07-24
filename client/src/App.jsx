@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
+import { clearBookBookmark, getAllBookBookmarks, getBookBookmark } from './bookProgress'
 import BookReader from './BookReader'
 import {
   deleteMediaItem,
@@ -343,6 +344,8 @@ function App() {
   const [readingBookId, setReadingBookId] = useState(null)
   const [readingBookUrl, setReadingBookUrl] = useState(null)
   const [readingBookBusy, setReadingBookBusy] = useState(false)
+  const [readingBookStartPage, setReadingBookStartPage] = useState(1)
+  const [bookBookmarks, setBookBookmarks] = useState(() => getAllBookBookmarks())
   const [coverBusy, setCoverBusy] = useState(false)
   const [jacketBusy, setJacketBusy] = useState(false)
   const [editingItemId, setEditingItemId] = useState(null)
@@ -909,7 +912,9 @@ function App() {
     setReadingBookBusy(true)
     setError('')
     try {
+      const bookmark = getBookBookmark(book.id)
       const url = await ensureMediaUrl(book.id, book.type || 'application/pdf')
+      setReadingBookStartPage(bookmark?.page > 1 ? bookmark.page : 1)
       setReadingBookUrl(url)
       setReadingBookId(book.id)
     } catch (bookError) {
@@ -923,6 +928,12 @@ function App() {
   const closeBook = useCallback(() => {
     setReadingBookId(null)
     setReadingBookUrl(null)
+    setReadingBookStartPage(1)
+    setBookBookmarks(getAllBookBookmarks())
+  }, [])
+
+  const handleBookProgress = useCallback(() => {
+    setBookBookmarks(getAllBookBookmarks())
   }, [])
 
   const skipTodayHero = useCallback(() => {
@@ -2327,6 +2338,13 @@ const playPrevious = useCallback(() => {
       }
 
       await deleteMediaItem(itemId)
+      clearBookBookmark(itemId)
+      setBookBookmarks(getAllBookBookmarks())
+      if (readingBookId === itemId) {
+        setReadingBookId(null)
+        setReadingBookUrl(null)
+        setReadingBookStartPage(1)
+      }
       if (editingItemId === itemId) {
         setEditingItemId(null)
         setEditingName('')
@@ -3325,19 +3343,29 @@ const playPrevious = useCallback(() => {
                     <h3>本棚</h3>
                     <span className="image-library-count">{bookItems.length}冊</span>
                   </div>
-                  <p className="bookshelf-hint">PDFを開いて、ページをめくりながら読めます</p>
+                  <p className="bookshelf-hint">PDFを開いて、しおりの頁から続きが読めます</p>
                   <ul className="bookshelf-grid">
-                    {bookItems.map((item, index) => (
+                    {bookItems.map((item, index) => {
+                      const bookmark = bookBookmarks[item.id]
+                      const hasShiori = bookmark?.page > 1
+                      return (
                       <li key={item.id} className="bookshelf-spine" style={{ '--spine-hue': `${(index * 47) % 360}` }}>
                         <button
                           type="button"
-                          className="bookshelf-book"
+                          className={`bookshelf-book${hasShiori ? ' has-shiori' : ''}`}
                           onClick={() => void openBook(item.id)}
                           disabled={readingBookBusy}
-                          title={getDisplayName(item.name)}
+                          title={
+                            hasShiori
+                              ? `${getDisplayName(item.name)} · しおり ${bookmark.page}頁`
+                              : getDisplayName(item.name)
+                          }
                         >
+                          {hasShiori ? <span className="bookshelf-shiori" aria-hidden="true" /> : null}
                           <span className="bookshelf-book-title">{getDisplayName(item.name)}</span>
-                          <span className="bookshelf-book-meta">{formatSize(item.size)}</span>
+                          <span className="bookshelf-book-meta">
+                            {hasShiori ? `続き ${bookmark.page}頁` : formatSize(item.size)}
+                          </span>
                         </button>
                         <button
                           type="button"
@@ -3349,7 +3377,8 @@ const playPrevious = useCallback(() => {
                           ×
                         </button>
                       </li>
-                    ))}
+                      )
+                    })}
                   </ul>
                 </div>
               ) : null}
@@ -3534,9 +3563,12 @@ const playPrevious = useCallback(() => {
       {readingBookId && readingBookUrl ? (
         <BookReader
           open
+          bookId={readingBookId}
           title={getDisplayName(items.find((item) => item.id === readingBookId)?.name || '無題の本')}
           pdfUrl={readingBookUrl}
+          initialPage={readingBookStartPage}
           onClose={closeBook}
+          onProgressChange={handleBookProgress}
         />
       ) : null}
 
