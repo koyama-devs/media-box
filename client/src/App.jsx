@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { createPortal } from 'react-dom'
 import './App.css'
 import { clearBookBookmark, getAllBookBookmarks, getBookBookmark } from './bookProgress'
+import DailyKotoba from './DailyKotoba'
 import {
   deleteMediaItem,
   getFirebaseErrorMessage,
@@ -2503,6 +2504,10 @@ const playPrevious = useCallback(() => {
               </button>
             </div>
           </header>
+
+          <div className={listeningSpaceOpen && focusMode ? 'is-space-hidden' : ''}>
+            <DailyKotoba />
+          </div>
 
           <section className={`upload-card${listeningSpaceOpen && focusMode ? ' is-space-hidden' : ''}`}>
             <div>
