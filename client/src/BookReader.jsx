@@ -1,7 +1,21 @@
-import * as pdfjs from 'pdfjs-dist'
-import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
+import pdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+
+// Modern pdf.js expects Map.getOrInsertComputed (not in all browsers yet).
+if (typeof Map.prototype.getOrInsertComputed !== 'function') {
+  Object.defineProperty(Map.prototype, 'getOrInsertComputed', {
+    value(key, callbackFn) {
+      if (this.has(key)) return this.get(key)
+      const value = callbackFn(key)
+      this.set(key, value)
+      return value
+    },
+    writable: true,
+    configurable: true,
+  })
+}
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker
 
