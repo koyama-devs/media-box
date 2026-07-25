@@ -48,6 +48,7 @@ import { pickPostcardLyric } from './lyrics'
 import LyricsPanel from './LyricsPanel'
 import { blobToThumbnailUrl, mapPool } from './mediaPerf'
 import SeasonalAnime from './SeasonalAnime.jsx'
+import JapaneseMusic from './JapaneseMusic.jsx'
 import {
   appendTodayRecordHistory,
   formatTodayDateLabel,
@@ -2550,6 +2551,7 @@ const playPrevious = useCallback(() => {
           <div className={listeningSpaceOpen && focusMode ? 'is-space-hidden' : ''}>
             <DailyKotoba />
             <SeasonalAnime />
+            <JapaneseMusic />
           </div>
 
           <section className={`upload-card${listeningSpaceOpen && focusMode ? ' is-space-hidden' : ''}`}>

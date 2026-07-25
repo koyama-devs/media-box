@@ -2586,6 +2586,327 @@
   }
 }
 
+.jp-music {
+  --music-mincho: 'Shippori Mincho', 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
+  margin: 0 0 18px;
+  padding: 20px 22px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(198, 140, 120, 0.22);
+  background:
+    radial-gradient(ellipse at 12% 0%, rgba(198, 120, 90, 0.14), transparent 42%),
+    linear-gradient(155deg, rgba(28, 18, 16, 0.96), rgba(12, 10, 12, 0.98));
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.28);
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.55s ease, transform 0.55s ease;
+}
+
+.jp-music.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.jp-music-header {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 14px;
+}
+
+.jp-music-seal {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid #c4785a;
+  color: #e0a080;
+  font-family: var(--music-mincho);
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.jp-music-kicker {
+  margin: 0 0 6px;
+  font-family: var(--music-mincho);
+  font-size: 0.72rem;
+  letter-spacing: 0.22em;
+  color: #e0a080;
+}
+
+.jp-music-heading {
+  margin: 0;
+  font-family: var(--music-mincho);
+  font-size: clamp(1.15rem, 2.4vw, 1.45rem);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #f7efe8;
+}
+
+.jp-music-tabs,
+.jp-music-entities,
+.jp-music-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.jp-music-search {
+  display: block;
+  margin: 0 0 12px;
+}
+
+.jp-music-search input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(198, 163, 140, 0.28);
+  background: rgba(12, 8, 8, 0.55);
+  color: #f7efe8;
+  font-family: var(--music-mincho);
+  font-size: 0.9rem;
+  letter-spacing: 0.04em;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.jp-music-search input::placeholder {
+  color: rgba(220, 190, 170, 0.45);
+}
+
+.jp-music-search input:focus {
+  outline: none;
+  border-color: rgba(224, 160, 128, 0.55);
+  box-shadow: 0 0 0 3px rgba(180, 100, 70, 0.18);
+}
+
+.jp-music-tabs button,
+.jp-music-entities button,
+.jp-music-filters button {
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(180, 150, 130, 0.28);
+  background: transparent;
+  color: #d6c0b0;
+  font-family: var(--music-mincho);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+.jp-music-tabs button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.jp-music-tabs button:hover,
+.jp-music-entities button:hover,
+.jp-music-filters button:hover {
+  border-color: rgba(224, 160, 128, 0.45);
+  color: #f7efe8;
+}
+
+.jp-music-tabs button:disabled:hover {
+  border-color: rgba(180, 150, 130, 0.28);
+  color: #d6c0b0;
+}
+
+.jp-music-tabs button.is-active,
+.jp-music-entities button.is-active,
+.jp-music-filters button.is-active {
+  border-color: rgba(224, 160, 128, 0.55);
+  background: rgba(140, 70, 50, 0.28);
+  color: #faf0e8;
+}
+
+.jp-music-status,
+.jp-music-error {
+  margin: 0 0 10px;
+  font-size: 0.86rem;
+}
+
+.jp-music-status {
+  color: rgba(220, 190, 170, 0.7);
+}
+
+.jp-music-error {
+  color: #f0a8a0;
+}
+
+.jp-music-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 6px 2px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(58vh, 520px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(224, 160, 128, 0.35) transparent;
+}
+
+.jp-music-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.jp-music-list::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 4px 0;
+}
+
+.jp-music-list::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(224, 160, 128, 0.28), rgba(180, 100, 70, 0.45));
+  border-radius: 999px;
+}
+
+.jp-music-item {
+  display: grid;
+  grid-template-columns: 36px 56px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(180, 150, 130, 0.12);
+  background: rgba(10, 6, 6, 0.45);
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.jp-music-item.is-favorite {
+  border-color: rgba(224, 140, 110, 0.4);
+}
+
+.jp-music-rank {
+  font-family: var(--music-mincho);
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  color: rgba(224, 160, 128, 0.75);
+  text-align: center;
+}
+
+.jp-music-cover {
+  display: block;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(40, 28, 24, 0.8);
+  flex-shrink: 0;
+}
+
+.jp-music-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.jp-music-cover-fallback {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  color: rgba(220, 190, 170, 0.5);
+}
+
+.jp-music-meta {
+  min-width: 0;
+}
+
+.jp-music-title {
+  display: block;
+  margin: 0 0 2px;
+  font-family: var(--music-mincho);
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #f7efe8;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jp-music-title:hover {
+  color: #f0c8b0;
+}
+
+.jp-music-artist {
+  margin: 0;
+  font-size: 0.72rem;
+  color: rgba(210, 180, 160, 0.65);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jp-music-kind {
+  color: rgba(224, 160, 128, 0.85);
+  letter-spacing: 0.06em;
+}
+
+.jp-music-status-btn {
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(180, 150, 130, 0.3);
+  background: rgba(28, 18, 16, 0.7);
+  color: #e8d4c8;
+  font-family: var(--music-mincho);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.jp-music-status-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(224, 160, 128, 0.5);
+}
+
+.jp-music-status-btn.is-favorite {
+  border-color: rgba(224, 140, 110, 0.55);
+  color: #f0c0a8;
+  background: rgba(120, 50, 40, 0.35);
+}
+
+@media (max-width: 700px) {
+  .jp-music {
+    padding: 16px;
+  }
+
+  .jp-music-header {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .jp-music-seal {
+    width: 34px;
+    height: 34px;
+    font-size: 0.9rem;
+  }
+
+  .jp-music-item {
+    grid-template-columns: 28px 48px 1fr;
+    grid-template-rows: auto auto;
+    gap: 8px 10px;
+  }
+
+  .jp-music-status-btn {
+    grid-column: 2 / -1;
+    justify-self: start;
+  }
+
+  .jp-music-cover {
+    width: 48px;
+    height: 48px;
+  }
+}
+
 .bookshelf {
   margin-top: 18px;
   padding-top: 16px;
