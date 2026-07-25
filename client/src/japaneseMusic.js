@@ -1,19 +1,61 @@
 const CHART_CACHE_TTL_MS = 6 * 60 * 60 * 1000
-const CHART_CACHE_PREFIX = 'hana-jp-music-chart-v2:'
+const CHART_CACHE_PREFIX = 'hana-jp-music-chart-v3:'
 const LIBRARY_KEY = 'hana-jp-music-library'
 const LEGACY_PROGRESS_KEY = 'hana-jp-music-progress'
+const CHART_FETCH_LIMIT = 50
+const CHART_DISPLAY_LIMIT = 30
 
+/** Japan-leaning genres only (Western / K-pop genre tabs removed). */
 /** @type {{ id: string, label: string, genreId: number|null }[]} */
 export const MUSIC_GENRES = [
   { id: 'all', label: '総合', genreId: null },
   { id: 'jpop', label: 'J-Pop', genreId: 27 },
   { id: 'anime', label: 'アニメ', genreId: 29 },
   { id: 'rock', label: 'ロック', genreId: 15 },
-  { id: 'hiphop', label: 'ヒップホップ', genreId: 18 },
-  { id: 'rnb', label: 'R&B', genreId: 13 },
-  { id: 'electronic', label: 'エレクトロニック', genreId: 7 },
   { id: 'karaoke', label: 'カラオケ', genreId: 51 },
 ]
+
+const JP_STRONG_SCRIPT_RE = /[\u3040-\u309f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/
+
+/** Always drop — usually non-Japanese acts on the JP store. */
+const EXCLUDED_GENRES = new Set([
+  'K-Pop',
+  'ポップ',
+  'ラテン',
+  'カントリー',
+  'レゲエ',
+  'ブルース',
+  'ジャズ',
+  'クラシック',
+  'ワールドミュージック',
+  'ダンス',
+  'ワールド',
+])
+
+/** Strong Japan genre labels from iTunes JP. */
+const KEEP_GENRES = new Set([
+  'J-Pop',
+  'アニメ',
+  'アニメーション',
+  '演歌',
+  'カラオケ',
+  'ヴィジュアル系',
+  'J-Rock',
+  'J-Punk',
+  'アイドル',
+  '童謡/唱歌',
+  '伝統音楽',
+])
+
+/** Domestic-leaning genres that often use Latin artist names (Mrs. GREEN APPLE, Number_i). */
+const SOFT_KEEP_GENRES = new Set([
+  'ロック',
+  'エレクトロニック',
+  'ヒップホップ/ラップ',
+  'R&B/ソウル',
+  'サウンドトラック',
+  'フォーク',
+])
 
 /** Chart/search target. Artist has no iTunes RSS chart — search only. */
 export const SEARCH_ENTITIES = [
@@ -45,9 +87,89 @@ function makeId(kind, numericId) {
   return `${kind}:${numericId}`
 }
 
+function numericIdFromItem(item) {
+  if (!item?.id) return ''
+  const parts = String(item.id).split(':')
+  return parts[1] || ''
+}
+
+function hasStrongJapaneseScript(...parts) {
+  return JP_STRONG_SCRIPT_RE.test(parts.filter(Boolean).join(' '))
+}
+
+function isExcludedGenre(genre) {
+  const g = String(genre || '').trim()
+  if (!g) return false
+  if (EXCLUDED_GENRES.has(g)) return true
+  if (g === 'J-Pop' || g === 'J-Rock' || g === 'J-Punk') return false
+  // スペイン語ポップ, 韓国ポップ, etc.
+  if (g.includes('ポップ') || /k-?pop/i.test(g)) return true
+  return false
+}
+
+/**
+ * Heuristic: keep domestic JP catalog, drop K-Pop / Western pop on the JP store.
+ * @param {{ title?: string, artist?: string, album?: string, genre?: string }} item
+ */
+export function isJapaneseMusic(item) {
+  if (!item) return false
+  const genre = String(item.genre || '').trim()
+  if (isExcludedGenre(genre)) return false
+  if (hasStrongJapaneseScript(item.title, item.artist, item.album)) return true
+  if (genre && KEEP_GENRES.has(genre)) return true
+  if (genre && SOFT_KEEP_GENRES.has(genre)) return true
+  // Katakana-only / Latin-only with no useful genre — drop
+  return false
+}
+
+/**
+ * @param {string[]} ids
+ * @returns {Promise<Map<string, object>>}
+ */
+async function lookupItunesJp(ids) {
+  const unique = [...new Set(ids.map(String).filter(Boolean))]
+  const map = new Map()
+  for (let i = 0; i < unique.length; i += 40) {
+    const chunk = unique.slice(i, i + 40).join(',')
+    const res = await fetch(`https://itunes.apple.com/lookup?id=${chunk}&country=jp`)
+    if (!res.ok) continue
+    const json = await res.json()
+    for (const row of json?.results || []) {
+      const id = String(row.trackId || row.collectionId || row.artistId || '')
+      if (id) map.set(id, row)
+    }
+  }
+  return map
+}
+
+/**
+ * Attach genre from lookup and keep Japanese-leaning rows; re-rank.
+ * @param {object[]} items
+ * @param {number} [limit]
+ */
+async function enrichAndFilterJapanese(items, limit = CHART_DISPLAY_LIMIT) {
+  if (!items.length) return []
+  const lookup = await lookupItunesJp(items.map(numericIdFromItem))
+  const filtered = []
+  for (const item of items) {
+    const raw = lookup.get(numericIdFromItem(item))
+    const genre = raw?.primaryGenreName || item.genre || ''
+    const next = {
+      ...item,
+      genre,
+      artwork: item.artwork || artworkUrl(raw?.artworkUrl100) || null,
+      url: item.url || raw?.trackViewUrl || raw?.collectionViewUrl || raw?.artistLinkUrl || null,
+      previewUrl: item.previewUrl || raw?.previewUrl || null,
+    }
+    if (isJapaneseMusic(next)) filtered.push(next)
+  }
+  return filtered.slice(0, limit).map((item, index) => ({ ...item, rank: index + 1 }))
+}
+
 /** Normalize iTunes Search API result. */
 export function normalizeSearchResult(item) {
   if (!item) return null
+  const genre = item.primaryGenreName || ''
 
   if (item.wrapperType === 'track' && item.kind === 'song') {
     return {
@@ -59,6 +181,7 @@ export function normalizeSearchResult(item) {
       artwork: artworkUrl(item.artworkUrl100),
       url: item.trackViewUrl || item.collectionViewUrl || null,
       previewUrl: item.previewUrl || null,
+      genre,
       rank: null,
     }
   }
@@ -73,6 +196,7 @@ export function normalizeSearchResult(item) {
       artwork: artworkUrl(item.artworkUrl100),
       url: item.trackViewUrl || null,
       previewUrl: item.previewUrl || null,
+      genre,
       rank: null,
     }
   }
@@ -87,6 +211,7 @@ export function normalizeSearchResult(item) {
       artwork: artworkUrl(item.artworkUrl100),
       url: item.collectionViewUrl || null,
       previewUrl: null,
+      genre,
       rank: null,
     }
   }
@@ -101,6 +226,7 @@ export function normalizeSearchResult(item) {
       artwork: null,
       url: item.artistLinkUrl || null,
       previewUrl: null,
+      genre,
       rank: null,
     }
   }
@@ -138,6 +264,7 @@ export function normalizeChartEntry(entry, index, kind = 'song') {
     artwork: artworkUrl(largest),
     url: link || null,
     previewUrl: null,
+    genre: '',
     rank: index + 1,
   }
 }
@@ -150,9 +277,9 @@ export async function fetchJapanMusicChart(genreId = null, options = {}) {
   const feed = options.feed ?? 'topsongs'
   if (!feed) return []
 
-  const limit = options.limit ?? 30
+  const fetchLimit = options.limit ?? CHART_FETCH_LIMIT
   const kind = CHART_KIND_BY_FEED[feed] || 'song'
-  const cacheKey = `${CHART_CACHE_PREFIX}${feed}-${genreId ?? 'all'}-${limit}`
+  const cacheKey = `${CHART_CACHE_PREFIX}${feed}-${genreId ?? 'all'}-${fetchLimit}`
 
   if (!options.force) {
     try {
@@ -169,16 +296,17 @@ export async function fetchJapanMusicChart(genreId = null, options = {}) {
   }
 
   const genrePart = genreId != null ? `genre=${genreId}/` : ''
-  const url = `https://itunes.apple.com/jp/rss/${feed}/limit=${limit}/${genrePart}json`
+  const url = `https://itunes.apple.com/jp/rss/${feed}/limit=${fetchLimit}/${genrePart}json`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`iTunes chart ${res.status}`)
 
   const json = await res.json()
   const entries = json?.feed?.entry
   const list = Array.isArray(entries) ? entries : entries ? [entries] : []
-  const items = list
+  const rawItems = list
     .map((entry, index) => normalizeChartEntry(entry, index, kind))
     .filter(Boolean)
+  const items = await enrichAndFilterJapanese(rawItems, CHART_DISPLAY_LIMIT)
 
   try {
     sessionStorage.setItem(cacheKey, JSON.stringify({ fetchedAt: Date.now(), items }))
@@ -199,7 +327,7 @@ export async function searchJapanMusic(term, options = {}) {
 
   const entity = options.entity || 'song'
   const media = options.media || (entity === 'musicVideo' ? 'musicVideo' : 'music')
-  const limit = options.limit ?? 25
+  const limit = options.limit ?? 40
   const params = new URLSearchParams({
     term: q,
     country: 'jp',
@@ -214,7 +342,11 @@ export async function searchJapanMusic(term, options = {}) {
 
   const json = await res.json()
   const results = Array.isArray(json?.results) ? json.results : []
-  return results.map(normalizeSearchResult).filter(Boolean)
+  return results
+    .map(normalizeSearchResult)
+    .filter(Boolean)
+    .filter(isJapaneseMusic)
+    .slice(0, 25)
 }
 
 /** @returns {Record<string, object>} */

@@ -16,7 +16,7 @@ const SEARCH_DEBOUNCE_MS = 320
  * Japanese music charts (iTunes JP) + favorites list.
  */
 export default function JapaneseMusic({ hidden = false }) {
-  const [genreId, setGenreId] = useState('all')
+  const [genreId, setGenreId] = useState('jpop')
   const [view, setView] = useState('chart') // chart | favorites
   const [searchEntity, setSearchEntity] = useState('song')
   const [query, setQuery] = useState('')
@@ -151,7 +151,7 @@ export default function JapaneseMusic({ hidden = false }) {
       <header className="jp-music-header">
         <div className="jp-music-seal" aria-hidden="true">音</div>
         <div className="jp-music-titles">
-          <p className="jp-music-kicker">日本の音楽 · チャート</p>
+          <p className="jp-music-kicker">日本の音楽のみ · チャート</p>
           <h3 className="jp-music-heading">
             {isSearching
               ? `${activeEntity.label}の検索結果`
