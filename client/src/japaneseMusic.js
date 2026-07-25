@@ -1,5 +1,5 @@
 const CHART_CACHE_TTL_MS = 6 * 60 * 60 * 1000
-const CHART_CACHE_PREFIX = 'hana-jp-music-chart-v1:'
+const CHART_CACHE_PREFIX = 'hana-jp-music-chart-v2:'
 const LIBRARY_KEY = 'hana-jp-music-library'
 const LEGACY_PROGRESS_KEY = 'hana-jp-music-progress'
 
@@ -15,12 +15,19 @@ export const MUSIC_GENRES = [
   { id: 'karaoke', label: 'カラオケ', genreId: 51 },
 ]
 
+/** Chart/search target. Artist has no iTunes RSS chart — search only. */
 export const SEARCH_ENTITIES = [
-  { id: 'song', label: '曲', itunes: 'song' },
-  { id: 'artist', label: '歌手', itunes: 'musicArtist' },
-  { id: 'album', label: 'アルバム', itunes: 'album' },
-  { id: 'mv', label: 'MV', itunes: 'musicVideo' },
+  { id: 'song', label: '曲', itunes: 'song', media: 'music', chartFeed: 'topsongs' },
+  { id: 'artist', label: '歌手', itunes: 'musicArtist', media: 'music', chartFeed: null },
+  { id: 'album', label: 'アルバム', itunes: 'album', media: 'music', chartFeed: 'topalbums' },
+  { id: 'mv', label: 'MV', itunes: 'musicVideo', media: 'musicVideo', chartFeed: 'topmusicvideos' },
 ]
+
+const CHART_KIND_BY_FEED = {
+  topsongs: 'song',
+  topalbums: 'album',
+  topmusicvideos: 'mv',
+}
 
 export const MUSIC_KIND_LABEL = {
   song: '曲',
@@ -101,8 +108,13 @@ export function normalizeSearchResult(item) {
   return null
 }
 
-/** Normalize iTunes JP RSS topsongs entry. */
-export function normalizeChartEntry(entry, index) {
+/**
+ * Normalize iTunes JP RSS chart entry (songs / albums / music videos).
+ * @param {object} entry
+ * @param {number} index
+ * @param {'song'|'album'|'mv'} [kind]
+ */
+export function normalizeChartEntry(entry, index, kind = 'song') {
   if (!entry) return null
   const idAttr = entry.id?.attributes?.['im:id'] || entry.id?.label
   const numericId = idAttr ? String(idAttr).replace(/\D/g, '') : ''
@@ -116,12 +128,13 @@ export function normalizeChartEntry(entry, index) {
 
   if (!numericId) return null
 
+  const albumName = entry['im:collection']?.['im:name']?.label || ''
   return {
-    id: makeId('song', numericId),
-    kind: 'song',
+    id: makeId(kind, numericId),
+    kind,
     title,
     artist,
-    album: entry['im:collection']?.['im:name']?.label || '',
+    album: kind === 'album' ? title : albumName,
     artwork: artworkUrl(largest),
     url: link || null,
     previewUrl: null,
@@ -131,11 +144,15 @@ export function normalizeChartEntry(entry, index) {
 
 /**
  * @param {number|null} genreId
- * @param {{ limit?: number, force?: boolean }} [options]
+ * @param {{ limit?: number, force?: boolean, feed?: string|null }} [options]
  */
 export async function fetchJapanMusicChart(genreId = null, options = {}) {
+  const feed = options.feed ?? 'topsongs'
+  if (!feed) return []
+
   const limit = options.limit ?? 30
-  const cacheKey = `${CHART_CACHE_PREFIX}${genreId ?? 'all'}-${limit}`
+  const kind = CHART_KIND_BY_FEED[feed] || 'song'
+  const cacheKey = `${CHART_CACHE_PREFIX}${feed}-${genreId ?? 'all'}-${limit}`
 
   if (!options.force) {
     try {
@@ -152,7 +169,7 @@ export async function fetchJapanMusicChart(genreId = null, options = {}) {
   }
 
   const genrePart = genreId != null ? `genre=${genreId}/` : ''
-  const url = `https://itunes.apple.com/jp/rss/topsongs/limit=${limit}/${genrePart}json`
+  const url = `https://itunes.apple.com/jp/rss/${feed}/limit=${limit}/${genrePart}json`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`iTunes chart ${res.status}`)
 
@@ -160,7 +177,7 @@ export async function fetchJapanMusicChart(genreId = null, options = {}) {
   const entries = json?.feed?.entry
   const list = Array.isArray(entries) ? entries : entries ? [entries] : []
   const items = list
-    .map((entry, index) => normalizeChartEntry(entry, index))
+    .map((entry, index) => normalizeChartEntry(entry, index, kind))
     .filter(Boolean)
 
   try {
@@ -174,18 +191,19 @@ export async function fetchJapanMusicChart(genreId = null, options = {}) {
 
 /**
  * @param {string} term
- * @param {{ entity?: string, limit?: number }} [options]
+ * @param {{ entity?: string, media?: string, limit?: number }} [options]
  */
 export async function searchJapanMusic(term, options = {}) {
   const q = term.trim()
   if (!q) return []
 
   const entity = options.entity || 'song'
+  const media = options.media || (entity === 'musicVideo' ? 'musicVideo' : 'music')
   const limit = options.limit ?? 25
   const params = new URLSearchParams({
     term: q,
     country: 'jp',
-    media: 'music',
+    media,
     entity,
     limit: String(limit),
     lang: 'ja_jp',

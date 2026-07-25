@@ -34,8 +34,13 @@ export default function JapaneseMusic({ hidden = false }) {
     () => MUSIC_GENRES.find((g) => g.id === genreId) || MUSIC_GENRES[0],
     [genreId],
   )
+  const activeEntity = useMemo(
+    () => SEARCH_ENTITIES.find((e) => e.id === searchEntity) || SEARCH_ENTITIES[0],
+    [searchEntity],
+  )
   const isSearching = Boolean(debouncedQuery.trim())
   const showingFavorites = view === 'favorites' && !isSearching
+  const chartNeedsSearch = !activeEntity.chartFeed
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setEntered(true))
@@ -50,11 +55,18 @@ export default function JapaneseMusic({ hidden = false }) {
   }, [query])
 
   useEffect(() => {
+    if (chartNeedsSearch) {
+      setChartItems([])
+      setLoading(false)
+      setError('')
+      return undefined
+    }
+
     let cancelled = false
     setLoading(true)
     setError('')
 
-    fetchJapanMusicChart(activeGenre.genreId)
+    fetchJapanMusicChart(activeGenre.genreId, { feed: activeEntity.chartFeed })
       .then((list) => {
         if (!cancelled) setChartItems(list)
       })
@@ -71,7 +83,7 @@ export default function JapaneseMusic({ hidden = false }) {
     return () => {
       cancelled = true
     }
-  }, [activeGenre.genreId])
+  }, [activeGenre.genreId, activeEntity.chartFeed, chartNeedsSearch])
 
   useEffect(() => {
     const q = debouncedQuery.trim()
@@ -85,8 +97,7 @@ export default function JapaneseMusic({ hidden = false }) {
     setSearching(true)
     setError('')
 
-    const entityMeta = SEARCH_ENTITIES.find((e) => e.id === searchEntity) || SEARCH_ENTITIES[0]
-    searchJapanMusic(q, { entity: entityMeta.itunes })
+    searchJapanMusic(q, { entity: activeEntity.itunes, media: activeEntity.media })
       .then((list) => {
         if (!cancelled) setSearchItems(list)
       })
@@ -103,13 +114,15 @@ export default function JapaneseMusic({ hidden = false }) {
     return () => {
       cancelled = true
     }
-  }, [debouncedQuery, searchEntity])
+  }, [debouncedQuery, activeEntity])
 
   if (hidden) return null
 
   const visible = showingFavorites
     ? favorites
     : (isSearching ? searchItems : chartItems)
+
+  const chartHeading = `${activeGenre.label}${activeEntity.label}トップ`
 
   const syncFavorites = (library) => {
     setFavorites(Object.values(library).filter((item) => item?.id)
@@ -141,10 +154,12 @@ export default function JapaneseMusic({ hidden = false }) {
           <p className="jp-music-kicker">日本の音楽 · チャート</p>
           <h3 className="jp-music-heading">
             {isSearching
-              ? '検索結果'
+              ? `${activeEntity.label}の検索結果`
               : showingFavorites
                 ? 'お気に入り'
-                : `${activeGenre.label}トップ`}
+                : chartNeedsSearch
+                  ? '歌手を検索'
+                  : chartHeading}
           </h3>
         </div>
       </header>
@@ -173,23 +188,7 @@ export default function JapaneseMusic({ hidden = false }) {
 
       {!showingFavorites ? (
         <>
-          <div className="jp-music-tabs" role="tablist" aria-label="ジャンル">
-            {MUSIC_GENRES.map((genre) => (
-              <button
-                key={genre.id}
-                type="button"
-                role="tab"
-                aria-selected={genreId === genre.id}
-                className={genreId === genre.id ? 'is-active' : ''}
-                onClick={() => setGenreId(genre.id)}
-                disabled={isSearching}
-              >
-                {genre.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="jp-music-entities" role="group" aria-label="検索対象">
+          <div className="jp-music-entities" role="group" aria-label="表示対象">
             {SEARCH_ENTITIES.map((entity) => (
               <button
                 key={entity.id}
@@ -202,13 +201,35 @@ export default function JapaneseMusic({ hidden = false }) {
             ))}
           </div>
 
+          {!chartNeedsSearch || isSearching ? (
+            <div className="jp-music-tabs" role="tablist" aria-label="ジャンル">
+              {MUSIC_GENRES.map((genre) => (
+                <button
+                  key={genre.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={genreId === genre.id}
+                  className={genreId === genre.id ? 'is-active' : ''}
+                  onClick={() => setGenreId(genre.id)}
+                  disabled={isSearching}
+                >
+                  {genre.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
           <label className="jp-music-search">
-            <span className="sr-only">曲・歌手・アルバム・MVを検索</span>
+            <span className="sr-only">{activeEntity.label}を検索</span>
             <input
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="曲・歌手・アルバム・MVを検索…"
+              placeholder={
+                chartNeedsSearch
+                  ? '歌手名で検索…'
+                  : `${activeEntity.label}を検索…`
+              }
               autoComplete="off"
               spellCheck={false}
             />
@@ -222,7 +243,11 @@ export default function JapaneseMusic({ hidden = false }) {
       {error ? <p className="jp-music-error">{error}</p> : null}
       {!busy && !error && visible.length === 0 ? (
         <p className="jp-music-status">
-          {showingFavorites ? 'お気に入りはまだありません。' : '該当する作品がありません。'}
+          {showingFavorites
+            ? 'お気に入りはまだありません。'
+            : chartNeedsSearch && !isSearching
+              ? '歌手チャートはないので、上で名前を検索してください。'
+              : '該当する作品がありません。'}
         </p>
       ) : null}
 
