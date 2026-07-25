@@ -40,7 +40,6 @@ export default function JapaneseMusic({ hidden = false }) {
   )
   const isSearching = Boolean(debouncedQuery.trim())
   const showingFavorites = view === 'favorites' && !isSearching
-  const chartNeedsSearch = !activeEntity.chartFeed
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setEntered(true))
@@ -55,13 +54,6 @@ export default function JapaneseMusic({ hidden = false }) {
   }, [query])
 
   useEffect(() => {
-    if (chartNeedsSearch) {
-      setChartItems([])
-      setLoading(false)
-      setError('')
-      return undefined
-    }
-
     let cancelled = false
     setLoading(true)
     setError('')
@@ -83,7 +75,7 @@ export default function JapaneseMusic({ hidden = false }) {
     return () => {
       cancelled = true
     }
-  }, [activeGenre.genreId, activeEntity.chartFeed, chartNeedsSearch])
+  }, [activeGenre.genreId, activeEntity.chartFeed])
 
   useEffect(() => {
     const q = debouncedQuery.trim()
@@ -157,9 +149,7 @@ export default function JapaneseMusic({ hidden = false }) {
               ? `${activeEntity.label}の検索結果`
               : showingFavorites
                 ? 'お気に入り'
-                : chartNeedsSearch
-                  ? '歌手を検索'
-                  : chartHeading}
+                : chartHeading}
           </h3>
         </div>
       </header>
@@ -201,23 +191,21 @@ export default function JapaneseMusic({ hidden = false }) {
             ))}
           </div>
 
-          {!chartNeedsSearch || isSearching ? (
-            <div className="jp-music-tabs" role="tablist" aria-label="ジャンル">
-              {MUSIC_GENRES.map((genre) => (
-                <button
-                  key={genre.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={genreId === genre.id}
-                  className={genreId === genre.id ? 'is-active' : ''}
-                  onClick={() => setGenreId(genre.id)}
-                  disabled={isSearching}
-                >
-                  {genre.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
+          <div className="jp-music-tabs" role="tablist" aria-label="ジャンル">
+            {MUSIC_GENRES.map((genre) => (
+              <button
+                key={genre.id}
+                type="button"
+                role="tab"
+                aria-selected={genreId === genre.id}
+                className={genreId === genre.id ? 'is-active' : ''}
+                onClick={() => setGenreId(genre.id)}
+                disabled={isSearching}
+              >
+                {genre.label}
+              </button>
+            ))}
+          </div>
 
           <label className="jp-music-search">
             <span className="sr-only">{activeEntity.label}を検索</span>
@@ -225,11 +213,7 @@ export default function JapaneseMusic({ hidden = false }) {
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder={
-                chartNeedsSearch
-                  ? '歌手名で検索…'
-                  : `${activeEntity.label}を検索…`
-              }
+              placeholder={`${activeEntity.label}を検索…`}
               autoComplete="off"
               spellCheck={false}
             />
@@ -243,11 +227,7 @@ export default function JapaneseMusic({ hidden = false }) {
       {error ? <p className="jp-music-error">{error}</p> : null}
       {!busy && !error && visible.length === 0 ? (
         <p className="jp-music-status">
-          {showingFavorites
-            ? 'お気に入りはまだありません。'
-            : chartNeedsSearch && !isSearching
-              ? '歌手チャートはないので、上で名前を検索してください。'
-              : '該当する作品がありません。'}
+          {showingFavorites ? 'お気に入りはまだありません。' : '該当する作品がありません。'}
         </p>
       ) : null}
 
@@ -294,7 +274,9 @@ export default function JapaneseMusic({ hidden = false }) {
                 </a>
                 <p className="jp-music-artist">
                   <span className="jp-music-kind">{MUSIC_KIND_LABEL[item.kind] || item.kind}</span>
-                  {item.artist ? ` · ${item.artist}` : ''}
+                  {item.kind === 'artist'
+                    ? (item.genre ? ` · ${item.genre}` : '')
+                    : (item.artist ? ` · ${item.artist}` : '')}
                 </p>
               </div>
               <button

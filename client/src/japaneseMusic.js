@@ -1,5 +1,5 @@
 const CHART_CACHE_TTL_MS = 6 * 60 * 60 * 1000
-const CHART_CACHE_PREFIX = 'hana-jp-music-chart-v3:'
+const CHART_CACHE_PREFIX = 'hana-jp-music-chart-v4:'
 const LIBRARY_KEY = 'hana-jp-music-library'
 const LEGACY_PROGRESS_KEY = 'hana-jp-music-progress'
 const CHART_FETCH_LIMIT = 50
@@ -57,10 +57,10 @@ const SOFT_KEEP_GENRES = new Set([
   'フォーク',
 ])
 
-/** Chart/search target. Artist has no iTunes RSS chart — search only. */
+/** Chart/search target. Artist chart is derived from topsongs (no iTunes artist RSS). */
 export const SEARCH_ENTITIES = [
   { id: 'song', label: '曲', itunes: 'song', media: 'music', chartFeed: 'topsongs' },
-  { id: 'artist', label: '歌手', itunes: 'musicArtist', media: 'music', chartFeed: null },
+  { id: 'artist', label: '歌手', itunes: 'musicArtist', media: 'music', chartFeed: 'topartists' },
   { id: 'album', label: 'アルバム', itunes: 'album', media: 'music', chartFeed: 'topalbums' },
   { id: 'mv', label: 'MV', itunes: 'musicVideo', media: 'musicVideo', chartFeed: 'topmusicvideos' },
 ]
@@ -69,6 +69,7 @@ const CHART_KIND_BY_FEED = {
   topsongs: 'song',
   topalbums: 'album',
   topmusicvideos: 'mv',
+  topartists: 'artist',
 }
 
 export const MUSIC_KIND_LABEL = {
@@ -93,12 +94,16 @@ function numericIdFromItem(item) {
   return parts[1] || ''
 }
 
+function normalizeGenreKey(genre) {
+  return String(genre || '').trim().replace(/／/g, '/')
+}
+
 function hasStrongJapaneseScript(...parts) {
   return JP_STRONG_SCRIPT_RE.test(parts.filter(Boolean).join(' '))
 }
 
 function isExcludedGenre(genre) {
-  const g = String(genre || '').trim()
+  const g = normalizeGenreKey(genre)
   if (!g) return false
   if (EXCLUDED_GENRES.has(g)) return true
   if (g === 'J-Pop' || g === 'J-Rock' || g === 'J-Punk') return false
@@ -109,16 +114,17 @@ function isExcludedGenre(genre) {
 
 /**
  * Heuristic: keep domestic JP catalog, drop K-Pop / Western pop on the JP store.
- * @param {{ title?: string, artist?: string, album?: string, genre?: string }} item
+ * @param {{ title?: string, artist?: string, album?: string, genre?: string, kind?: string }} item
  */
 export function isJapaneseMusic(item) {
   if (!item) return false
-  const genre = String(item.genre || '').trim()
+  const genre = normalizeGenreKey(item.genre)
   if (isExcludedGenre(genre)) return false
   if (hasStrongJapaneseScript(item.title, item.artist, item.album)) return true
   if (genre && KEEP_GENRES.has(genre)) return true
   if (genre && SOFT_KEEP_GENRES.has(genre)) return true
-  // Katakana-only / Latin-only with no useful genre — drop
+  // Artists with unknown genre but matching a Japanese search — keep if not excluded
+  if (item.kind === 'artist' && !genre) return true
   return false
 }
 
@@ -153,10 +159,12 @@ async function enrichAndFilterJapanese(items, limit = CHART_DISPLAY_LIMIT) {
   const filtered = []
   for (const item of items) {
     const raw = lookup.get(numericIdFromItem(item))
-    const genre = raw?.primaryGenreName || item.genre || ''
+    const genre = normalizeGenreKey(raw?.primaryGenreName || item.genre || '')
     const next = {
       ...item,
       genre,
+      artistId: raw?.artistId ? String(raw.artistId) : item.artistId || null,
+      artistUrl: raw?.artistViewUrl || item.artistUrl || null,
       artwork: item.artwork || artworkUrl(raw?.artworkUrl100) || null,
       url: item.url || raw?.trackViewUrl || raw?.collectionViewUrl || raw?.artistLinkUrl || null,
       previewUrl: item.previewUrl || raw?.previewUrl || null,
@@ -164,6 +172,36 @@ async function enrichAndFilterJapanese(items, limit = CHART_DISPLAY_LIMIT) {
     if (isJapaneseMusic(next)) filtered.push(next)
   }
   return filtered.slice(0, limit).map((item, index) => ({ ...item, rank: index + 1 }))
+}
+
+/** Build a ranked artist list from filtered top songs. */
+function artistsFromSongs(songs, limit = CHART_DISPLAY_LIMIT) {
+  const seen = new Set()
+  const artists = []
+  for (const song of songs) {
+    const name = String(song.artist || '').trim()
+    if (!name) continue
+    const key = song.artistId ? `id:${song.artistId}` : `name:${name.toLowerCase()}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const artistNumericId = song.artistId || String(
+      [...name].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7),
+    )
+    artists.push({
+      id: makeId('artist', artistNumericId),
+      kind: 'artist',
+      title: name,
+      artist: name,
+      album: '',
+      artwork: song.artwork || null,
+      url: song.artistUrl || song.url || null,
+      previewUrl: null,
+      genre: song.genre || '',
+      rank: artists.length + 1,
+    })
+    if (artists.length >= limit) break
+  }
+  return artists
 }
 
 /** Normalize iTunes Search API result. */
@@ -278,7 +316,6 @@ export async function fetchJapanMusicChart(genreId = null, options = {}) {
   if (!feed) return []
 
   const fetchLimit = options.limit ?? CHART_FETCH_LIMIT
-  const kind = CHART_KIND_BY_FEED[feed] || 'song'
   const cacheKey = `${CHART_CACHE_PREFIX}${feed}-${genreId ?? 'all'}-${fetchLimit}`
 
   if (!options.force) {
@@ -295,8 +332,11 @@ export async function fetchJapanMusicChart(genreId = null, options = {}) {
     }
   }
 
+  // iTunes has no top-artists RSS — derive from topsongs.
+  const rssFeed = feed === 'topartists' ? 'topsongs' : feed
+  const kind = CHART_KIND_BY_FEED[rssFeed] || 'song'
   const genrePart = genreId != null ? `genre=${genreId}/` : ''
-  const url = `https://itunes.apple.com/jp/rss/${feed}/limit=${fetchLimit}/${genrePart}json`
+  const url = `https://itunes.apple.com/jp/rss/${rssFeed}/limit=${fetchLimit}/${genrePart}json`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`iTunes chart ${res.status}`)
 
@@ -306,7 +346,13 @@ export async function fetchJapanMusicChart(genreId = null, options = {}) {
   const rawItems = list
     .map((entry, index) => normalizeChartEntry(entry, index, kind))
     .filter(Boolean)
-  const items = await enrichAndFilterJapanese(rawItems, CHART_DISPLAY_LIMIT)
+
+  // Pull enough songs so artist chart still has ~30 unique names after filter.
+  const songLimit = feed === 'topartists' ? fetchLimit : CHART_DISPLAY_LIMIT
+  const songs = await enrichAndFilterJapanese(rawItems, songLimit)
+  const items = feed === 'topartists'
+    ? artistsFromSongs(songs, CHART_DISPLAY_LIMIT)
+    : songs
 
   try {
     sessionStorage.setItem(cacheKey, JSON.stringify({ fetchedAt: Date.now(), items }))
