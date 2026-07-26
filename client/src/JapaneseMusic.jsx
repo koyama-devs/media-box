@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+    countMusicLibraryByKind,
+    FAVORITE_KIND_FILTERS,
     fetchJapanMusicChart,
     listMusicLibrary,
     loadMusicLibrary,
@@ -13,17 +15,19 @@ import {
 const SEARCH_DEBOUNCE_MS = 320
 
 /**
- * Japanese music charts (iTunes JP) + favorites list.
+ * Music charts (iTunes) + favorites list split by kind.
  */
 export default function JapaneseMusic({ hidden = false }) {
-  const [genreId, setGenreId] = useState('jpop')
+  const [genreId, setGenreId] = useState('all')
   const [view, setView] = useState('chart') // chart | favorites
   const [searchEntity, setSearchEntity] = useState('song')
+  const [favoriteKind, setFavoriteKind] = useState('song')
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [chartItems, setChartItems] = useState([])
   const [searchItems, setSearchItems] = useState([])
-  const [favorites, setFavorites] = useState(() => listMusicLibrary())
+  const [favorites, setFavorites] = useState(() => listMusicLibrary('song'))
+  const [favoriteCounts, setFavoriteCounts] = useState(() => countMusicLibraryByKind())
   const [favoriteIds, setFavoriteIds] = useState(() => new Set(Object.keys(loadMusicLibrary())))
   const [loading, setLoading] = useState(true)
   const [searching, setSearching] = useState(false)
@@ -58,7 +62,7 @@ export default function JapaneseMusic({ hidden = false }) {
     setLoading(true)
     setError('')
 
-    fetchJapanMusicChart(activeGenre.genreId, { feed: activeEntity.chartFeed })
+    fetchJapanMusicChart(activeGenre, { feed: activeEntity.chartFeed })
       .then((list) => {
         if (!cancelled) setChartItems(list)
       })
@@ -75,7 +79,7 @@ export default function JapaneseMusic({ hidden = false }) {
     return () => {
       cancelled = true
     }
-  }, [activeGenre.genreId, activeEntity.chartFeed])
+  }, [activeGenre, activeEntity.chartFeed])
 
   useEffect(() => {
     const q = debouncedQuery.trim()
@@ -108,6 +112,11 @@ export default function JapaneseMusic({ hidden = false }) {
     }
   }, [debouncedQuery, activeEntity])
 
+  useEffect(() => {
+    if (!showingFavorites) return
+    setFavorites(listMusicLibrary(favoriteKind))
+  }, [showingFavorites, favoriteKind])
+
   if (hidden) return null
 
   const visible = showingFavorites
@@ -116,24 +125,42 @@ export default function JapaneseMusic({ hidden = false }) {
 
   const chartHeading = `${activeGenre.label}${activeEntity.label}トップ`
 
-  const syncFavorites = (library) => {
-    setFavorites(Object.values(library).filter((item) => item?.id)
-      .sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0)))
+  const syncFavorites = (library, preferKind) => {
+    const counts = { all: 0, song: 0, artist: 0, album: 0, mv: 0 }
+    const values = Object.values(library).filter((item) => item?.id)
+    for (const item of values) {
+      counts.all += 1
+      if (item.kind && counts[item.kind] != null) counts[item.kind] += 1
+    }
+    setFavoriteCounts(counts)
     setFavoriteIds(new Set(Object.keys(library)))
+    const kind = preferKind || favoriteKind
+    setFavorites(
+      values
+        .filter((item) => kind === 'all' || item.kind === kind)
+        .sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0)),
+    )
   }
 
   const handleToggleFavorite = (item) => {
     const { library, favorited } = toggleMusicFavorite(item)
-    syncFavorites(library)
-    if (favorited && isSearching) {
-      setQuery('')
-      setDebouncedQuery('')
-      setSearchItems([])
-      setView('favorites')
+    const nextKind = item.kind || 'song'
+    if (favorited) {
+      setFavoriteKind(nextKind)
+      syncFavorites(library, nextKind)
+      if (isSearching) {
+        setQuery('')
+        setDebouncedQuery('')
+        setSearchItems([])
+        setView('favorites')
+      }
+      return
     }
+    syncFavorites(library, favoriteKind)
   }
 
   const busy = isSearching ? searching : (!showingFavorites && loading)
+  const favoriteTotal = favoriteCounts.all || 0
 
   return (
     <section
@@ -148,7 +175,7 @@ export default function JapaneseMusic({ hidden = false }) {
             {isSearching
               ? `${activeEntity.label}の検索結果`
               : showingFavorites
-                ? 'お気に入り'
+                ? `お気に入り · ${FAVORITE_KIND_FILTERS.find((k) => k.id === favoriteKind)?.label || '曲'}`
                 : chartHeading}
           </h3>
         </div>
@@ -170,13 +197,31 @@ export default function JapaneseMusic({ hidden = false }) {
             setDebouncedQuery('')
             setSearchItems([])
             setView('favorites')
+            setFavorites(listMusicLibrary(favoriteKind))
+            setFavoriteCounts(countMusicLibraryByKind())
           }}
         >
-          お気に入り ({favorites.length})
+          お気に入り ({favoriteTotal})
         </button>
       </div>
 
-      {!showingFavorites ? (
+      {showingFavorites ? (
+        <div className="jp-music-entities" role="group" aria-label="お気に入りの種類">
+          {FAVORITE_KIND_FILTERS.map((kind) => (
+            <button
+              key={kind.id}
+              type="button"
+              className={favoriteKind === kind.id ? 'is-active' : ''}
+              onClick={() => setFavoriteKind(kind.id)}
+            >
+              {kind.label}
+              {kind.id === 'all'
+                ? ` (${favoriteCounts.all || 0})`
+                : ` (${favoriteCounts[kind.id] || 0})`}
+            </button>
+          ))}
+        </div>
+      ) : (
         <>
           <div className="jp-music-entities" role="group" aria-label="表示対象">
             {SEARCH_ENTITIES.map((entity) => (
@@ -219,7 +264,7 @@ export default function JapaneseMusic({ hidden = false }) {
             />
           </label>
         </>
-      ) : null}
+      )}
 
       {busy ? (
         <p className="jp-music-status">{isSearching ? '検索中…' : '読み込み中…'}</p>
@@ -227,7 +272,9 @@ export default function JapaneseMusic({ hidden = false }) {
       {error ? <p className="jp-music-error">{error}</p> : null}
       {!busy && !error && visible.length === 0 ? (
         <p className="jp-music-status">
-          {showingFavorites ? 'お気に入りはまだありません。' : '該当する作品がありません。'}
+          {showingFavorites
+            ? 'このお気に入りはまだありません。'
+            : '該当する作品がありません。'}
         </p>
       ) : null}
 

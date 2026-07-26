@@ -1,61 +1,23 @@
 const CHART_CACHE_TTL_MS = 6 * 60 * 60 * 1000
-const CHART_CACHE_PREFIX = 'hana-jp-music-chart-v4:'
+const CHART_CACHE_PREFIX = 'hana-jp-music-chart-v5:'
 const LIBRARY_KEY = 'hana-jp-music-library'
 const LEGACY_PROGRESS_KEY = 'hana-jp-music-progress'
 const CHART_FETCH_LIMIT = 50
 const CHART_DISPLAY_LIMIT = 30
 
-/** Japan-leaning genres only (Western / K-pop genre tabs removed). */
-/** @type {{ id: string, label: string, genreId: number|null }[]} */
+/**
+ * Chart categories. `store` chooses which iTunes store RSS to read.
+ * @type {{ id: string, label: string, store: string, genreId: number|null, keep?: string }[]}
+ */
 export const MUSIC_GENRES = [
-  { id: 'all', label: '総合', genreId: null },
-  { id: 'jpop', label: 'J-Pop', genreId: 27 },
-  { id: 'anime', label: 'アニメ', genreId: 29 },
-  { id: 'rock', label: 'ロック', genreId: 15 },
-  { id: 'karaoke', label: 'カラオケ', genreId: 51 },
+  { id: 'all', label: '総合', store: 'jp', genreId: null },
+  { id: 'jpop', label: 'J-Pop', store: 'jp', genreId: 27 },
+  { id: 'anime', label: 'アニメ', store: 'jp', genreId: 29 },
+  { id: 'kpop', label: 'K-Pop', store: 'jp', genreId: 51 },
+  { id: 'cpop', label: '華語', store: 'tw', genreId: null, keep: 'cpop' },
+  { id: 'western', label: '洋楽', store: 'us', genreId: null },
+  { id: 'rock', label: 'ロック', store: 'jp', genreId: 21 },
 ]
-
-const JP_STRONG_SCRIPT_RE = /[\u3040-\u309f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/
-
-/** Always drop — usually non-Japanese acts on the JP store. */
-const EXCLUDED_GENRES = new Set([
-  'K-Pop',
-  'ポップ',
-  'ラテン',
-  'カントリー',
-  'レゲエ',
-  'ブルース',
-  'ジャズ',
-  'クラシック',
-  'ワールドミュージック',
-  'ダンス',
-  'ワールド',
-])
-
-/** Strong Japan genre labels from iTunes JP. */
-const KEEP_GENRES = new Set([
-  'J-Pop',
-  'アニメ',
-  'アニメーション',
-  '演歌',
-  'カラオケ',
-  'ヴィジュアル系',
-  'J-Rock',
-  'J-Punk',
-  'アイドル',
-  '童謡/唱歌',
-  '伝統音楽',
-])
-
-/** Domestic-leaning genres that often use Latin artist names (Mrs. GREEN APPLE, Number_i). */
-const SOFT_KEEP_GENRES = new Set([
-  'ロック',
-  'エレクトロニック',
-  'ヒップホップ/ラップ',
-  'R&B/ソウル',
-  'サウンドトラック',
-  'フォーク',
-])
 
 /** Chart/search target. Artist chart is derived from topsongs (no iTunes artist RSS). */
 export const SEARCH_ENTITIES = [
@@ -63,6 +25,11 @@ export const SEARCH_ENTITIES = [
   { id: 'artist', label: '歌手', itunes: 'musicArtist', media: 'music', chartFeed: 'topartists' },
   { id: 'album', label: 'アルバム', itunes: 'album', media: 'music', chartFeed: 'topalbums' },
   { id: 'mv', label: 'MV', itunes: 'musicVideo', media: 'musicVideo', chartFeed: 'topmusicvideos' },
+]
+
+export const FAVORITE_KIND_FILTERS = [
+  { id: 'all', label: 'すべて' },
+  ...SEARCH_ENTITIES.map(({ id, label }) => ({ id, label })),
 ]
 
 const CHART_KIND_BY_FEED = {
@@ -98,46 +65,54 @@ function normalizeGenreKey(genre) {
   return String(genre || '').trim().replace(/／/g, '/')
 }
 
-function hasStrongJapaneseScript(...parts) {
-  return JP_STRONG_SCRIPT_RE.test(parts.filter(Boolean).join(' '))
+/** Prefer jp Apple Music links when the URL is store-scoped. */
+function preferJpStoreUrl(url) {
+  if (!url) return null
+  try {
+    const u = new URL(url)
+    if (u.hostname.includes('apple.com') || u.hostname.includes('itunes.apple.com')) {
+      u.pathname = u.pathname.replace(/^\/[a-z]{2}(?=\/)/i, '/jp')
+      if (u.searchParams.has('uo')) u.searchParams.set('uo', '4')
+      return u.toString()
+    }
+  } catch {
+    /* ignore */
+  }
+  return url
 }
 
-function isExcludedGenre(genre) {
-  const g = normalizeGenreKey(genre)
-  if (!g) return false
-  if (EXCLUDED_GENRES.has(g)) return true
-  if (g === 'J-Pop' || g === 'J-Rock' || g === 'J-Punk') return false
-  // スペイン語ポップ, 韓国ポップ, etc.
-  if (g.includes('ポップ') || /k-?pop/i.test(g)) return true
+/** Keep Mandopop / Taiwan / Cantonese-leaning rows from TW charts. */
+function isCpopItem(item) {
+  const genre = normalizeGenreKey(item?.genre)
+  if (/韓國|K-Pop|日本流行|J-Pop|基督教|クラシック|Classical/i.test(genre)) return false
+  if (/華語|台灣|国语|國語|粤语|粵語|廣東|广东|Mandarin|Cantonese|C-Pop/i.test(genre)) return true
+  const blob = `${item?.title || ''} ${item?.artist || ''}`
+  // Han characters without hiragana → likely C-Pop / Mandopop title
+  if (/[\u4e00-\u9fff]/.test(blob) && !/[\u3040-\u309f]/.test(blob)) return true
   return false
 }
 
-/**
- * Heuristic: keep domestic JP catalog, drop K-Pop / Western pop on the JP store.
- * @param {{ title?: string, artist?: string, album?: string, genre?: string, kind?: string }} item
- */
-export function isJapaneseMusic(item) {
-  if (!item) return false
-  const genre = normalizeGenreKey(item.genre)
-  if (isExcludedGenre(genre)) return false
-  if (hasStrongJapaneseScript(item.title, item.artist, item.album)) return true
-  if (genre && KEEP_GENRES.has(genre)) return true
-  if (genre && SOFT_KEEP_GENRES.has(genre)) return true
-  // Artists with unknown genre but matching a Japanese search — keep if not excluded
-  if (item.kind === 'artist' && !genre) return true
-  return false
+function applyKeepFilter(items, keep) {
+  if (!keep) return items
+  if (keep === 'cpop') {
+    return items
+      .filter(isCpopItem)
+      .map((item, index) => ({ ...item, rank: index + 1 }))
+  }
+  return items
 }
 
 /**
  * @param {string[]} ids
+ * @param {string} [store]
  * @returns {Promise<Map<string, object>>}
  */
-async function lookupItunesJp(ids) {
+async function lookupItunes(ids, store = 'jp') {
   const unique = [...new Set(ids.map(String).filter(Boolean))]
   const map = new Map()
   for (let i = 0; i < unique.length; i += 40) {
     const chunk = unique.slice(i, i + 40).join(',')
-    const res = await fetch(`https://itunes.apple.com/lookup?id=${chunk}&country=jp`)
+    const res = await fetch(`https://itunes.apple.com/lookup?id=${chunk}&country=${store}`)
     if (!res.ok) continue
     const json = await res.json()
     for (const row of json?.results || []) {
@@ -149,32 +124,36 @@ async function lookupItunesJp(ids) {
 }
 
 /**
- * Attach genre from lookup and keep Japanese-leaning rows; re-rank.
+ * Attach genre / artist metadata from lookup; re-rank.
  * @param {object[]} items
- * @param {number} [limit]
+ * @param {{ limit?: number, store?: string }} [options]
  */
-async function enrichAndFilterJapanese(items, limit = CHART_DISPLAY_LIMIT) {
+async function enrichChartItems(items, options = {}) {
+  const limit = options.limit ?? CHART_DISPLAY_LIMIT
+  const store = options.store || 'jp'
   if (!items.length) return []
-  const lookup = await lookupItunesJp(items.map(numericIdFromItem))
-  const filtered = []
+
+  const lookup = await lookupItunes(items.map(numericIdFromItem), store)
+  const enriched = []
   for (const item of items) {
     const raw = lookup.get(numericIdFromItem(item))
     const genre = normalizeGenreKey(raw?.primaryGenreName || item.genre || '')
-    const next = {
+    enriched.push({
       ...item,
       genre,
       artistId: raw?.artistId ? String(raw.artistId) : item.artistId || null,
-      artistUrl: raw?.artistViewUrl || item.artistUrl || null,
+      artistUrl: preferJpStoreUrl(raw?.artistViewUrl || item.artistUrl || null),
       artwork: item.artwork || artworkUrl(raw?.artworkUrl100) || null,
-      url: item.url || raw?.trackViewUrl || raw?.collectionViewUrl || raw?.artistLinkUrl || null,
+      url: preferJpStoreUrl(
+        item.url || raw?.trackViewUrl || raw?.collectionViewUrl || raw?.artistLinkUrl || null,
+      ),
       previewUrl: item.previewUrl || raw?.previewUrl || null,
-    }
-    if (isJapaneseMusic(next)) filtered.push(next)
+    })
   }
-  return filtered.slice(0, limit).map((item, index) => ({ ...item, rank: index + 1 }))
+  return enriched.slice(0, limit).map((item, index) => ({ ...item, rank: index + 1 }))
 }
 
-/** Build a ranked artist list from filtered top songs. */
+/** Build a ranked artist list from top songs. */
 function artistsFromSongs(songs, limit = CHART_DISPLAY_LIMIT) {
   const seen = new Set()
   const artists = []
@@ -207,7 +186,7 @@ function artistsFromSongs(songs, limit = CHART_DISPLAY_LIMIT) {
 /** Normalize iTunes Search API result. */
 export function normalizeSearchResult(item) {
   if (!item) return null
-  const genre = item.primaryGenreName || ''
+  const genre = normalizeGenreKey(item.primaryGenreName || '')
 
   if (item.wrapperType === 'track' && item.kind === 'song') {
     return {
@@ -217,7 +196,7 @@ export function normalizeSearchResult(item) {
       artist: item.artistName || '',
       album: item.collectionName || '',
       artwork: artworkUrl(item.artworkUrl100),
-      url: item.trackViewUrl || item.collectionViewUrl || null,
+      url: preferJpStoreUrl(item.trackViewUrl || item.collectionViewUrl || null),
       previewUrl: item.previewUrl || null,
       genre,
       rank: null,
@@ -232,7 +211,7 @@ export function normalizeSearchResult(item) {
       artist: item.artistName || '',
       album: item.collectionName || '',
       artwork: artworkUrl(item.artworkUrl100),
-      url: item.trackViewUrl || null,
+      url: preferJpStoreUrl(item.trackViewUrl || null),
       previewUrl: item.previewUrl || null,
       genre,
       rank: null,
@@ -247,7 +226,7 @@ export function normalizeSearchResult(item) {
       artist: item.artistName || '',
       album: item.collectionName || '',
       artwork: artworkUrl(item.artworkUrl100),
-      url: item.collectionViewUrl || null,
+      url: preferJpStoreUrl(item.collectionViewUrl || null),
       previewUrl: null,
       genre,
       rank: null,
@@ -262,7 +241,7 @@ export function normalizeSearchResult(item) {
       artist: item.artistName || '',
       album: '',
       artwork: null,
-      url: item.artistLinkUrl || null,
+      url: preferJpStoreUrl(item.artistLinkUrl || null),
       previewUrl: null,
       genre,
       rank: null,
@@ -273,7 +252,7 @@ export function normalizeSearchResult(item) {
 }
 
 /**
- * Normalize iTunes JP RSS chart entry (songs / albums / music videos).
+ * Normalize iTunes RSS chart entry (songs / albums / music videos).
  * @param {object} entry
  * @param {number} index
  * @param {'song'|'album'|'mv'} [kind]
@@ -289,6 +268,7 @@ export function normalizeChartEntry(entry, index, kind = 'song') {
   const link = Array.isArray(entry.link)
     ? entry.link.find((l) => l.attributes?.rel === 'alternate')?.attributes?.href
     : entry.link?.attributes?.href
+  const genre = normalizeGenreKey(entry.category?.attributes?.label || '')
 
   if (!numericId) return null
 
@@ -300,23 +280,26 @@ export function normalizeChartEntry(entry, index, kind = 'song') {
     artist,
     album: kind === 'album' ? title : albumName,
     artwork: artworkUrl(largest),
-    url: link || null,
+    url: preferJpStoreUrl(link || null),
     previewUrl: null,
-    genre: '',
+    genre,
     rank: index + 1,
   }
 }
 
 /**
- * @param {number|null} genreId
+ * @param {{ store?: string, genreId?: number|null, id?: string }} genre
  * @param {{ limit?: number, force?: boolean, feed?: string|null }} [options]
  */
-export async function fetchJapanMusicChart(genreId = null, options = {}) {
+export async function fetchJapanMusicChart(genre = {}, options = {}) {
   const feed = options.feed ?? 'topsongs'
   if (!feed) return []
 
+  const store = genre.store || 'jp'
+  const genreId = genre.genreId ?? null
+  const keep = genre.keep || null
   const fetchLimit = options.limit ?? CHART_FETCH_LIMIT
-  const cacheKey = `${CHART_CACHE_PREFIX}${feed}-${genreId ?? 'all'}-${fetchLimit}`
+  const cacheKey = `${CHART_CACHE_PREFIX}${store}-${feed}-${genreId ?? 'all'}-${keep || 'any'}-${fetchLimit}`
 
   if (!options.force) {
     try {
@@ -336,7 +319,7 @@ export async function fetchJapanMusicChart(genreId = null, options = {}) {
   const rssFeed = feed === 'topartists' ? 'topsongs' : feed
   const kind = CHART_KIND_BY_FEED[rssFeed] || 'song'
   const genrePart = genreId != null ? `genre=${genreId}/` : ''
-  const url = `https://itunes.apple.com/jp/rss/${rssFeed}/limit=${fetchLimit}/${genrePart}json`
+  const url = `https://itunes.apple.com/${store}/rss/${rssFeed}/limit=${fetchLimit}/${genrePart}json`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`iTunes chart ${res.status}`)
 
@@ -347,9 +330,10 @@ export async function fetchJapanMusicChart(genreId = null, options = {}) {
     .map((entry, index) => normalizeChartEntry(entry, index, kind))
     .filter(Boolean)
 
-  // Pull enough songs so artist chart still has ~30 unique names after filter.
-  const songLimit = feed === 'topartists' ? fetchLimit : CHART_DISPLAY_LIMIT
-  const songs = await enrichAndFilterJapanese(rawItems, songLimit)
+  const songLimit = feed === 'topartists' || keep ? fetchLimit : CHART_DISPLAY_LIMIT
+  const enriched = await enrichChartItems(rawItems, { limit: songLimit, store })
+  const songs = applyKeepFilter(enriched, keep).slice(0, CHART_DISPLAY_LIMIT)
+    .map((item, index) => ({ ...item, rank: index + 1 }))
   const items = feed === 'topartists'
     ? artistsFromSongs(songs, CHART_DISPLAY_LIMIT)
     : songs
@@ -373,7 +357,7 @@ export async function searchJapanMusic(term, options = {}) {
 
   const entity = options.entity || 'song'
   const media = options.media || (entity === 'musicVideo' ? 'musicVideo' : 'music')
-  const limit = options.limit ?? 40
+  const limit = options.limit ?? 25
   const params = new URLSearchParams({
     term: q,
     country: 'jp',
@@ -388,11 +372,7 @@ export async function searchJapanMusic(term, options = {}) {
 
   const json = await res.json()
   const results = Array.isArray(json?.results) ? json.results : []
-  return results
-    .map(normalizeSearchResult)
-    .filter(Boolean)
-    .filter(isJapaneseMusic)
-    .slice(0, 25)
+  return results.map(normalizeSearchResult).filter(Boolean)
 }
 
 /** @returns {Record<string, object>} */
@@ -408,10 +388,23 @@ export function loadMusicLibrary() {
 }
 
 /** @returns {object[]} newest favorites first */
-export function listMusicLibrary() {
-  return Object.values(loadMusicLibrary())
+export function listMusicLibrary(kind = 'all') {
+  const all = Object.values(loadMusicLibrary())
     .filter((item) => item?.id)
     .sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))
+  if (!kind || kind === 'all') return all
+  return all.filter((item) => item.kind === kind)
+}
+
+/** @returns {Record<string, number>} */
+export function countMusicLibraryByKind() {
+  const counts = { all: 0, song: 0, artist: 0, album: 0, mv: 0 }
+  for (const item of Object.values(loadMusicLibrary())) {
+    if (!item?.id) continue
+    counts.all += 1
+    if (item.kind && counts[item.kind] != null) counts[item.kind] += 1
+  }
+  return counts
 }
 
 export function isMusicFavorite(id) {
@@ -444,6 +437,7 @@ export function addMusicFavorite(item) {
       artwork: item.artwork || null,
       url: item.url || null,
       previewUrl: item.previewUrl || null,
+      genre: item.genre || '',
       rank: null,
       savedAt: Date.now(),
     },
