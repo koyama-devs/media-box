@@ -549,7 +549,7 @@ export default function SeasonalAnime({ hidden = false }) {
                 ) : previewSynopsis ? (
                   <p className="seasonal-anime-preview-desc">{previewSynopsis}</p>
                 ) : (
-                  <p className="seasonal-anime-preview-desc is-empty">日本語あらすじが見つかりません</p>
+                  <p className="seasonal-anime-preview-desc is-empty">あらすじが見つかりません</p>
                 )}
                 <div className="seasonal-anime-preview-actions">
                   <a

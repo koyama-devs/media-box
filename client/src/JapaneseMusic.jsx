@@ -138,12 +138,12 @@ export default function JapaneseMusic({ hidden = false }) {
   return (
     <section
       className={`jp-music${entered ? ' is-visible' : ''}`}
-      aria-label="日本の音楽"
+      aria-label="ミュージック"
     >
       <header className="jp-music-header">
         <div className="jp-music-seal" aria-hidden="true">音</div>
         <div className="jp-music-titles">
-          <p className="jp-music-kicker">日本の音楽のみ · チャート</p>
+          <p className="jp-music-kicker">ミュージック · チャート</p>
           <h3 className="jp-music-heading">
             {isSearching
               ? `${activeEntity.label}の検索結果`
