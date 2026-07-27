@@ -80,7 +80,7 @@ const BookReader = lazy(() => import('./BookReader'))
 const AUTH_KEY = 'media-share-lite-auth'
 const AUTH_ROLE_KEY = 'media-share-lite-role'
 const OWNER_PASSWORDS = new Set(['hana'])
-const PASSWORDS = new Set(['hiro', 'zen', 'gabusan' ])
+const PASSWORDS = new Set(['hiro', 'zen', 'gabusan', 'hana'])
 const TRACK_QUERY_KEY = 'track'
 
 function readStoredAuthRole() {
