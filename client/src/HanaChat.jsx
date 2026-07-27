@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import hanachanArt from './assets/hanachan.svg'
 import {
     chatWithHanachan,
-    ensureGuestAuth,
+    ensureGuestChatId,
     getFirebaseErrorMessage,
     guestLabelFromUid,
     isAdminUser,
@@ -25,11 +25,13 @@ const AI_WELCOME = {
  * Floating Hanachan / Hana chat.
  * - はなちゃん: AI companion (Cloud Function)
  * - はな: realtime Firestore inbox with the human owner
+ * Guests use a localStorage UUID thread id (no Anonymous Auth).
  */
 export default function HanaChat({ hidden = false }) {
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState('hanachan') // hanachan | hana
   const [authUser, setAuthUser] = useState(null)
+  const [guestChatId, setGuestChatId] = useState('')
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -42,8 +44,6 @@ export default function HanaChat({ hidden = false }) {
   const listRef = useRef(null)
 
   const isOwner = isAdminUser(authUser)
-  const guestUid = authUser && !isOwner ? authUser.uid : null
-  const guestLabel = guestUid ? guestLabelFromUid(guestUid) : ''
 
   const unreadLauncher = useMemo(() => {
     if (isOwner) return threads.filter((t) => t.unreadByHana).length
@@ -56,15 +56,9 @@ export default function HanaChat({ hidden = false }) {
   }, [hidden])
 
   useEffect(() => {
-    if (hidden) return undefined
-    let cancelled = false
-    ensureGuestAuth().catch((err) => {
-      if (!cancelled && open) setError(getFirebaseErrorMessage(err) || 'ログインに失敗しました。')
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [hidden, open])
+    if (hidden) return
+    setGuestChatId(ensureGuestChatId())
+  }, [hidden])
 
   useEffect(() => {
     if (hidden || !isOwner) {
@@ -78,18 +72,18 @@ export default function HanaChat({ hidden = false }) {
   }, [hidden, isOwner])
 
   useEffect(() => {
-    if (hidden || isOwner || !guestUid) {
-      if (!guestUid) setOwnThread(null)
+    if (hidden || isOwner || !guestChatId) {
+      if (!guestChatId) setOwnThread(null)
       return undefined
     }
     return subscribeOwnChatThread(
-      guestUid,
+      guestChatId,
       (next) => setOwnThread(next),
       () => {},
     )
-  }, [hidden, isOwner, guestUid])
+  }, [hidden, isOwner, guestChatId])
 
-  const hanaThreadId = isOwner ? activeThreadId : guestUid
+  const hanaThreadId = isOwner ? activeThreadId : guestChatId
 
   useEffect(() => {
     if (hidden || mode !== 'hana' || !hanaThreadId) {
@@ -151,26 +145,25 @@ export default function HanaChat({ hidden = false }) {
           ...prev,
           { id: `h-${Date.now()}`, role: 'hanachan', text: reply },
         ])
-      } else {
-        const user = await ensureGuestAuth()
-        if (isOwner) {
-          if (!activeThreadId) {
-            setError('返信する相手を選んでください。')
-            return
-          }
-          await sendChatMessage({
-            threadId: activeThreadId,
-            text,
-            sender: 'hana',
-          })
-        } else {
-          await sendChatMessage({
-            threadId: user.uid,
-            text,
-            sender: 'guest',
-            guestLabel: guestLabelFromUid(user.uid),
-          })
+      } else if (isOwner) {
+        if (!activeThreadId) {
+          setError('返信する相手を選んでください。')
+          return
         }
+        await sendChatMessage({
+          threadId: activeThreadId,
+          text,
+          sender: 'hana',
+        })
+      } else {
+        const threadId = guestChatId || ensureGuestChatId()
+        if (!guestChatId) setGuestChatId(threadId)
+        await sendChatMessage({
+          threadId,
+          text,
+          sender: 'guest',
+          guestLabel: guestLabelFromUid(threadId),
+        })
       }
     } catch (err) {
       console.error(err)

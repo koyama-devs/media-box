@@ -6,7 +6,6 @@ import {
     getRedirectResult,
     GoogleAuthProvider,
     onAuthStateChanged,
-    signInAnonymously,
     signInWithEmailAndPassword,
     signInWithPopup,
     signInWithRedirect,
@@ -69,6 +68,7 @@ const SHARED_STATE_COLLECTION = 'shared-state'
 const SHARED_PLAYLISTS_DOC = 'playlists'
 const SHARED_SPACES_DOC = 'spaces'
 const CHAT_THREADS_COLLECTION = 'chatThreads'
+const GUEST_CHAT_ID_KEY = 'hana-chat-guest-id'
 const GUEST_LABELS = ['桜', '蜜', '月', '風', '霧', '蝶', '鈴', '露', '霞', '羽']
 
 const functions = getFunctions(app, 'asia-northeast1')
@@ -196,7 +196,6 @@ export function isAdminUser(user) {
 
 export function subscribeToAdminAuth(onChange) {
   return onAuthStateChanged(auth, (user) => {
-    // Keep anonymous guests for Hana chat; only eject non-allowlisted named accounts.
     if (user && !user.isAnonymous && !isAdminEmailAllowed(user.email)) {
       signOut(auth).finally(() => onChange(null))
       return
@@ -205,22 +204,32 @@ export function subscribeToAdminAuth(onChange) {
   })
 }
 
-/** Any Firebase auth user (admin or anonymous guest). */
+/** Admin Firebase auth only (guests use localStorage chat id, not Auth). */
 export function subscribeToAuthUser(onChange) {
-  return onAuthStateChanged(auth, onChange)
+  return onAuthStateChanged(auth, (user) => {
+    onChange(isAdminUser(user) ? user : null)
+  })
 }
 
 /**
- * Ensure a Firebase Auth session for chat.
- * Admins keep their session; others get anonymous auth (enable Anonymous in console).
+ * Stable guest thread id in localStorage (no Anonymous Auth required).
+ * @returns {string}
  */
-export async function ensureGuestAuth() {
-  const current = auth.currentUser
-  if (current) {
-    if (isAdminUser(current) || current.isAnonymous) return current
+export function ensureGuestChatId() {
+  try {
+    const existing = localStorage.getItem(GUEST_CHAT_ID_KEY)
+    if (existing && /^[a-zA-Z0-9_-]{8,128}$/.test(existing)) return existing
+    const id = globalThis.crypto?.randomUUID?.()
+      || `g-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+    localStorage.setItem(GUEST_CHAT_ID_KEY, id)
+    return id
+  } catch {
+    if (!ensureGuestChatId._fallback) {
+      ensureGuestChatId._fallback = globalThis.crypto?.randomUUID?.()
+        || `g-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+    }
+    return ensureGuestChatId._fallback
   }
-  const credential = await signInAnonymously(auth)
-  return credential.user
 }
 
 export function guestLabelFromUid(uid) {
