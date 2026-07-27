@@ -26,6 +26,8 @@ import {
   updatePlaylistOrder,
   uploadMediaFile,
 } from './firebase'
+import HanaChat from './HanaChat.jsx'
+import JapaneseMusic from './JapaneseMusic.jsx'
 import ListeningPostcard from './ListeningPostcard'
 import ListeningSpace, { ListeningSpaceSettings } from './ListeningSpace'
 import {
@@ -48,8 +50,6 @@ import { pickPostcardLyric } from './lyrics'
 import LyricsPanel from './LyricsPanel'
 import { blobToThumbnailUrl, mapPool } from './mediaPerf'
 import SeasonalAnime from './SeasonalAnime.jsx'
-import JapaneseMusic from './JapaneseMusic.jsx'
-import HanaChat from './HanaChat.jsx'
 import {
   appendTodayRecordHistory,
   formatTodayDateLabel,
@@ -78,7 +78,7 @@ import VinylPlayer from './VinylPlayer'
 const BookReader = lazy(() => import('./BookReader'))
 
 const AUTH_KEY = 'media-share-lite-auth'
-const PASSWORDS = new Set(['hiro', 'zen'])
+const PASSWORDS = new Set(['hiro', 'zen','gabusan'])
 const TRACK_QUERY_KEY = 'track'
 
 function getTrackShareUrl(itemId) {
