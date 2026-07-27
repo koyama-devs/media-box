@@ -22,6 +22,13 @@ service cloud.firestore {
         && request.resource.data.sender in ['guest', 'hana'];
     }
 
+    function isValidChatMessageUpdate() {
+      return request.resource.data.sender == resource.data.sender
+        && request.resource.data.sender in ['guest', 'hana']
+        && request.resource.data.text is string
+        && request.resource.data.text.size() <= 2000;
+    }
+
     match /media-items/{itemId} {
       allow read, write: if true;
 
@@ -60,7 +67,8 @@ service cloud.firestore {
       match /messages/{messageId} {
         allow read: if true;
         allow create: if isValidChatMessage();
-        allow update, delete: if isAdmin();
+        allow update: if isValidChatMessageUpdate();
+        allow delete: if true;
       }
     }
 

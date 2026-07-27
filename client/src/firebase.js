@@ -24,6 +24,7 @@ import {
     query,
     serverTimestamp,
     setDoc,
+    updateDoc,
     writeBatch,
 } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions'
@@ -70,6 +71,18 @@ const SHARED_SPACES_DOC = 'spaces'
 const CHAT_THREADS_COLLECTION = 'chatThreads'
 const GUEST_CHAT_ID_KEY = 'hana-chat-guest-id'
 const GUEST_LABELS = ['桜', '蜜', '月', '風', '霧', '蝶', '鈴', '露', '霞', '羽']
+
+/** Password → guest identity (display in UI + how Hanachan addresses them). */
+export const GUEST_PROFILES = {
+  hiro: { key: 'hiro', displayName: 'ヒロ', addressAs: 'ヒロ' },
+  zen: { key: 'zen', displayName: 'ぜん', addressAs: 'ぜん' },
+  gabusan: { key: 'gabusan', displayName: 'ガブリエル', addressAs: 'ガブさん' },
+}
+
+export function getGuestProfile(guestKey) {
+  const key = String(guestKey || '').trim().toLowerCase()
+  return GUEST_PROFILES[key] || null
+}
 
 const functions = getFunctions(app, 'asia-northeast1')
 const SPACE_PARTICLE_TYPES = new Set(['stars', 'rain', 'mist', 'petals'])
@@ -212,16 +225,33 @@ export function subscribeToAuthUser(onChange) {
 }
 
 /**
- * Stable guest thread id in localStorage (no Anonymous Auth required).
+ * Stable guest thread id per password guest (separate history per guest).
+ * Known guests use deterministic ids: guest-hiro, guest-zen, guest-gabusan.
+ * @param {string} [guestKey]
  * @returns {string}
  */
-export function ensureGuestChatId() {
+export function ensureGuestChatId(guestKey = 'guest') {
+  const profile = getGuestProfile(guestKey)
+  if (profile) {
+    const id = `guest-${profile.key}`
+    try {
+      localStorage.setItem(`${GUEST_CHAT_ID_KEY}:${profile.key}`, id)
+    } catch {
+      /* ignore */
+    }
+    return id
+  }
+
+  const storageKey = `${GUEST_CHAT_ID_KEY}:${guestKey || 'guest'}`
   try {
-    const existing = localStorage.getItem(GUEST_CHAT_ID_KEY)
-    if (existing && /^[a-zA-Z0-9_-]{8,128}$/.test(existing)) return existing
+    const existing = localStorage.getItem(storageKey) || localStorage.getItem(GUEST_CHAT_ID_KEY)
+    if (existing && /^[a-zA-Z0-9_-]{8,128}$/.test(existing)) {
+      localStorage.setItem(storageKey, existing)
+      return existing
+    }
     const id = globalThis.crypto?.randomUUID?.()
       || `g-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
-    localStorage.setItem(GUEST_CHAT_ID_KEY, id)
+    localStorage.setItem(storageKey, id)
     return id
   } catch {
     if (!ensureGuestChatId._fallback) {
@@ -234,6 +264,10 @@ export function ensureGuestChatId() {
 
 export function guestLabelFromUid(uid) {
   const raw = String(uid || 'guest')
+  const known = raw.match(/^guest-(hiro|zen|gabusan)$/i)
+  if (known) {
+    return GUEST_PROFILES[known[1].toLowerCase()]?.displayName || raw
+  }
   let hash = 0
   for (let i = 0; i < raw.length; i += 1) {
     hash = (hash * 31 + raw.charCodeAt(i)) >>> 0
@@ -244,23 +278,100 @@ export function guestLabelFromUid(uid) {
 }
 
 function serializeChatMessage(id, data) {
+  const deleted = Boolean(data?.deleted)
   return {
     id,
-    text: String(data?.text || ''),
+    text: deleted ? '（削除されたメッセージ）' : String(data?.text || ''),
+    rawText: String(data?.text || ''),
     sender: data?.sender === 'hana' ? 'hana' : 'guest',
     createdAt: data?.createdAt?.toDate?.()?.toISOString?.() || data?.createdAtIso || null,
+    editedAt: data?.editedAt?.toDate?.()?.toISOString?.() || data?.editedAtIso || null,
+    deleted,
+    replyTo: data?.replyToId
+      ? {
+          id: String(data.replyToId),
+          text: String(data.replyToText || ''),
+          sender: data.replyToSender === 'hana' ? 'hana' : data.replyToSender === 'hanachan' ? 'hanachan' : 'guest',
+        }
+      : null,
   }
 }
 
 function serializeChatThread(id, data) {
   return {
     id,
+    guestKey: data?.guestKey || (String(id).match(/^guest-(.+)$/) || [])[1] || '',
     guestLabel: data?.guestLabel || guestLabelFromUid(id),
     lastText: String(data?.lastText || ''),
     updatedAt: data?.updatedAt?.toDate?.()?.toISOString?.() || data?.updatedAtIso || null,
     unreadByHana: Boolean(data?.unreadByHana),
     unreadByGuest: Boolean(data?.unreadByGuest),
+    hanaLastReadAt: data?.hanaLastReadAt?.toDate?.()?.toISOString?.() || data?.hanaLastReadAtIso || null,
+    guestLastReadAt: data?.guestLastReadAt?.toDate?.()?.toISOString?.() || data?.guestLastReadAtIso || null,
+    guestOnlineAt: data?.guestOnlineAt?.toDate?.()?.toISOString?.() || data?.guestOnlineAtIso || null,
+    hanaOnlineAt: data?.hanaOnlineAt?.toDate?.()?.toISOString?.() || data?.hanaOnlineAtIso || null,
   }
+}
+
+const PRESENCE_ONLINE_MS = 45_000
+
+/** True if last heartbeat is recent enough to count as online. */
+export function isPresenceOnline(iso, now = Date.now()) {
+  if (!iso) return false
+  const t = new Date(iso).getTime()
+  if (Number.isNaN(t)) return false
+  return now - t <= PRESENCE_ONLINE_MS
+}
+
+/**
+ * Heartbeat while chat UI is open.
+ * @param {string} threadId
+ * @param {'guest'|'hana'} role
+ */
+export async function pulseChatPresence(threadId, role) {
+  if (!threadId || (role !== 'guest' && role !== 'hana')) return
+  const nowIso = new Date().toISOString()
+  const patch = role === 'hana'
+    ? { hanaOnlineAt: serverTimestamp(), hanaOnlineAtIso: nowIso }
+    : { guestOnlineAt: serverTimestamp(), guestOnlineAtIso: nowIso }
+  await setDoc(doc(db, CHAT_THREADS_COLLECTION, threadId), patch, { merge: true })
+}
+
+/** Format message timestamp for chat UI (Asia/Tokyo-friendly local). */
+export function formatChatTimestamp(iso) {
+  if (!iso) return ''
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  const now = new Date()
+  const sameDay = date.toDateString() === now.toDateString()
+  const time = date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', hour12: false })
+  if (sameDay) return time
+  const day = date.toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' })
+  return `${day} ${time}`
+}
+
+/**
+ * Delivery status for messages the current viewer sent.
+ * @param {{ sender: string, createdAt?: string|null }} message
+ * @param {{ hanaLastReadAt?: string|null, guestLastReadAt?: string|null }|null} thread
+ * @param {'guest'|'hana'} viewer
+ * @returns {'sent'|'read'|null}
+ */
+export function getMessageDeliveryStatus(message, thread, viewer) {
+  if (!message || (viewer !== 'guest' && viewer !== 'hana')) return null
+  if (message.sender !== viewer) return null
+  if (!message.createdAt) return 'sent'
+  const readAt = viewer === 'guest' ? thread?.hanaLastReadAt : thread?.guestLastReadAt
+  if (readAt && new Date(readAt).getTime() >= new Date(message.createdAt).getTime()) {
+    return 'read'
+  }
+  return 'sent'
+}
+
+export function deliveryStatusLabel(status) {
+  if (status === 'read') return '既読'
+  if (status === 'sent') return '送信済'
+  return ''
 }
 
 /** @returns {() => void} */
@@ -319,9 +430,16 @@ export function subscribeChatThreads(onData, onError) {
 }
 
 /**
- * @param {{ threadId: string, text: string, sender: 'guest'|'hana', guestLabel?: string }} payload
+ * @param {{
+ *   threadId: string,
+ *   text: string,
+ *   sender: 'guest'|'hana',
+ *   guestLabel?: string,
+ *   guestKey?: string,
+ *   replyTo?: { id: string, text: string, sender: string }|null,
+ * }} payload
  */
-export async function sendChatMessage({ threadId, text, sender, guestLabel }) {
+export async function sendChatMessage({ threadId, text, sender, guestLabel, guestKey, replyTo }) {
   const trimmed = String(text || '').trim()
   if (!threadId || !trimmed) return null
   if (trimmed.length > 2000) {
@@ -334,11 +452,14 @@ export async function sendChatMessage({ threadId, text, sender, guestLabel }) {
   const threadRef = doc(db, CHAT_THREADS_COLLECTION, threadId)
   const messagesRef = collection(threadRef, 'messages')
   const nowIso = new Date().toISOString()
+  const label = guestLabel || guestLabelFromUid(threadId)
+  const key = guestKey || getGuestProfile(String(threadId).replace(/^guest-/, ''))?.key || ''
 
   await setDoc(
     threadRef,
     {
-      guestLabel: guestLabel || guestLabelFromUid(threadId),
+      guestLabel: label,
+      ...(key ? { guestKey: key } : {}),
       lastText: trimmed.slice(0, 160),
       updatedAt: serverTimestamp(),
       updatedAtIso: nowIso,
@@ -348,33 +469,118 @@ export async function sendChatMessage({ threadId, text, sender, guestLabel }) {
     { merge: true },
   )
 
-  const messageRef = await addDoc(messagesRef, {
+  const payload = {
     text: trimmed,
     sender: role,
     createdAt: serverTimestamp(),
     createdAtIso: nowIso,
-  })
+    deleted: false,
+  }
+  if (replyTo?.id) {
+    payload.replyToId = String(replyTo.id)
+    payload.replyToText = String(replyTo.text || '').slice(0, 120)
+    payload.replyToSender = String(replyTo.sender || 'guest')
+  }
 
+  const messageRef = await addDoc(messagesRef, payload)
   return messageRef.id
+}
+
+export async function updateChatMessage({ threadId, messageId, text }) {
+  const trimmed = String(text || '').trim()
+  if (!threadId || !messageId || !trimmed) return
+  if (trimmed.length > 2000) {
+    const error = new Error('メッセージが長すぎます。')
+    error.code = 'chat/too-long'
+    throw error
+  }
+  const nowIso = new Date().toISOString()
+  await updateDoc(doc(db, CHAT_THREADS_COLLECTION, threadId, 'messages', messageId), {
+    text: trimmed,
+    editedAt: serverTimestamp(),
+    editedAtIso: nowIso,
+    deleted: false,
+  })
+  await setDoc(
+    doc(db, CHAT_THREADS_COLLECTION, threadId),
+    {
+      lastText: trimmed.slice(0, 160),
+      updatedAt: serverTimestamp(),
+      updatedAtIso: nowIso,
+    },
+    { merge: true },
+  )
+}
+
+export async function softDeleteChatMessage({ threadId, messageId }) {
+  if (!threadId || !messageId) return
+  const nowIso = new Date().toISOString()
+  await updateDoc(doc(db, CHAT_THREADS_COLLECTION, threadId, 'messages', messageId), {
+    text: '（削除されたメッセージ）',
+    deleted: true,
+    editedAt: serverTimestamp(),
+    editedAtIso: nowIso,
+    deletedAtIso: nowIso,
+  })
+  await setDoc(
+    doc(db, CHAT_THREADS_COLLECTION, threadId),
+    {
+      lastText: '（削除されたメッセージ）',
+      updatedAt: serverTimestamp(),
+      updatedAtIso: nowIso,
+    },
+    { merge: true },
+  )
 }
 
 export async function markThreadRead(threadId, reader) {
   if (!threadId) return
+  const nowIso = new Date().toISOString()
   const patch = reader === 'hana'
-    ? { unreadByHana: false }
-    : { unreadByGuest: false }
+    ? {
+        unreadByHana: false,
+        hanaLastReadAt: serverTimestamp(),
+        hanaLastReadAtIso: nowIso,
+      }
+    : {
+        unreadByGuest: false,
+        guestLastReadAt: serverTimestamp(),
+        guestLastReadAtIso: nowIso,
+      }
   await setDoc(doc(db, CHAT_THREADS_COLLECTION, threadId), patch, { merge: true })
+}
+
+/** Ensure a known guest thread doc exists (admin roster / open chat). */
+export async function ensureChatThread({ threadId, guestLabel, guestKey }) {
+  if (!threadId) return null
+  const nowIso = new Date().toISOString()
+  const profile = getGuestProfile(guestKey) || getGuestProfile(String(threadId).replace(/^guest-/, ''))
+  await setDoc(
+    doc(db, CHAT_THREADS_COLLECTION, threadId),
+    {
+      guestLabel: guestLabel || profile?.displayName || guestLabelFromUid(threadId),
+      guestKey: guestKey || profile?.key || '',
+      updatedAt: serverTimestamp(),
+      updatedAtIso: nowIso,
+      unreadByHana: false,
+      unreadByGuest: false,
+    },
+    { merge: true },
+  )
+  return threadId
 }
 
 /**
  * Call Cloud Function `chatHanachan`.
- * @param {{ message: string, history?: { role: string, text: string }[] }} payload
+ * @param {{ message: string, history?: { role: string, text: string }[], guestName?: string, addressAs?: string }} payload
  */
 export async function chatWithHanachan(payload) {
   const callable = httpsCallable(functions, 'chatHanachan')
   const result = await callable({
     message: String(payload?.message || '').trim(),
     history: Array.isArray(payload?.history) ? payload.history.slice(-12) : [],
+    guestName: String(payload?.guestName || '').trim().slice(0, 40),
+    addressAs: String(payload?.addressAs || '').trim().slice(0, 40),
   })
   return result?.data || { reply: '' }
 }

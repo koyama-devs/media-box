@@ -79,6 +79,7 @@ const BookReader = lazy(() => import('./BookReader'))
 
 const AUTH_KEY = 'media-share-lite-auth'
 const AUTH_ROLE_KEY = 'media-share-lite-role'
+const AUTH_GUEST_KEY = 'media-share-lite-guest'
 const OWNER_PASSWORDS = new Set(['hana'])
 const PASSWORDS = new Set(['hiro', 'zen', 'gabusan', 'hana'])
 const TRACK_QUERY_KEY = 'track'
@@ -88,6 +89,15 @@ function readStoredAuthRole() {
     return window.localStorage.getItem(AUTH_ROLE_KEY) === 'owner' ? 'owner' : 'guest'
   } catch {
     return 'guest'
+  }
+}
+
+function readStoredGuestKey() {
+  try {
+    const key = String(window.localStorage.getItem(AUTH_GUEST_KEY) || '').trim().toLowerCase()
+    return key && !OWNER_PASSWORDS.has(key) ? key : ''
+  } catch {
+    return ''
   }
 }
 
@@ -319,6 +329,7 @@ function App() {
     }
   })
   const [authRole, setAuthRole] = useState(() => readStoredAuthRole())
+  const [guestKey, setGuestKey] = useState(() => readStoredGuestKey())
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [items, setItems] = useState([])
@@ -1966,13 +1977,20 @@ const playPrevious = useCallback(() => {
 
     if (PASSWORDS.has(password)) {
       const role = OWNER_PASSWORDS.has(password) ? 'owner' : 'guest'
+      const nextGuestKey = role === 'guest' ? password : ''
       try {
         window.localStorage.setItem(AUTH_KEY, 'true')
         window.localStorage.setItem(AUTH_ROLE_KEY, role)
+        if (nextGuestKey) {
+          window.localStorage.setItem(AUTH_GUEST_KEY, nextGuestKey)
+        } else {
+          window.localStorage.removeItem(AUTH_GUEST_KEY)
+        }
       } catch {
         // Ignore storage errors and keep the app working.
       }
       setAuthRole(role)
+      setGuestKey(nextGuestKey)
       setIsLoggedIn(true)
       setError('')
       return
@@ -1985,11 +2003,13 @@ const playPrevious = useCallback(() => {
     try {
       window.localStorage.removeItem(AUTH_KEY)
       window.localStorage.removeItem(AUTH_ROLE_KEY)
+      window.localStorage.removeItem(AUTH_GUEST_KEY)
     } catch {
       // Ignore storage errors and keep the app working.
     }
     setIsLoggedIn(false)
     setAuthRole('guest')
+    setGuestKey('')
     setPassword('')
     setError('')
   }
@@ -3928,7 +3948,7 @@ const playPrevious = useCallback(() => {
             document.body,
           )
         : null}
-      {isLoggedIn ? <HanaChat appRole={authRole} /> : null}
+      {isLoggedIn ? <HanaChat appRole={authRole} guestKey={guestKey} /> : null}
     </div>
   )
 }

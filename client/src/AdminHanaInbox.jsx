@@ -1,14 +1,27 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
 import {
-  getFirebaseErrorMessage,
-  markThreadRead,
-  sendChatMessage,
-  subscribeChatMessages,
-  subscribeChatThreads,
+    deliveryStatusLabel,
+    ensureChatThread,
+    formatChatTimestamp,
+    getFirebaseErrorMessage,
+    getMessageDeliveryStatus,
+    GUEST_PROFILES,
+    isPresenceOnline,
+    markThreadRead,
+    pulseChatPresence,
+    sendChatMessage,
+    softDeleteChatMessage,
+    subscribeChatMessages,
+    subscribeChatThreads,
+    updateChatMessage,
 } from './firebase'
+import './hana-chat.css'
+
+const KNOWN_GUESTS = Object.values(GUEST_PROFILES)
 
 /**
- * Admin inbox for Hana realtime chat (used on /admin).
+ * Admin inbox for Hana realtime chat + guest roster (used on /admin).
  */
 export default function AdminHanaInbox() {
   const [threads, setThreads] = useState([])
@@ -17,6 +30,9 @@ export default function AdminHanaInbox() {
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [replyTo, setReplyTo] = useState(null)
+  const [editingId, setEditingId] = useState(null)
+  const [presenceTick, setPresenceTick] = useState(() => Date.now())
   const listRef = useRef(null)
 
   useEffect(() => {
@@ -27,6 +43,11 @@ export default function AdminHanaInbox() {
       },
       (err) => setError(getFirebaseErrorMessage(err) || 'チャットの読み込みに失敗しました。'),
     )
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setPresenceTick(Date.now()), 15_000)
+    return () => window.clearInterval(timer)
   }, [])
 
   useEffect(() => {
@@ -44,10 +65,108 @@ export default function AdminHanaInbox() {
   }, [activeId])
 
   useEffect(() => {
+    if (!activeId) return undefined
+    const beat = () => {
+      pulseChatPresence(activeId, 'hana').catch(() => {})
+    }
+    beat()
+    const timer = window.setInterval(beat, 20_000)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') beat()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [activeId])
+
+  useEffect(() => {
     const node = listRef.current
     if (!node) return
     node.scrollTop = node.scrollHeight
   }, [messages, activeId])
+
+  const guestRoster = useMemo(() => {
+    return KNOWN_GUESTS.map((profile) => {
+      const threadId = `guest-${profile.key}`
+      const thread = threads.find((t) => t.id === threadId || t.guestKey === profile.key) || null
+      return { profile, threadId, thread }
+    })
+  }, [threads])
+
+  const otherThreads = useMemo(() => {
+    const knownIds = new Set(KNOWN_GUESTS.map((g) => `guest-${g.key}`))
+    return threads.filter((t) => !knownIds.has(t.id) && !KNOWN_GUESTS.some((g) => g.key === t.guestKey))
+  }, [threads])
+
+  const activeThread = useMemo(
+    () => threads.find((t) => t.id === activeId) || null,
+    [threads, activeId],
+  )
+
+  const activeGuestName = useMemo(() => {
+    if (!activeId) return ''
+    const known = KNOWN_GUESTS.find((g) => `guest-${g.key}` === activeId)
+    return known?.displayName || activeThread?.guestLabel || 'ゲスト'
+  }, [activeId, activeThread])
+
+  const clearComposerExtras = () => {
+    setReplyTo(null)
+    setEditingId(null)
+  }
+
+  const labelForSender = (sender) => (sender === 'hana' ? 'はな' : activeGuestName)
+
+  const handleOpenGuest = async (profile) => {
+    const threadId = `guest-${profile.key}`
+    setBusy(true)
+    setError('')
+    clearComposerExtras()
+    try {
+      await ensureChatThread({
+        threadId,
+        guestLabel: profile.displayName,
+        guestKey: profile.key,
+      })
+      setActiveId(threadId)
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || 'ゲストの準備に失敗しました。')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const startReply = (message) => {
+    if (message.deleted) return
+    setEditingId(null)
+    setReplyTo({
+      id: message.id,
+      text: message.text,
+      sender: message.sender,
+    })
+  }
+
+  const startEdit = (message) => {
+    if (!canMutateOwnMessage(message) || message.deleted) return
+    setReplyTo(null)
+    setEditingId(message.id)
+    setDraft(message.rawText || message.text)
+  }
+
+  const handleDelete = async (message) => {
+    if (!canMutateOwnMessage(message) || message.deleted || !activeId) return
+    if (!window.confirm('このメッセージを削除しますか？')) return
+    try {
+      await softDeleteChatMessage({ threadId: activeId, messageId: message.id })
+      if (editingId === message.id) {
+        setEditingId(null)
+        setDraft('')
+      }
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || '削除に失敗しました。')
+    }
+  }
 
   const handleSend = async (event) => {
     event.preventDefault()
@@ -55,9 +174,21 @@ export default function AdminHanaInbox() {
     if (!text || !activeId || busy) return
     setBusy(true)
     setError('')
+    const pendingReply = replyTo
+    const pendingEditId = editingId
+    setDraft('')
+    clearComposerExtras()
     try {
-      await sendChatMessage({ threadId: activeId, text, sender: 'hana' })
-      setDraft('')
+      if (pendingEditId) {
+        await updateChatMessage({ threadId: activeId, messageId: pendingEditId, text })
+      } else {
+        await sendChatMessage({
+          threadId: activeId,
+          text,
+          sender: 'hana',
+          replyTo: pendingReply,
+        })
+      }
     } catch (err) {
       setError(getFirebaseErrorMessage(err) || '送信に失敗しました。')
     } finally {
@@ -66,73 +197,206 @@ export default function AdminHanaInbox() {
   }
 
   const unread = threads.filter((t) => t.unreadByHana).length
+  const activeGuestOnline = isPresenceOnline(activeThread?.guestOnlineAt, presenceTick)
 
   return (
-    <section className="admin-card admin-chat-card">
-      <div className="admin-logs-header">
-        <div>
-          <h2>はなチャット</h2>
-          <p>
-            ゲストからのメッセージに返信します
-            {unread ? ` · 未読 ${unread}` : ''}
-          </p>
+    <>
+      <section className="admin-card admin-chat-card">
+        <div className="admin-logs-header">
+          <div>
+            <h2>ゲスト管理</h2>
+            <p>パスワードごとのゲストアカウントと会話スレッド</p>
+          </div>
         </div>
-      </div>
 
-      {error ? <p className="admin-error">{error}</p> : null}
+        <div className="admin-guest-roster" aria-label="ゲスト一覧">
+          {guestRoster.map(({ profile, thread, threadId }) => {
+            const online = isPresenceOnline(thread?.guestOnlineAt, presenceTick)
+            return (
+              <article
+                key={profile.key}
+                className={`admin-guest-card${activeId === threadId ? ' is-active' : ''}${thread?.unreadByHana ? ' is-unread' : ''}`}
+              >
+                <div className="admin-guest-card-main">
+                  <strong className="admin-guest-name">
+                    <span className={`admin-guest-dot ${online ? 'is-online' : 'is-offline'}`} aria-hidden="true" />
+                    {profile.displayName}
+                    <span className={`admin-guest-online-label${online ? ' is-online' : ''}`}>{online ? 'オンライン' : 'オフライン'}</span>
+                  </strong>
+                  <span className="admin-guest-meta">
+                    pass: {profile.key}
+                    {profile.addressAs !== profile.displayName ? ` · 呼び: ${profile.addressAs}` : ''}
+                  </span>
+                  <span className="admin-guest-meta">
+                    {thread?.updatedAt
+                      ? `最終: ${formatChatTimestamp(thread.updatedAt)}`
+                      : 'まだ会話なし'}
+                    {thread?.unreadByHana ? ' · 未読あり' : ''}
+                  </span>
+                  {thread?.lastText ? (
+                    <span className="admin-guest-preview">{thread.lastText}</span>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  className="admin-primary"
+                  disabled={busy}
+                  onClick={() => handleOpenGuest(profile)}
+                >
+                  チャットを開く
+                </button>
+              </article>
+            )
+          })}
+        </div>
+      </section>
 
-      <div className="admin-chat-layout">
-        <aside className="admin-chat-thread-list" aria-label="スレッド">
-          {threads.length === 0 ? (
-            <p className="admin-chat-empty">まだ会話はありません。</p>
-          ) : (
-            threads.map((thread) => (
+      <section className="admin-card admin-chat-card">
+        <div className="admin-logs-header">
+          <div>
+            <h2>はなチャット</h2>
+            <p>
+              右にスワイプで返信 / 自分の直近メッセージは左スワイプで編集・削除
+              {unread ? ` · 未読 ${unread}` : ''}
+            </p>
+          </div>
+        </div>
+
+        {error ? <p className="admin-error">{error}</p> : null}
+
+        <div className="admin-chat-layout">
+          <aside className="admin-chat-thread-list" aria-label="スレッド">
+            {guestRoster.map(({ profile, thread, threadId }) => (
+              <button
+                key={threadId}
+                type="button"
+                className={`admin-chat-thread${activeId === threadId ? ' is-active' : ''}${thread?.unreadByHana ? ' is-unread' : ''}`}
+                onClick={() => handleOpenGuest(profile)}
+              >
+                <strong className="admin-guest-name">
+                  <span
+                    className={`admin-guest-dot ${isPresenceOnline(thread?.guestOnlineAt, presenceTick) ? 'is-online' : 'is-offline'}`}
+                    aria-hidden="true"
+                  />
+                  {profile.displayName}
+                </strong>
+                <span>{thread?.lastText || '（未開始）'}</span>
+              </button>
+            ))}
+            {otherThreads.map((thread) => (
               <button
                 key={thread.id}
                 type="button"
                 className={`admin-chat-thread${activeId === thread.id ? ' is-active' : ''}${thread.unreadByHana ? ' is-unread' : ''}`}
-                onClick={() => setActiveId(thread.id)}
+                onClick={() => {
+                  clearComposerExtras()
+                  setActiveId(thread.id)
+                }}
               >
                 <strong>{thread.guestLabel}</strong>
                 <span>{thread.lastText || '—'}</span>
               </button>
-            ))
-          )}
-        </aside>
+            ))}
+          </aside>
 
-        <div className="admin-chat-main">
-          {!activeId ? (
-            <p className="admin-chat-empty">スレッドを選んで返信してください。</p>
-          ) : (
-            <>
-              <div className="admin-chat-messages" ref={listRef}>
-                {messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`admin-chat-bubble is-${message.sender}`}
-                  >
-                    <span>{message.sender === 'hana' ? 'はな' : 'ゲスト'}</span>
-                    <p>{message.text}</p>
+          <div className="admin-chat-main">
+            {!activeId ? (
+              <p className="admin-chat-empty">ゲストを選んで返信してください。</p>
+            ) : (
+              <>
+                <div className="admin-chat-active-title">
+                  <strong className="admin-guest-name">
+                    <span
+                      className={`admin-guest-dot ${activeGuestOnline ? 'is-online' : 'is-offline'}`}
+                      aria-hidden="true"
+                    />
+                    {activeGuestName}
+                  </strong>
+                  <span>{activeGuestOnline ? 'オンライン' : 'オフライン'} · とチャット中</span>
+                </div>
+                <div className="admin-chat-messages" ref={listRef}>
+                  {messages.length === 0 ? (
+                    <p className="admin-chat-empty">まだメッセージはありません。先に送っても大丈夫です。</p>
+                  ) : null}
+                  {messages.map((message) => {
+                    const delivery = message.deleted
+                      ? null
+                      : getMessageDeliveryStatus(message, activeThread, 'hana')
+                    const timeLabel = formatChatTimestamp(message.createdAt)
+                    const mutable = message.sender === 'hana' && canMutateOwnMessage(message)
+                    return (
+                      <ChatSwipeBubble
+                        key={message.id}
+                        className={`is-${message.sender}`}
+                        canReply={!message.deleted}
+                        canEdit={mutable}
+                        canDelete={mutable}
+                        onReply={() => startReply(message)}
+                        onEdit={() => startEdit(message)}
+                        onDelete={() => handleDelete(message)}
+                      >
+                        <div className={`admin-chat-bubble is-${message.sender}${message.deleted ? ' is-deleted' : ''}`}>
+                          <span>{labelForSender(message.sender)}</span>
+                          {message.replyTo ? (
+                            <div className="hana-chat-quote">
+                              <strong>{labelForSender(message.replyTo.sender)}</strong>
+                              <span>{message.replyTo.text}</span>
+                            </div>
+                          ) : null}
+                          <p>{message.text}</p>
+                          {(timeLabel || delivery || message.editedAt) ? (
+                            <div className="admin-chat-bubble-meta">
+                              {message.editedAt && !message.deleted ? <span>編集済</span> : null}
+                              {timeLabel ? <time dateTime={message.createdAt || undefined}>{timeLabel}</time> : null}
+                              {delivery ? (
+                                <span className={`admin-chat-delivery is-${delivery}`}>
+                                  {deliveryStatusLabel(delivery)}
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
+                      </ChatSwipeBubble>
+                    )
+                  })}
+                </div>
+                {replyTo || editingId ? (
+                  <div className="hana-chat-composer-context admin-chat-composer-context">
+                    <div>
+                      <strong>{editingId ? 'メッセージを編集' : '返信先'}</strong>
+                      <span>
+                        {editingId
+                          ? '内容を直して更新できます'
+                          : `${labelForSender(replyTo?.sender)}: ${String(replyTo?.text || '').slice(0, 60)}`}
+                      </span>
+                    </div>
+                    <button type="button" onClick={clearComposerExtras} aria-label="キャンセル">×</button>
                   </div>
-                ))}
-              </div>
-              <form className="admin-chat-composer" onSubmit={handleSend}>
-                <input
-                  type="text"
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                  placeholder="はなとして返信…"
-                  maxLength={2000}
-                  disabled={busy}
-                />
-                <button type="submit" className="admin-primary" disabled={busy || !draft.trim()}>
-                  送る
-                </button>
-              </form>
-            </>
-          )}
+                ) : null}
+                <form className="admin-chat-composer" onSubmit={handleSend}>
+                  <input
+                    type="text"
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    placeholder={
+                      editingId
+                        ? '編集して更新…'
+                        : replyTo
+                          ? '返信を書く…'
+                          : `${activeGuestName}に返信…`
+                    }
+                    maxLength={2000}
+                    disabled={busy}
+                  />
+                  <button type="submit" className="admin-primary" disabled={busy || !draft.trim()}>
+                    {editingId ? '更新' : '送る'}
+                  </button>
+                </form>
+              </>
+            )}
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+    </>
   )
 }

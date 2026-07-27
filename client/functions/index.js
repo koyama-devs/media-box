@@ -17,7 +17,7 @@ const SYSTEM_PROMPT = `あなたは「はなちゃん」。Hana Mediabox（共�
 できないこと：外部の有料契約代行、パスワード推測、違法行為の手伝い。わからないことは素直に言う。
 ユーザーが困っていたら手順をやさしく案内する。雑談にも付き合う。`
 
-async function callGemini({ apiKey, message, history }) {
+async function callGemini({ apiKey, message, history, guestName, addressAs }) {
   const contents = []
   for (const turn of history || []) {
     const role = turn.role === 'model' ? 'model' : 'user'
@@ -27,12 +27,19 @@ async function callGemini({ apiKey, message, history }) {
   }
   contents.push({ role: 'user', parts: [{ text: message }] })
 
+  let systemText = SYSTEM_PROMPT
+  const name = String(guestName || '').trim()
+  const callName = String(addressAs || guestName || '').trim()
+  if (name && callName) {
+    systemText += `\n\n相手の情報：このゲストの名前は「${name}」です。返事では必ず「${callName}」と呼んでください（「あなた」は使わない）。`
+  }
+
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${encodeURIComponent(apiKey)}`
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+      systemInstruction: { parts: [{ text: systemText }] },
       contents,
       generationConfig: {
         temperature: 0.85,
@@ -66,6 +73,8 @@ exports.chatHanachan = onCall({ cors: true }, async (request) => {
   }
 
   const history = Array.isArray(request.data?.history) ? request.data.history.slice(-12) : []
+  const guestName = String(request.data?.guestName || '').trim().slice(0, 40)
+  const addressAs = String(request.data?.addressAs || '').trim().slice(0, 40)
   const key = process.env.GEMINI_API_KEY || ''
 
   if (!key) {
@@ -76,7 +85,7 @@ exports.chatHanachan = onCall({ cors: true }, async (request) => {
   }
 
   try {
-    const reply = await callGemini({ apiKey: key, message, history })
+    const reply = await callGemini({ apiKey: key, message, history, guestName, addressAs })
     return {
       reply: reply || '……うまく言葉が出てこなかったみたい。もう一度話しかけてくれる？',
       reason: null,
