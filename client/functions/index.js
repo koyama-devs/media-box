@@ -1,10 +1,9 @@
 const { onCall, HttpsError } = require('firebase-functions/v2/https')
-const { defineSecret } = require('firebase-functions/params')
+const { setGlobalOptions } = require('firebase-functions/v2')
 const { initializeApp } = require('firebase-admin/app')
 
+setGlobalOptions({ region: 'asia-northeast1' })
 initializeApp()
-
-const geminiApiKey = defineSecret('GEMINI_API_KEY')
 
 const SYSTEM_PROMPT = `あなたは「はなちゃん」。Hana Mediabox（共有メディアスペース）の案内マスコットです。
 口調はやさしく、少し可愛らしく、敬語すぎず親しみやすい日本語で話します。短めの返信を心がけてください。
@@ -57,38 +56,31 @@ async function callGemini({ apiKey, message, history }) {
   return reply || ''
 }
 
-exports.chatHanachan = onCall(
-  {
-    region: 'asia-northeast1',
-    secrets: [geminiApiKey],
-    cors: true,
-  },
-  async (request) => {
-    const message = String(request.data?.message || '').trim()
-    if (!message) {
-      throw new HttpsError('invalid-argument', 'message is required')
-    }
-    if (message.length > 2000) {
-      throw new HttpsError('invalid-argument', 'message too long')
-    }
+exports.chatHanachan = onCall({ cors: true }, async (request) => {
+  const message = String(request.data?.message || '').trim()
+  if (!message) {
+    throw new HttpsError('invalid-argument', 'message is required')
+  }
+  if (message.length > 2000) {
+    throw new HttpsError('invalid-argument', 'message too long')
+  }
 
-    const history = Array.isArray(request.data?.history) ? request.data.history.slice(-12) : []
-    const key = geminiApiKey.value()
+  const history = Array.isArray(request.data?.history) ? request.data.history.slice(-12) : []
+  const key = process.env.GEMINI_API_KEY || ''
 
-    if (!key) {
-      return {
-        reply: 'はなちゃん、いま準備中だよ。もう少し待っててね。お話ししたくなったらまた来てください。',
-      }
+  if (!key) {
+    return {
+      reply: 'はなちゃん、いま準備中だよ。もう少し待っててね。お話ししたくなったらまた来てください。',
     }
+  }
 
-    try {
-      const reply = await callGemini({ apiKey: key, message, history })
-      return {
-        reply: reply || '……うまく言葉が出てこなかったみたい。もう一度話しかけてくれる？',
-      }
-    } catch (error) {
-      console.error('chatHanachan', error)
-      throw new HttpsError('internal', 'はなちゃんが返事できませんでした')
+  try {
+    const reply = await callGemini({ apiKey: key, message, history })
+    return {
+      reply: reply || '……うまく言葉が出てこなかったみたい。もう一度話しかけてくれる？',
     }
-  },
-)
+  } catch (error) {
+    console.error('chatHanachan', error)
+    throw new HttpsError('internal', 'はなちゃんが返事できませんでした')
+  }
+})

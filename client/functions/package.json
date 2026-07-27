@@ -2,7 +2,7 @@
   "name": "hana-mediabox-functions",
   "description": "Cloud Functions for Hana Mediabox (Hanachan chat)",
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "main": "index.js",
   "type": "commonjs",
