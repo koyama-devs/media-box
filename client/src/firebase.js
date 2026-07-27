@@ -84,6 +84,18 @@ export function getGuestProfile(guestKey) {
   return GUEST_PROFILES[key] || null
 }
 
+/** Resolve a friendly guest display name from thread id / guestKey / stored label. */
+export function resolveGuestDisplayName({ threadId, guestKey, guestLabel } = {}) {
+  const fromKey = getGuestProfile(guestKey)
+  if (fromKey) return fromKey.displayName
+  const id = String(threadId || '')
+  const known = id.match(/^guest-(hiro|zen|gabusan)$/i)
+  if (known) return GUEST_PROFILES[known[1].toLowerCase()]?.displayName || id
+  const label = String(guestLabel || '').trim()
+  if (label && !/^ゲスト/.test(label)) return label
+  return label || guestLabelFromUid(id || 'guest')
+}
+
 const functions = getFunctions(app, 'asia-northeast1')
 const SPACE_PARTICLE_TYPES = new Set(['stars', 'rain', 'mist', 'petals'])
 const SPACE_AMBIENT_TYPES = new Set(['ocean', 'rain', 'wind', 'room'])
@@ -298,10 +310,15 @@ function serializeChatMessage(id, data) {
 }
 
 function serializeChatThread(id, data) {
+  const guestKey = data?.guestKey || (String(id).match(/^guest-(.+)$/) || [])[1] || ''
   return {
     id,
-    guestKey: data?.guestKey || (String(id).match(/^guest-(.+)$/) || [])[1] || '',
-    guestLabel: data?.guestLabel || guestLabelFromUid(id),
+    guestKey,
+    guestLabel: resolveGuestDisplayName({
+      threadId: id,
+      guestKey,
+      guestLabel: data?.guestLabel,
+    }),
     lastText: String(data?.lastText || ''),
     updatedAt: data?.updatedAt?.toDate?.()?.toISOString?.() || data?.updatedAtIso || null,
     unreadByHana: Boolean(data?.unreadByHana),

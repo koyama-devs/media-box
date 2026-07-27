@@ -77,12 +77,6 @@ export default function ChatSwipeBubble({
 
   return (
     <div className={`chat-swipe${actionsOpen ? ' is-actions' : ''}${className ? ` ${className}` : ''}`}>
-      <div className="chat-swipe-hint chat-swipe-hint-reply" aria-hidden="true">
-        返信
-      </div>
-      <div className="chat-swipe-hint chat-swipe-hint-actions" aria-hidden="true">
-        {(canEdit || canDelete) ? '操作' : ''}
-      </div>
       <div
         className="chat-swipe-sheet"
         style={{ transform: `translateX(${offset}px)` }}

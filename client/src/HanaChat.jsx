@@ -4,15 +4,18 @@ import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
 import {
     chatWithHanachan,
     deliveryStatusLabel,
+    ensureChatThread,
     ensureGuestChatId,
     formatChatTimestamp,
     getFirebaseErrorMessage,
     getGuestProfile,
     getMessageDeliveryStatus,
+    GUEST_PROFILES,
     isAdminUser,
     isPresenceOnline,
     markThreadRead,
     pulseChatPresence,
+    resolveGuestDisplayName,
     sendChatMessage,
     softDeleteChatMessage,
     subscribeChatMessages,
@@ -145,8 +148,37 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   const ownerActiveGuestLabel = useMemo(() => {
     if (!actingAsOwner || !activeThreadId) return 'ゲスト'
-    return threads.find((thread) => thread.id === activeThreadId)?.guestLabel || 'ゲスト'
+    const thread = threads.find((entry) => entry.id === activeThreadId)
+    return resolveGuestDisplayName({
+      threadId: activeThreadId,
+      guestKey: thread?.guestKey,
+      guestLabel: thread?.guestLabel,
+    })
   }, [actingAsOwner, activeThreadId, threads])
+
+  const ownerGuestRoster = useMemo(() => {
+    if (!actingAsOwner) return []
+    const known = Object.values(GUEST_PROFILES).map((profile) => {
+      const threadId = `guest-${profile.key}`
+      const thread = threads.find((t) => t.id === threadId || t.guestKey === profile.key) || null
+      return {
+        threadId,
+        label: profile.displayName,
+        thread,
+        known: true,
+      }
+    })
+    const knownIds = new Set(known.map((g) => g.threadId))
+    const extras = threads
+      .filter((t) => !knownIds.has(t.id) && !Object.values(GUEST_PROFILES).some((p) => p.key === t.guestKey))
+      .map((thread) => ({
+        threadId: thread.id,
+        label: resolveGuestDisplayName(thread),
+        thread,
+        known: false,
+      }))
+    return [...known, ...extras]
+  }, [actingAsOwner, threads])
 
   const unreadLauncher = useMemo(() => {
     if (actingAsOwner) return threads.filter((t) => t.unreadByHana).length
@@ -368,12 +400,31 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const labelForRole = (role) => {
     if (role === 'hanachan') return 'はなちゃん'
     if (role === 'hana') return 'はな'
-    return actingAsOwner ? ownerActiveGuestLabel : guestDisplayName
+    // Guest bubble: never 「あなた」 — always the guest's display name.
+    if (actingAsOwner) return ownerActiveGuestLabel
+    return guestDisplayName
   }
+
+  const labelForMessage = (message) => labelForRole(message.sender || message.role)
 
   const clearComposerExtras = () => {
     setReplyTo(null)
     setEditingId(null)
+  }
+
+  const openOwnerThread = async (threadId, label, guestKey = '') => {
+    setActiveThreadId(threadId)
+    clearComposerExtras()
+    if (!threadId.startsWith('guest-')) return
+    try {
+      await ensureChatThread({
+        threadId,
+        guestLabel: label,
+        guestKey: guestKey || threadId.replace(/^guest-/, ''),
+      })
+    } catch {
+      /* ignore */
+    }
   }
 
   const startReply = (message) => {
@@ -572,10 +623,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       ? 'はな'
       : 'はなちゃん'
   const modeSub = actingAsOwner
-    ? '右スワイプで返信 · 左で編集/削除'
+    ? 'ゲストへの返信'
     : channel === 'human'
       ? HUMAN_MODE_HINT
-      : '右スワイプで返信 · 自分の直近は左で編集/削除'
+      : 'はなちゃんとお話し中'
   const presenceLabel = partnerOnline ? 'オンライン' : 'オフライン'
 
   return (
@@ -632,24 +683,30 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
           {actingAsOwner ? (
             <div className="hana-chat-threads" aria-label="会話一覧">
-              {threads.length === 0 ? (
+              {ownerGuestRoster.length === 0 ? (
                 <p className="hana-chat-empty">まだメッセージはありません。</p>
               ) : (
-                threads.map((thread) => (
+                ownerGuestRoster.map((entry) => (
                   <button
-                    key={thread.id}
+                    key={entry.threadId}
                     type="button"
-                    className={`hana-chat-thread${activeThreadId === thread.id ? ' is-active' : ''}${thread.unreadByHana ? ' is-unread' : ''}`}
-                    onClick={() => setActiveThreadId(thread.id)}
+                    className={`hana-chat-thread${activeThreadId === entry.threadId ? ' is-active' : ''}${entry.thread?.unreadByHana ? ' is-unread' : ''}`}
+                    onClick={() => openOwnerThread(
+                      entry.threadId,
+                      entry.label,
+                      entry.thread?.guestKey || (entry.known ? entry.threadId.replace(/^guest-/, '') : ''),
+                    )}
                   >
                     <span className="hana-chat-thread-name">
                       <span
-                        className={`hana-chat-thread-dot ${isPresenceOnline(thread.guestOnlineAt, presenceTick) ? 'is-online' : 'is-offline'}`}
+                        className={`hana-chat-thread-dot ${isPresenceOnline(entry.thread?.guestOnlineAt, presenceTick) ? 'is-online' : 'is-offline'}`}
                         aria-hidden="true"
                       />
-                      {thread.guestLabel}
+                      {entry.label}
                     </span>
-                    <span className="hana-chat-thread-preview">{thread.lastText || '—'}</span>
+                    <span className="hana-chat-thread-preview">
+                      {entry.thread?.lastText || (entry.known ? '（未開始）' : '—')}
+                    </span>
                   </button>
                 ))
               )}
@@ -684,10 +741,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               const isOwn = (message.sender || message.role) === ownSender
                 || (!actingAsOwner && !guestOnHuman && message.role === 'guest')
               const mutable = isOwn && canMutateOwnMessage(message)
+              const sideClass = isOwn ? 'is-own' : 'is-other'
               return (
                 <ChatSwipeBubble
                   key={message.id}
-                  className={`is-${message.role}`}
+                  className={`${sideClass} is-${message.role}`}
                   canReply={!message.deleted}
                   canEdit={mutable}
                   canDelete={mutable}
@@ -696,10 +754,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   onDelete={() => handleDelete(message)}
                 >
                   <div
-                    className={`hana-chat-bubble is-${message.role}${message.kind === 'human-switch' || message.kind === 'intro' ? ' is-notice' : ''}${message.deleted ? ' is-deleted' : ''}`}
+                    className={`hana-chat-bubble ${sideClass} is-${message.role}${message.kind === 'human-switch' || message.kind === 'intro' ? ' is-notice' : ''}${message.deleted ? ' is-deleted' : ''}`}
                   >
                     <span className="hana-chat-bubble-label">
-                      {labelForRole(message.role)}
+                      {labelForMessage(message)}
                     </span>
                     {message.replyTo ? (
                       <div className="hana-chat-quote">
@@ -708,17 +766,20 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                       </div>
                     ) : null}
                     <p>{message.text}</p>
-                    {(timeLabel || delivery || message.editedAt) ? (
-                      <div className="hana-chat-bubble-meta">
-                        {message.editedAt && !message.deleted ? <span>編集済</span> : null}
-                        {timeLabel ? <time dateTime={message.createdAt || undefined}>{timeLabel}</time> : null}
-                        {delivery ? (
-                          <span className={`hana-chat-delivery is-${delivery}`}>
-                            {deliveryStatusLabel(delivery)}
-                          </span>
-                        ) : null}
-                      </div>
-                    ) : null}
+                    <div className="hana-chat-bubble-meta">
+                      {message.editedAt && !message.deleted ? <span>編集済</span> : null}
+                      <time dateTime={message.createdAt || undefined}>
+                        {timeLabel || '—'}
+                      </time>
+                      {isOwn && delivery ? (
+                        <span className={`hana-chat-delivery is-${delivery}`}>
+                          {deliveryStatusLabel(delivery)}
+                        </span>
+                      ) : null}
+                      {isOwn && !delivery && !message.deleted ? (
+                        <span className="hana-chat-delivery is-sent">送信済</span>
+                      ) : null}
+                    </div>
                   </div>
                 </ChatSwipeBubble>
               )
