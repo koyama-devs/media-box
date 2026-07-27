@@ -78,8 +78,18 @@ import VinylPlayer from './VinylPlayer'
 const BookReader = lazy(() => import('./BookReader'))
 
 const AUTH_KEY = 'media-share-lite-auth'
-const PASSWORDS = new Set(['hiro', 'zen','gabusan'])
+const AUTH_ROLE_KEY = 'media-share-lite-role'
+const OWNER_PASSWORDS = new Set(['hana'])
+const PASSWORDS = new Set(['hiro', 'zen', 'gabusan' ])
 const TRACK_QUERY_KEY = 'track'
+
+function readStoredAuthRole() {
+  try {
+    return window.localStorage.getItem(AUTH_ROLE_KEY) === 'owner' ? 'owner' : 'guest'
+  } catch {
+    return 'guest'
+  }
+}
 
 function getTrackShareUrl(itemId) {
   const url = new URL(window.location.href)
@@ -308,6 +318,7 @@ function App() {
       return false
     }
   })
+  const [authRole, setAuthRole] = useState(() => readStoredAuthRole())
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [items, setItems] = useState([])
@@ -1954,11 +1965,14 @@ const playPrevious = useCallback(() => {
     event.preventDefault()
 
     if (PASSWORDS.has(password)) {
+      const role = OWNER_PASSWORDS.has(password) ? 'owner' : 'guest'
       try {
         window.localStorage.setItem(AUTH_KEY, 'true')
+        window.localStorage.setItem(AUTH_ROLE_KEY, role)
       } catch {
         // Ignore storage errors and keep the app working.
       }
+      setAuthRole(role)
       setIsLoggedIn(true)
       setError('')
       return
@@ -1970,10 +1984,12 @@ const playPrevious = useCallback(() => {
   const handleLogout = () => {
     try {
       window.localStorage.removeItem(AUTH_KEY)
+      window.localStorage.removeItem(AUTH_ROLE_KEY)
     } catch {
       // Ignore storage errors and keep the app working.
     }
     setIsLoggedIn(false)
+    setAuthRole('guest')
     setPassword('')
     setError('')
   }
@@ -3912,7 +3928,7 @@ const playPrevious = useCallback(() => {
             document.body,
           )
         : null}
-      {isLoggedIn ? <HanaChat /> : null}
+      {isLoggedIn ? <HanaChat appRole={authRole} /> : null}
     </div>
   )
 }

@@ -30,7 +30,6 @@ service cloud.firestore {
       }
     }
 
-    // Visitors can create access logs; only signed-in admins can read/manage them.
     match /access-logs/{logId} {
       allow create: if true
         && request.resource.data.keys().hasAll([
@@ -49,26 +48,18 @@ service cloud.firestore {
       allow read, update, delete: if isAdmin();
     }
 
-    // Shared playlist state used by all clients on the same app account/password.
     match /shared-state/{docId} {
       allow read, write: if true;
     }
 
-    // Hana inbox: guests use localStorage UUID (get/write by id, no Auth).
-    // Listing all threads is admin-only. Message "hana" sender requires admin.
+    // Private shared-password app: owner (password hana) may list without Google admin.
     match /chatThreads/{threadId} {
-      allow get: if true;
-      allow list: if isAdmin();
-      allow create, update: if true;
+      allow read, create, update: if true;
       allow delete: if isAdmin();
 
       match /messages/{messageId} {
         allow read: if true;
-        allow create: if isValidChatMessage()
-          && (
-            request.resource.data.sender == 'guest'
-            || (isAdmin() && request.resource.data.sender == 'hana')
-          );
+        allow create: if isValidChatMessage();
         allow update, delete: if isAdmin();
       }
     }

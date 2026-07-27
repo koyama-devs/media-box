@@ -111,6 +111,7 @@
   margin: 0;
   font-size: 0.72rem;
   letter-spacing: 0.08em;
+  line-height: 1.4;
   color: rgba(240, 201, 188, 0.72);
 }
 
@@ -133,53 +134,57 @@
   cursor: pointer;
 }
 
-.hana-chat-modes {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  padding: 10px 12px 0;
-}
-
-.hana-chat-role {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  padding: 8px 12px 0;
-}
-
-.hana-chat-role button {
-  border: 1px dashed rgba(198, 140, 120, 0.35);
-  border-radius: 999px;
-  padding: 6px 8px;
-  background: transparent;
-  color: rgba(255, 248, 240, 0.62);
-  font: inherit;
-  font-size: 0.75rem;
-  cursor: pointer;
-}
-
-.hana-chat-role button.is-active {
-  border-style: solid;
-  border-color: rgba(232, 154, 170, 0.45);
-  background: rgba(196, 92, 74, 0.22);
-  color: var(--hana-cream);
-}
-
-.hana-chat-modes button {
-  border: 1px solid rgba(198, 140, 120, 0.28);
-  border-radius: 999px;
+.hana-chat-channel-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 10px 12px 0;
   padding: 8px 10px;
-  background: transparent;
-  color: rgba(255, 248, 240, 0.72);
+  border-radius: 12px;
+  background: rgba(232, 154, 170, 0.14);
+  border: 1px solid rgba(232, 154, 170, 0.28);
+}
+
+.hana-chat-channel-banner p {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: rgba(255, 248, 240, 0.82);
+}
+
+.hana-chat-channel-banner button {
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(255, 248, 240, 0.12);
+  color: var(--hana-cream);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.hana-chat-suggest {
+  padding: 0 12px 8px;
+}
+
+.hana-chat-suggest button {
+  width: 100%;
+  border: 1px dashed rgba(232, 154, 170, 0.45);
+  border-radius: 12px;
+  padding: 8px 12px;
+  background: rgba(196, 92, 74, 0.12);
+  color: rgba(255, 248, 240, 0.88);
+  font: inherit;
+  font-size: 0.8rem;
   cursor: pointer;
 }
 
-.hana-chat-modes button.is-active {
-  background: rgba(196, 92, 74, 0.28);
-  border-color: rgba(232, 154, 170, 0.45);
-  color: var(--hana-cream);
+.hana-chat-bubble.is-notice {
+  background: rgba(232, 154, 170, 0.12);
+  border: 1px solid rgba(232, 154, 170, 0.22);
 }
 
 .hana-chat-threads {

@@ -27,7 +27,7 @@ async function callGemini({ apiKey, message, history }) {
   }
   contents.push({ role: 'user', parts: [{ text: message }] })
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(apiKey)}`
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${encodeURIComponent(apiKey)}`
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -70,7 +70,8 @@ exports.chatHanachan = onCall({ cors: true }, async (request) => {
 
   if (!key) {
     return {
-      reply: 'はなちゃん、いま準備中だよ。もう少し待っててね。お話ししたくなったらまた来てください。',
+      reply: null,
+      reason: 'quota',
     }
   }
 
@@ -78,9 +79,13 @@ exports.chatHanachan = onCall({ cors: true }, async (request) => {
     const reply = await callGemini({ apiKey: key, message, history })
     return {
       reply: reply || '……うまく言葉が出てこなかったみたい。もう一度話しかけてくれる？',
+      reason: null,
     }
   } catch (error) {
     console.error('chatHanachan', error)
+    if (error?.status === 429 || /credits? are depleted|quota|RESOURCE_EXHAUSTED/i.test(String(error?.message || ''))) {
+      return { reply: null, reason: 'quota' }
+    }
     throw new HttpsError('internal', 'はなちゃんが返事できませんでした')
   }
 })
