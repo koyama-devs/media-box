@@ -6,12 +6,14 @@ import {
     getRedirectResult,
     GoogleAuthProvider,
     onAuthStateChanged,
+    signInAnonymously,
     signInWithEmailAndPassword,
     signInWithPopup,
     signInWithRedirect,
     signOut,
 } from 'firebase/auth'
 import {
+    addDoc,
     collection,
     doc,
     getDoc,
@@ -25,6 +27,7 @@ import {
     setDoc,
     writeBatch,
 } from 'firebase/firestore'
+import { getFunctions, httpsCallable } from 'firebase/functions'
 import {
     deleteObject,
     getBlob,
@@ -65,6 +68,10 @@ const ACCESS_LOGS_COLLECTION = 'access-logs'
 const SHARED_STATE_COLLECTION = 'shared-state'
 const SHARED_PLAYLISTS_DOC = 'playlists'
 const SHARED_SPACES_DOC = 'spaces'
+const CHAT_THREADS_COLLECTION = 'chatThreads'
+const GUEST_LABELS = ['桜', '蜜', '月', '風', '霧', '蝶', '鈴', '露', '霞', '羽']
+
+const functions = getFunctions(app, 'asia-northeast1')
 const SPACE_PARTICLE_TYPES = new Set(['stars', 'rain', 'mist', 'petals'])
 const SPACE_AMBIENT_TYPES = new Set(['ocean', 'rain', 'wind', 'room'])
 const MAX_SHARED_CUSTOM_SPACES = 12
@@ -183,14 +190,184 @@ export function getFirebaseErrorMessage(error) {
   return error?.message || 'アップロードに失敗しました。'
 }
 
+export function isAdminUser(user) {
+  return Boolean(user && !user.isAnonymous && isAdminEmailAllowed(user.email))
+}
+
 export function subscribeToAdminAuth(onChange) {
   return onAuthStateChanged(auth, (user) => {
-    if (user && !isAdminEmailAllowed(user.email)) {
+    // Keep anonymous guests for Hana chat; only eject non-allowlisted named accounts.
+    if (user && !user.isAnonymous && !isAdminEmailAllowed(user.email)) {
       signOut(auth).finally(() => onChange(null))
       return
     }
-    onChange(user)
+    onChange(isAdminUser(user) ? user : null)
   })
+}
+
+/** Any Firebase auth user (admin or anonymous guest). */
+export function subscribeToAuthUser(onChange) {
+  return onAuthStateChanged(auth, onChange)
+}
+
+/**
+ * Ensure a Firebase Auth session for chat.
+ * Admins keep their session; others get anonymous auth (enable Anonymous in console).
+ */
+export async function ensureGuestAuth() {
+  const current = auth.currentUser
+  if (current) {
+    if (isAdminUser(current) || current.isAnonymous) return current
+  }
+  const credential = await signInAnonymously(auth)
+  return credential.user
+}
+
+export function guestLabelFromUid(uid) {
+  const raw = String(uid || 'guest')
+  let hash = 0
+  for (let i = 0; i < raw.length; i += 1) {
+    hash = (hash * 31 + raw.charCodeAt(i)) >>> 0
+  }
+  const petal = GUEST_LABELS[hash % GUEST_LABELS.length]
+  const num = (hash % 90) + 10
+  return `ゲスト${petal}${num}`
+}
+
+function serializeChatMessage(id, data) {
+  return {
+    id,
+    text: String(data?.text || ''),
+    sender: data?.sender === 'hana' ? 'hana' : 'guest',
+    createdAt: data?.createdAt?.toDate?.()?.toISOString?.() || data?.createdAtIso || null,
+  }
+}
+
+function serializeChatThread(id, data) {
+  return {
+    id,
+    guestLabel: data?.guestLabel || guestLabelFromUid(id),
+    lastText: String(data?.lastText || ''),
+    updatedAt: data?.updatedAt?.toDate?.()?.toISOString?.() || data?.updatedAtIso || null,
+    unreadByHana: Boolean(data?.unreadByHana),
+    unreadByGuest: Boolean(data?.unreadByGuest),
+  }
+}
+
+/** @returns {() => void} */
+export function subscribeChatMessages(threadId, onData, onError) {
+  if (!threadId) {
+    onData?.([])
+    return () => {}
+  }
+  const messagesQuery = query(
+    collection(db, CHAT_THREADS_COLLECTION, threadId, 'messages'),
+    orderBy('createdAt', 'asc'),
+    limit(200),
+  )
+  return onSnapshot(
+    messagesQuery,
+    (snap) => {
+      onData?.(snap.docs.map((document) => serializeChatMessage(document.id, document.data())))
+    },
+    (error) => onError?.(error),
+  )
+}
+
+/** Guest: watch own thread metadata (unread badge). */
+export function subscribeOwnChatThread(threadId, onData, onError) {
+  if (!threadId) {
+    onData?.(null)
+    return () => {}
+  }
+  return onSnapshot(
+    doc(db, CHAT_THREADS_COLLECTION, threadId),
+    (snap) => {
+      if (!snap.exists()) {
+        onData?.(null)
+        return
+      }
+      onData?.(serializeChatThread(snap.id, snap.data()))
+    },
+    (error) => onError?.(error),
+  )
+}
+
+/** Admin: watch all guest threads. */
+export function subscribeChatThreads(onData, onError) {
+  const threadsQuery = query(
+    collection(db, CHAT_THREADS_COLLECTION),
+    orderBy('updatedAt', 'desc'),
+    limit(80),
+  )
+  return onSnapshot(
+    threadsQuery,
+    (snap) => {
+      onData?.(snap.docs.map((document) => serializeChatThread(document.id, document.data())))
+    },
+    (error) => onError?.(error),
+  )
+}
+
+/**
+ * @param {{ threadId: string, text: string, sender: 'guest'|'hana', guestLabel?: string }} payload
+ */
+export async function sendChatMessage({ threadId, text, sender, guestLabel }) {
+  const trimmed = String(text || '').trim()
+  if (!threadId || !trimmed) return null
+  if (trimmed.length > 2000) {
+    const error = new Error('メッセージが長すぎます。')
+    error.code = 'chat/too-long'
+    throw error
+  }
+
+  const role = sender === 'hana' ? 'hana' : 'guest'
+  const threadRef = doc(db, CHAT_THREADS_COLLECTION, threadId)
+  const messagesRef = collection(threadRef, 'messages')
+  const nowIso = new Date().toISOString()
+
+  await setDoc(
+    threadRef,
+    {
+      guestLabel: guestLabel || guestLabelFromUid(threadId),
+      lastText: trimmed.slice(0, 160),
+      updatedAt: serverTimestamp(),
+      updatedAtIso: nowIso,
+      unreadByHana: role === 'guest',
+      unreadByGuest: role === 'hana',
+    },
+    { merge: true },
+  )
+
+  const messageRef = await addDoc(messagesRef, {
+    text: trimmed,
+    sender: role,
+    createdAt: serverTimestamp(),
+    createdAtIso: nowIso,
+  })
+
+  return messageRef.id
+}
+
+export async function markThreadRead(threadId, reader) {
+  if (!threadId) return
+  const patch = reader === 'hana'
+    ? { unreadByHana: false }
+    : { unreadByGuest: false }
+  await setDoc(doc(db, CHAT_THREADS_COLLECTION, threadId), patch, { merge: true })
+}
+
+/**
+ * Call Cloud Function `chatHanachan`.
+ * @param {{ message: string, history?: { role: string, text: string }[] }} payload
+ */
+export async function chatWithHanachan(payload) {
+  const callable = httpsCallable(functions, 'chatHanachan')
+  const result = await callable({
+    message: String(payload?.message || '').trim(),
+    history: Array.isArray(payload?.history) ? payload.history.slice(-12) : [],
+  })
+  return result?.data || { reply: '' }
 }
 
 export async function completeAdminRedirectLogin() {

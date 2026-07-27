@@ -2,6 +2,22 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && request.auth.token.email in [
+          'hihig9@gmail.com',
+          'koyamamika.me@gmail.com'
+        ];
+    }
+
+    function isThreadOwner(threadId) {
+      return isSignedIn() && request.auth.uid == threadId;
+    }
+
     match /media-items/{itemId} {
       allow read, write: if true;
 
@@ -26,12 +42,32 @@ service cloud.firestore {
         && request.resource.data.deviceType in ['mobile', 'tablet', 'desktop']
         && request.resource.data.browser is string
         && request.resource.data.os is string;
-      allow read, update, delete: if request.auth != null;
+      allow read, update, delete: if isAdmin();
     }
 
     // Shared playlist state used by all clients on the same app account/password.
     match /shared-state/{docId} {
       allow read, write: if true;
+    }
+
+    // Hana realtime inbox: guests own their thread; admins see all.
+    match /chatThreads/{threadId} {
+      allow read: if isAdmin() || isThreadOwner(threadId);
+      allow create, update: if isAdmin() || isThreadOwner(threadId);
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if isAdmin() || isThreadOwner(threadId);
+        allow create: if request.resource.data.keys().hasAll(['text', 'sender', 'createdAt'])
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 2000
+          && (
+            (isAdmin() && request.resource.data.sender == 'hana')
+            || (isThreadOwner(threadId) && request.resource.data.sender == 'guest')
+          );
+        allow update, delete: if isAdmin();
+      }
     }
 
     match /{document=**} {

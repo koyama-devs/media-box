@@ -8,6 +8,7 @@ import {
   subscribeToAccessLogs,
   subscribeToAdminAuth,
 } from './firebase'
+import AdminHanaInbox from './AdminHanaInbox'
 import './Admin.css'
 
 function formatVisitTime(value) {
@@ -351,6 +352,8 @@ function AdminDashboard({ user }) {
           <strong>{stats.countries}</strong>
         </article>
       </section>
+
+      <AdminHanaInbox />
 
       <section className="admin-card admin-logs-card">
         <div className="admin-logs-header">

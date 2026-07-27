@@ -49,6 +49,7 @@ import LyricsPanel from './LyricsPanel'
 import { blobToThumbnailUrl, mapPool } from './mediaPerf'
 import SeasonalAnime from './SeasonalAnime.jsx'
 import JapaneseMusic from './JapaneseMusic.jsx'
+import HanaChat from './HanaChat.jsx'
 import {
   appendTodayRecordHistory,
   formatTodayDateLabel,
@@ -3911,6 +3912,7 @@ const playPrevious = useCallback(() => {
             document.body,
           )
         : null}
+      {isLoggedIn ? <HanaChat /> : null}
     </div>
   )
 }
