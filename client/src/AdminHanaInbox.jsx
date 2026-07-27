@@ -57,7 +57,10 @@ export default function AdminHanaInbox() {
     }
     const unsub = subscribeChatMessages(
       activeId,
-      (next) => setMessages(next),
+      (next) => {
+        setMessages(next)
+        markThreadRead(activeId, 'hana').catch(() => {})
+      },
       (err) => setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。'),
     )
     markThreadRead(activeId, 'hana').catch(() => {})
@@ -256,7 +259,7 @@ export default function AdminHanaInbox() {
           <div>
             <h2>はなチャット</h2>
             <p>
-              右にスワイプで返信 / 自分の直近メッセージは左スワイプで編集・削除
+              ゲストからのメッセージに返信します
               {unread ? ` · 未読 ${unread}` : ''}
             </p>
           </div>

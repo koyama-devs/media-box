@@ -2,27 +2,27 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import hanachanArt from './assets/hanachan.svg'
 import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
 import {
-    chatWithHanachan,
-    deliveryStatusLabel,
-    ensureChatThread,
-    ensureGuestChatId,
-    formatChatTimestamp,
-    getFirebaseErrorMessage,
-    getGuestProfile,
-    getMessageDeliveryStatus,
-    GUEST_PROFILES,
-    isAdminUser,
-    isPresenceOnline,
-    markThreadRead,
-    pulseChatPresence,
-    resolveGuestDisplayName,
-    sendChatMessage,
-    softDeleteChatMessage,
-    subscribeChatMessages,
-    subscribeChatThreads,
-    subscribeOwnChatThread,
-    subscribeToAuthUser,
-    updateChatMessage,
+  chatWithHanachan,
+  deliveryStatusLabel,
+  ensureChatThread,
+  ensureGuestChatId,
+  formatChatTimestamp,
+  getFirebaseErrorMessage,
+  getGuestProfile,
+  getMessageDeliveryStatus,
+  GUEST_PROFILES,
+  isAdminUser,
+  isPresenceOnline,
+  markThreadRead,
+  pulseChatPresence,
+  resolveGuestDisplayName,
+  sendChatMessage,
+  softDeleteChatMessage,
+  subscribeChatMessages,
+  subscribeChatThreads,
+  subscribeOwnChatThread,
+  subscribeToAuthUser,
+  updateChatMessage,
 } from './firebase'
 import './hana-chat.css'
 
@@ -37,9 +37,6 @@ const HUMAN_SWITCH_QUOTA =
 
 const HUMAN_SWITCH_INTENT =
   'わかったよ。ここからははな本人に直接メッセージを送れるね。気軽に話しかけてみて。'
-
-const HUMAN_MODE_HINT =
-  'はな本人にメッセージを送れます。返事が来たら、ここに表示されます。'
 
 const WANT_HUMAN_RE =
   /(本物|本当|リアル).{0,6}はな|はな本人|はな(と|に).{0,8}(話|しゃべ|チャット)|人間のはな|実在のはな|real\s*hana|talk\s*to\s*hana|hana\s*(thật|that)|muốn\s*.{0,20}hana\s*thật|nói\s*chuyện\s*với\s*hana\s*thật|chủ\s*nhân|オーナーのはな/i
@@ -202,7 +199,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     setGuestChatId(id)
     setAiMessages(stored?.length ? stored : defaultIntroMessages(guestProfile))
     setChannel(savedChannel)
-    setHumanNotice(savedChannel === 'human' ? HUMAN_MODE_HINT : '')
+    setHumanNotice('')
     setStorageReady(true)
   }, [hidden, guestKey, guestProfile])
 
@@ -256,6 +253,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       (next) => {
         setHanaMessages(next)
         setError('')
+        // Re-mark read whenever messages update while guest is viewing.
+        markThreadRead(guestChatId, 'guest').catch(() => {})
       },
       (err) => setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。'),
     )
@@ -273,6 +272,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       (next) => {
         setHanaMessages(next)
         setError('')
+        markThreadRead(activeThreadId, 'hana').catch(() => {})
       },
       (err) => setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。'),
     )
@@ -625,7 +625,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const modeSub = actingAsOwner
     ? 'ゲストへの返信'
     : channel === 'human'
-      ? HUMAN_MODE_HINT
+      ? 'はな本人'
       : 'はなちゃんとお話し中'
   const presenceLabel = partnerOnline ? 'オンライン' : 'オフライン'
 
@@ -715,7 +715,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
           {!actingAsOwner && channel === 'human' ? (
             <div className="hana-chat-channel-banner" role="status">
-              <p>{humanNotice || HUMAN_MODE_HINT}</p>
+              {humanNotice ? <p>{humanNotice}</p> : <p>はな本人モード</p>}
               <button
                 type="button"
                 onClick={() => {

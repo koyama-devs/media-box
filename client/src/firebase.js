@@ -379,8 +379,22 @@ export function getMessageDeliveryStatus(message, thread, viewer) {
   if (message.sender !== viewer) return null
   if (!message.createdAt) return 'sent'
   const readAt = viewer === 'guest' ? thread?.hanaLastReadAt : thread?.guestLastReadAt
-  if (readAt && new Date(readAt).getTime() >= new Date(message.createdAt).getTime()) {
-    return 'read'
+  if (readAt) {
+    const readMs = new Date(readAt).getTime()
+    const createdMs = new Date(message.createdAt).getTime()
+    // Allow 2s skew between client ISO and server Timestamp.
+    if (!Number.isNaN(readMs) && !Number.isNaN(createdMs) && readMs + 2000 >= createdMs) {
+      return 'read'
+    }
+  }
+  // If recipient cleared unread after this message was the latest, treat as read.
+  const unreadFlag = viewer === 'guest' ? thread?.unreadByHana : thread?.unreadByGuest
+  if (unreadFlag === false && readAt) {
+    const readMs = new Date(readAt).getTime()
+    const createdMs = new Date(message.createdAt).getTime()
+    if (!Number.isNaN(readMs) && !Number.isNaN(createdMs) && readMs + 5000 >= createdMs) {
+      return 'read'
+    }
   }
   return 'sent'
 }
