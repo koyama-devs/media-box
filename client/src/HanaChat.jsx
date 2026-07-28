@@ -430,9 +430,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   const partnerOnline = useMemo(() => {
     void presenceTick
-    if (actingAsOwner) {
-      return isPresenceOnline(activeThreadMeta?.guestOnlineAt)
-    }
+    // Owner header is Hana's identity — do not mirror the selected guest's presence.
+    if (actingAsOwner) return true
     if (channel === 'ai') return true
     return isPresenceOnline(activeThreadMeta?.hanaOnlineAt)
   }, [actingAsOwner, channel, activeThreadMeta, presenceTick])
@@ -613,7 +612,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   const avatarSrcForProfile = (profileId, displayName) => {
     const id = String(profileId || '').trim().toLowerCase() || 'guest'
-    return resolveAvatarSrc(id, displayName || id, chatProfiles[id]?.avatarUrl || '')
+    const fallback = id === OWNER_PROFILE.key || id === 'hana' ? hanachanArt : ''
+    return resolveAvatarSrc(id, displayName || id, chatProfiles[id]?.avatarUrl || '', fallback)
   }
 
   const avatarSrcForMessage = (message) => {
@@ -627,10 +627,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     return avatarSrcForProfile(guestId, name)
   }
 
+  // Header always shows the chat partner for guests, and Hana herself for the owner inbox.
   const partnerAvatarSrc = (() => {
     if (actingAsOwner) {
-      if (!activeThreadId) return hanachanArt
-      return avatarSrcForProfile(ownerActiveGuestKey || 'guest', ownerActiveGuestLabel)
+      return avatarSrcForProfile(OWNER_PROFILE.key, OWNER_PROFILE.displayName)
     }
     if (channel === 'human') {
       return avatarSrcForProfile(OWNER_PROFILE.key, OWNER_PROFILE.displayName)

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
+import hanachanArt from './assets/hanachan.svg'
 import {
     clearAllChatHistories,
     clearChatThreadHistory,
@@ -140,7 +141,8 @@ export default function AdminHanaInbox() {
 
   const avatarSrcForProfile = (profileId, displayName) => {
     const id = String(profileId || '').trim().toLowerCase() || 'guest'
-    return resolveAvatarSrc(id, displayName || id, chatProfiles[id]?.avatarUrl || '')
+    const fallback = id === OWNER_PROFILE.key || id === 'hana' ? hanachanArt : ''
+    return resolveAvatarSrc(id, displayName || id, chatProfiles[id]?.avatarUrl || '', fallback)
   }
 
   const activeGuestKey = useMemo(() => {

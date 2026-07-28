@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import './App.css'
+import hanachanArt from './assets/hanachan.svg'
 import { clearBookBookmark, getAllBookBookmarks, getBookBookmark } from './bookProgress'
 import DailyKotoba from './DailyKotoba'
 import {
@@ -344,7 +345,12 @@ function App() {
   )
 
   const sessionAvatarSrc = useMemo(
-    () => resolveAvatarSrc(sessionProfile.id, sessionProfile.displayName, sessionAvatarUrl),
+    () => resolveAvatarSrc(
+      sessionProfile.id,
+      sessionProfile.displayName,
+      sessionAvatarUrl,
+      sessionProfile.id === 'hana' ? hanachanArt : '',
+    ),
     [sessionProfile, sessionAvatarUrl],
   )
   const [password, setPassword] = useState('')

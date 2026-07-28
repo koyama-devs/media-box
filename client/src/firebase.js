@@ -186,10 +186,12 @@ export function getDefaultAvatarDataUrl(profileId, displayName = '') {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
 }
 
-/** Prefer custom URL, else cached, else default initials. */
-export function resolveAvatarSrc(profileId, displayName, customUrl = '') {
+/** Prefer custom URL, else cached, else optional fallback (e.g. Hana art), else initials. */
+export function resolveAvatarSrc(profileId, displayName, customUrl = '', fallbackUrl = '') {
   const url = String(customUrl || getCachedAvatarUrl(profileId) || '').trim()
   if (url) return url
+  const fallback = String(fallbackUrl || '').trim()
+  if (fallback) return fallback
   return getDefaultAvatarDataUrl(profileId, displayName)
 }
 
