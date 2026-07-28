@@ -18,6 +18,7 @@ import {
     getDoc,
     getDocs,
     getFirestore,
+    increment,
     limit,
     onSnapshot,
     orderBy,
@@ -323,6 +324,8 @@ function serializeChatThread(id, data) {
     updatedAt: data?.updatedAt?.toDate?.()?.toISOString?.() || data?.updatedAtIso || null,
     unreadByHana: Boolean(data?.unreadByHana),
     unreadByGuest: Boolean(data?.unreadByGuest),
+    unreadCountHana: Math.max(0, Number(data?.unreadCountHana) || 0),
+    unreadCountGuest: Math.max(0, Number(data?.unreadCountGuest) || 0),
     hanaLastReadAt: data?.hanaLastReadAt?.toDate?.()?.toISOString?.() || data?.hanaLastReadAtIso || null,
     guestLastReadAt: data?.guestLastReadAt?.toDate?.()?.toISOString?.() || data?.guestLastReadAtIso || null,
     guestOnlineAt: data?.guestOnlineAt?.toDate?.()?.toISOString?.() || data?.guestOnlineAtIso || null,
@@ -411,18 +414,78 @@ export function subscribeChatMessages(threadId, onData, onError) {
     onData?.([])
     return () => {}
   }
-  const messagesQuery = query(
-    collection(db, CHAT_THREADS_COLLECTION, threadId, 'messages'),
-    orderBy('createdAt', 'asc'),
-    limit(200),
-  )
+  // Sort client-side: orderBy('createdAt') silently drops docs missing that field.
+  const messagesRef = collection(db, CHAT_THREADS_COLLECTION, threadId, 'messages')
   return onSnapshot(
-    messagesQuery,
+    query(messagesRef, limit(200)),
     (snap) => {
-      onData?.(snap.docs.map((document) => serializeChatMessage(document.id, document.data())))
+      const rows = snap.docs
+        .map((document) => serializeChatMessage(document.id, document.data()))
+        .sort((a, b) => String(a.createdAt || a.id || '').localeCompare(String(b.createdAt || b.id || '')))
+      onData?.(rows)
     },
     (error) => onError?.(error),
   )
+}
+
+/**
+ * If a known guest still has history on a legacy UUID thread, copy it into guest-{key}
+ * so owner + guest share one conversation.
+ * @returns {Promise<string>} thread id to open
+ */
+export async function migrateLegacyGuestThread({
+  canonicalId,
+  legacyThreadId,
+  guestLabel,
+  guestKey,
+}) {
+  if (!canonicalId || !legacyThreadId || canonicalId === legacyThreadId) {
+    return canonicalId || legacyThreadId
+  }
+
+  const canonMessagesRef = collection(db, CHAT_THREADS_COLLECTION, canonicalId, 'messages')
+  const legacyMessagesRef = collection(db, CHAT_THREADS_COLLECTION, legacyThreadId, 'messages')
+  const [canonSnap, legacySnap, legacyThreadSnap] = await Promise.all([
+    getDocs(query(canonMessagesRef, limit(1))),
+    getDocs(query(legacyMessagesRef, limit(200))),
+    getDoc(doc(db, CHAT_THREADS_COLLECTION, legacyThreadId)),
+  ])
+
+  if (legacySnap.empty) return canonicalId
+  // Canonical already has its own history — open whichever caller preferred.
+  if (!canonSnap.empty) return legacyThreadId
+
+  const legacyMeta = legacyThreadSnap.exists() ? legacyThreadSnap.data() : {}
+  const nowIso = new Date().toISOString()
+  await setDoc(
+    doc(db, CHAT_THREADS_COLLECTION, canonicalId),
+    {
+      guestLabel: guestLabel || legacyMeta.guestLabel || guestLabelFromUid(canonicalId),
+      guestKey: guestKey || legacyMeta.guestKey || String(canonicalId).replace(/^guest-/, ''),
+      lastText: legacyMeta.lastText || '',
+      updatedAt: serverTimestamp(),
+      updatedAtIso: legacyMeta.updatedAtIso || nowIso,
+      unreadByHana: Boolean(legacyMeta.unreadByHana),
+      unreadByGuest: Boolean(legacyMeta.unreadByGuest),
+      unreadCountHana: Math.max(0, Number(legacyMeta.unreadCountHana) || 0),
+      unreadCountGuest: Math.max(0, Number(legacyMeta.unreadCountGuest) || 0),
+      guestLastReadAt: legacyMeta.guestLastReadAt || null,
+      hanaLastReadAt: legacyMeta.hanaLastReadAt || null,
+      migratedFrom: legacyThreadId,
+    },
+    { merge: true },
+  )
+
+  const docs = legacySnap.docs
+  for (let i = 0; i < docs.length; i += 50) {
+    const batch = writeBatch(db)
+    docs.slice(i, i + 50).forEach((messageDoc) => {
+      batch.set(doc(canonMessagesRef, messageDoc.id), messageDoc.data(), { merge: true })
+    })
+    await batch.commit()
+  }
+
+  return canonicalId
 }
 
 /** Guest: watch own thread metadata (unread badge). */
@@ -494,8 +557,15 @@ export async function sendChatMessage({ threadId, text, sender, guestLabel, gues
       lastText: trimmed.slice(0, 160),
       updatedAt: serverTimestamp(),
       updatedAtIso: nowIso,
-      unreadByHana: role === 'guest',
-      unreadByGuest: role === 'hana',
+      ...(role === 'guest'
+        ? {
+            unreadByHana: true,
+            unreadCountHana: increment(1),
+          }
+        : {
+            unreadByGuest: true,
+            unreadCountGuest: increment(1),
+          }),
     },
     { merge: true },
   )
@@ -570,15 +640,30 @@ export async function markThreadRead(threadId, reader) {
   const patch = reader === 'hana'
     ? {
         unreadByHana: false,
+        unreadCountHana: 0,
         hanaLastReadAt: serverTimestamp(),
         hanaLastReadAtIso: nowIso,
       }
     : {
         unreadByGuest: false,
+        unreadCountGuest: 0,
         guestLastReadAt: serverTimestamp(),
         guestLastReadAtIso: nowIso,
       }
   await setDoc(doc(db, CHAT_THREADS_COLLECTION, threadId), patch, { merge: true })
+}
+
+/** Unread message count for launcher / thread chips (falls back to 1 if only the boolean flag is set). */
+export function threadUnreadCount(thread, viewer) {
+  if (!thread) return 0
+  if (viewer === 'hana') {
+    const n = Number(thread.unreadCountHana) || 0
+    if (n > 0) return n
+    return thread.unreadByHana ? 1 : 0
+  }
+  const n = Number(thread.unreadCountGuest) || 0
+  if (n > 0) return n
+  return thread.unreadByGuest ? 1 : 0
 }
 
 /** Ensure a known guest thread doc exists (admin roster / open chat). */
@@ -593,8 +678,6 @@ export async function ensureChatThread({ threadId, guestLabel, guestKey }) {
       guestKey: guestKey || profile?.key || '',
       updatedAt: serverTimestamp(),
       updatedAtIso: nowIso,
-      unreadByHana: false,
-      unreadByGuest: false,
     },
     { merge: true },
   )

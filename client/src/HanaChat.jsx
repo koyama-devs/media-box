@@ -14,6 +14,7 @@ import {
   isAdminUser,
   isPresenceOnline,
   markThreadRead,
+  migrateLegacyGuestThread,
   pulseChatPresence,
   resolveGuestDisplayName,
   sendChatMessage,
@@ -22,6 +23,7 @@ import {
   subscribeChatThreads,
   subscribeOwnChatThread,
   subscribeToAuthUser,
+  threadUnreadCount,
   updateChatMessage,
 } from './firebase'
 import './hana-chat.css'
@@ -155,31 +157,52 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   const ownerGuestRoster = useMemo(() => {
     if (!actingAsOwner) return []
+    const usedIds = new Set()
     const known = Object.values(GUEST_PROFILES).map((profile) => {
-      const threadId = `guest-${profile.key}`
-      const thread = threads.find((t) => t.id === threadId || t.guestKey === profile.key) || null
+      const canonicalId = `guest-${profile.key}`
+      const matches = threads.filter((t) => (
+        t.id === canonicalId
+        || t.guestKey === profile.key
+        || t.guestLabel === profile.displayName
+      ))
+      const thread = [...matches].sort((a, b) => {
+        const score = (entry) => (entry.lastText ? 4 : 0)
+          + (entry.id === canonicalId ? 2 : 0)
+          + (entry.guestKey === profile.key ? 1 : 0)
+        const diff = score(b) - score(a)
+        if (diff !== 0) return diff
+        return String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
+      })[0] || null
+      if (thread?.id) usedIds.add(thread.id)
       return {
-        threadId,
+        threadId: thread?.id || canonicalId,
+        canonicalId,
         label: profile.displayName,
         thread,
         known: true,
+        guestKey: profile.key,
       }
     })
-    const knownIds = new Set(known.map((g) => g.threadId))
     const extras = threads
-      .filter((t) => !knownIds.has(t.id) && !Object.values(GUEST_PROFILES).some((p) => p.key === t.guestKey))
+      .filter((t) => !usedIds.has(t.id) && !Object.values(GUEST_PROFILES).some((p) => (
+        p.key === t.guestKey || `guest-${p.key}` === t.id || p.displayName === t.guestLabel
+      )))
       .map((thread) => ({
         threadId: thread.id,
+        canonicalId: thread.id,
         label: resolveGuestDisplayName(thread),
         thread,
         known: false,
+        guestKey: thread.guestKey || '',
       }))
     return [...known, ...extras]
   }, [actingAsOwner, threads])
 
   const unreadLauncher = useMemo(() => {
-    if (actingAsOwner) return threads.filter((t) => t.unreadByHana).length
-    return ownThread?.unreadByGuest ? 1 : 0
+    if (actingAsOwner) {
+      return threads.reduce((sum, thread) => sum + threadUnreadCount(thread, 'hana'), 0)
+    }
+    return threadUnreadCount(ownThread, 'guest')
   }, [actingAsOwner, threads, ownThread])
 
   useEffect(() => {
@@ -241,7 +264,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   useEffect(() => {
     if (hidden || actingAsOwner) {
-      if (actingAsOwner && !activeThreadId) setHanaMessages([])
       return undefined
     }
     if (!guestOnHuman || !guestChatId) {
@@ -253,12 +275,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       (next) => {
         setHanaMessages(next)
         setError('')
-        // Re-mark read whenever messages update while guest is viewing.
-        markThreadRead(guestChatId, 'guest').catch(() => {})
       },
       (err) => setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。'),
     )
-    markThreadRead(guestChatId, 'guest').catch(() => {})
     return unsub
   }, [hidden, actingAsOwner, guestOnHuman, guestChatId])
 
@@ -267,18 +286,52 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       if (actingAsOwner && !activeThreadId) setHanaMessages([])
       return undefined
     }
+    let cancelled = false
     const unsub = subscribeChatMessages(
       activeThreadId,
       (next) => {
+        if (cancelled) return
         setHanaMessages(next)
         setError('')
-        markThreadRead(activeThreadId, 'hana').catch(() => {})
       },
-      (err) => setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。'),
+      (err) => {
+        if (cancelled) return
+        setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。')
+      },
     )
-    markThreadRead(activeThreadId, 'hana').catch(() => {})
-    return unsub
+    return () => {
+      cancelled = true
+      unsub()
+    }
   }, [hidden, actingAsOwner, activeThreadId])
+
+  // Only mark read while the chat panel is actually open and visible.
+  useEffect(() => {
+    if (hidden || !open) return undefined
+
+    const threadId = actingAsOwner
+      ? activeThreadId
+      : (guestOnHuman ? guestChatId : null)
+    if (!threadId) return undefined
+
+    const reader = actingAsOwner ? 'hana' : 'guest'
+    const markIfVisible = () => {
+      if (document.visibilityState === 'visible') {
+        markThreadRead(threadId, reader).catch(() => {})
+      }
+    }
+    markIfVisible()
+    document.addEventListener('visibilitychange', markIfVisible)
+    return () => document.removeEventListener('visibilitychange', markIfVisible)
+  }, [
+    hidden,
+    open,
+    actingAsOwner,
+    activeThreadId,
+    guestOnHuman,
+    guestChatId,
+    hanaMessages,
+  ])
 
   useEffect(() => {
     const node = listRef.current
@@ -412,18 +465,38 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     setEditingId(null)
   }
 
-  const openOwnerThread = async (threadId, label, guestKey = '') => {
-    setActiveThreadId(threadId)
+  const openOwnerThread = async (threadId, label, guestKey = '', canonicalId = '') => {
     clearComposerExtras()
-    if (!threadId.startsWith('guest-')) return
-    try {
-      await ensureChatThread({
-        threadId,
-        guestLabel: label,
-        guestKey: guestKey || threadId.replace(/^guest-/, ''),
-      })
-    } catch {
-      /* ignore */
+    setHanaMessages([])
+    const key = guestKey || (canonicalId || threadId).replace(/^guest-/, '')
+    const canon = canonicalId || (key && GUEST_PROFILES[key] ? `guest-${key}` : '')
+    let openId = threadId
+
+    if (canon && threadId && canon !== threadId) {
+      try {
+        openId = await migrateLegacyGuestThread({
+          canonicalId: canon,
+          legacyThreadId: threadId,
+          guestLabel: label,
+          guestKey: key,
+        })
+      } catch {
+        openId = threadId
+      }
+    }
+
+    setActiveThreadId(openId)
+
+    if (openId.startsWith('guest-')) {
+      try {
+        await ensureChatThread({
+          threadId: openId,
+          guestLabel: label,
+          guestKey: key || openId.replace(/^guest-/, ''),
+        })
+      } catch {
+        /* ignore */
+      }
     }
   }
 
@@ -641,8 +714,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       >
         <img src={hanachanArt} alt="" className="hana-chat-launcher-art" />
         {unreadLauncher ? (
-          <span className="hana-chat-badge" aria-label={`未読 ${unreadLauncher}`}>
-            {unreadLauncher > 9 ? '9+' : unreadLauncher}
+          <span className="hana-chat-badge" aria-label={`未読 ${unreadLauncher}件`}>
+            {unreadLauncher > 99 ? '99+' : unreadLauncher}
           </span>
         ) : null}
       </button>
@@ -686,15 +759,18 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               {ownerGuestRoster.length === 0 ? (
                 <p className="hana-chat-empty">まだメッセージはありません。</p>
               ) : (
-                ownerGuestRoster.map((entry) => (
+                ownerGuestRoster.map((entry) => {
+                  const unreadN = threadUnreadCount(entry.thread, 'hana')
+                  return (
                   <button
-                    key={entry.threadId}
+                    key={`${entry.canonicalId}:${entry.threadId}`}
                     type="button"
-                    className={`hana-chat-thread${activeThreadId === entry.threadId ? ' is-active' : ''}${entry.thread?.unreadByHana ? ' is-unread' : ''}`}
+                    className={`hana-chat-thread${activeThreadId === entry.threadId || activeThreadId === entry.canonicalId ? ' is-active' : ''}${unreadN ? ' is-unread' : ''}`}
                     onClick={() => openOwnerThread(
                       entry.threadId,
                       entry.label,
-                      entry.thread?.guestKey || (entry.known ? entry.threadId.replace(/^guest-/, '') : ''),
+                      entry.guestKey || entry.thread?.guestKey || '',
+                      entry.canonicalId,
                     )}
                   >
                     <span className="hana-chat-thread-name">
@@ -703,12 +779,18 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                         aria-hidden="true"
                       />
                       {entry.label}
+                      {unreadN ? (
+                        <span className="hana-chat-thread-unread" aria-label={`未読 ${unreadN}件`}>
+                          {unreadN > 99 ? '99+' : unreadN}
+                        </span>
+                      ) : null}
                     </span>
                     <span className="hana-chat-thread-preview">
                       {entry.thread?.lastText || (entry.known ? '（未開始）' : '—')}
                     </span>
                   </button>
-                ))
+                  )
+                })
               )}
             </div>
           ) : null}
