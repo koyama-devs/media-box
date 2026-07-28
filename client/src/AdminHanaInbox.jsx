@@ -125,6 +125,15 @@ export default function AdminHanaInbox() {
     ].join('\0')
   }, [messages, activeId])
 
+  const latestOtherMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const message = messages[i]
+      if (!message || message.deleted) continue
+      if (message.sender !== 'hana') return message.id
+    }
+    return null
+  }, [messages])
+
   useEffect(() => {
     const node = listRef.current
     if (!node) return
@@ -602,6 +611,7 @@ export default function AdminHanaInbox() {
                           canEdit={mutable}
                           canDelete={mutable}
                           canReact={!message.deleted}
+                          showFlowerReact={!message.deleted && !isOwn && message.id === latestOtherMessageId}
                           reactions={message.reactions || {}}
                           reactorId={OWNER_PROFILE.key}
                           copyText={message.deleted ? '' : (message.rawText || message.text || '')}

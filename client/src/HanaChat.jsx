@@ -848,6 +848,17 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     : (guestProfile?.key || String(guestKey || '').trim().toLowerCase() || 'guest')
   const canUseReactions = actingAsOwner || guestOnHuman
 
+  const latestOtherMessageId = useMemo(() => {
+    for (let i = visibleMessages.length - 1; i >= 0; i -= 1) {
+      const message = visibleMessages[i]
+      if (!message || message.deleted) continue
+      const isOwn = (message.sender || message.role) === ownSender
+        || (!actingAsOwner && !guestOnHuman && message.role === 'guest')
+      if (!isOwn) return message.id
+    }
+    return null
+  }, [visibleMessages, ownSender, actingAsOwner, guestOnHuman])
+
   const suggestContextKey = useMemo(() => {
     if (!actingAsOwner || !activeThreadId || !ownerSuggestEnabled) return ''
     const usable = hanaMessages.filter((m) => !m.deleted && String(m.text || '').trim())
@@ -1701,6 +1712,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     canEdit={mutable}
                     canDelete={mutable}
                     canReact={!message.deleted}
+                    showFlowerReact={!message.deleted && !isOwn && message.id === latestOtherMessageId}
                     reactions={message.reactions || {}}
                     reactorId={reactorId}
                     copyText={message.deleted ? '' : (message.rawText || message.text || '')}
