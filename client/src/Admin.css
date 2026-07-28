@@ -630,6 +630,20 @@
   flex-wrap: wrap;
 }
 
+.admin-guest-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.25);
+}
+
+.admin-guest-avatar--sm {
+  width: 22px;
+  height: 22px;
+}
+
 .admin-guest-dot {
   width: 9px;
   height: 9px;

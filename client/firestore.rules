@@ -59,6 +59,10 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /chatProfiles/{profileId} {
+      allow read, write: if true;
+    }
+
     // Private shared-password app: owner (password hana) may list without Google admin.
     match /chatThreads/{threadId} {
       allow read, create, update: if true;

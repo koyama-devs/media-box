@@ -15,11 +15,15 @@ import {
   isPresenceOnline,
   markThreadRead,
   migrateLegacyGuestThread,
+  OWNER_PROFILE,
   pulseChatPresence,
+  resolveAvatarSrc,
   resolveGuestDisplayName,
+  resolveSessionProfile,
   sendChatMessage,
   softDeleteChatMessage,
   subscribeChatMessages,
+  subscribeChatProfiles,
   subscribeChatThreads,
   subscribeOwnChatThread,
   subscribeToAuthUser,
@@ -135,6 +139,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [replyTo, setReplyTo] = useState(null)
   const [editingId, setEditingId] = useState(null)
   const [presenceTick, setPresenceTick] = useState(() => Date.now())
+  const [chatProfiles, setChatProfiles] = useState({})
   const listRef = useRef(null)
   const panelRef = useRef(null)
   const inputRef = useRef(null)
@@ -151,6 +156,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   const isAdmin = isAdminUser(authUser)
   const actingAsOwner = appRole === 'owner' || isAdmin
+  const sessionProfile = useMemo(
+    () => resolveSessionProfile(actingAsOwner ? 'owner' : 'guest', guestKey),
+    [actingAsOwner, guestKey],
+  )
 
   const ownerActiveGuestLabel = useMemo(() => {
     if (!actingAsOwner || !activeThreadId) return 'ゲスト'
@@ -160,6 +169,15 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       guestKey: thread?.guestKey,
       guestLabel: thread?.guestLabel,
     })
+  }, [actingAsOwner, activeThreadId, threads])
+
+  const ownerActiveGuestKey = useMemo(() => {
+    if (!actingAsOwner || !activeThreadId) return ''
+    const thread = threads.find((entry) => entry.id === activeThreadId)
+    const fromThread = String(thread?.guestKey || '').trim().toLowerCase()
+    if (fromThread) return fromThread
+    const known = String(activeThreadId).match(/^guest-(hiro|zen|gabusan)$/i)
+    return known ? known[1].toLowerCase() : ''
   }, [actingAsOwner, activeThreadId, threads])
 
   const ownerGuestRoster = useMemo(() => {
@@ -265,6 +283,24 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       () => {},
     )
   }, [hidden, actingAsOwner, guestChatId])
+
+  useEffect(() => {
+    if (hidden) {
+      setChatProfiles({})
+      return undefined
+    }
+    const ids = [
+      OWNER_PROFILE.key,
+      ...Object.keys(GUEST_PROFILES),
+      sessionProfile.id,
+      ownerActiveGuestKey,
+    ].filter(Boolean)
+    return subscribeChatProfiles(
+      ids,
+      (next) => setChatProfiles(next || {}),
+      () => {},
+    )
+  }, [hidden, sessionProfile.id, ownerActiveGuestKey])
 
   const hanaThreadId = actingAsOwner ? activeThreadId : guestChatId
   const guestOnHuman = !actingAsOwner && channel === 'human'
@@ -575,6 +611,33 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   const labelForMessage = (message) => labelForRole(message.sender || message.role)
 
+  const avatarSrcForProfile = (profileId, displayName) => {
+    const id = String(profileId || '').trim().toLowerCase() || 'guest'
+    return resolveAvatarSrc(id, displayName || id, chatProfiles[id]?.avatarUrl || '')
+  }
+
+  const avatarSrcForMessage = (message) => {
+    const role = message.sender || message.role
+    if (role === 'hanachan') return hanachanArt
+    if (role === 'hana') return avatarSrcForProfile(OWNER_PROFILE.key, OWNER_PROFILE.displayName)
+    const guestId = actingAsOwner
+      ? (ownerActiveGuestKey || 'guest')
+      : (guestProfile?.key || sessionProfile.id || 'guest')
+    const name = actingAsOwner ? ownerActiveGuestLabel : guestDisplayName
+    return avatarSrcForProfile(guestId, name)
+  }
+
+  const partnerAvatarSrc = (() => {
+    if (actingAsOwner) {
+      if (!activeThreadId) return hanachanArt
+      return avatarSrcForProfile(ownerActiveGuestKey || 'guest', ownerActiveGuestLabel)
+    }
+    if (channel === 'human') {
+      return avatarSrcForProfile(OWNER_PROFILE.key, OWNER_PROFILE.displayName)
+    }
+    return hanachanArt
+  })()
+
   const clearComposerExtras = () => {
     setReplyTo(null)
     setEditingId(null)
@@ -863,7 +926,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         >
           <header className="hana-chat-header">
             <div className={`hana-chat-avatar${speaking ? ' is-speaking' : ''}`}>
-              <img src={hanachanArt} alt="" />
+              <img src={partnerAvatarSrc} alt="" />
               <span
                 className={`hana-chat-presence ${partnerOnline ? 'is-online' : 'is-offline'}`}
                 title={presenceLabel}
@@ -909,6 +972,14 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     )}
                   >
                     <span className="hana-chat-thread-name">
+                      <img
+                        className="hana-chat-thread-avatar"
+                        src={avatarSrcForProfile(
+                          entry.guestKey || entry.canonicalId.replace(/^guest-/, '') || 'guest',
+                          entry.label,
+                        )}
+                        alt=""
+                      />
                       <span
                         className={`hana-chat-thread-dot ${isPresenceOnline(entry.thread?.guestOnlineAt, presenceTick) ? 'is-online' : 'is-offline'}`}
                         aria-hidden="true"
@@ -959,46 +1030,54 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 || (!actingAsOwner && !guestOnHuman && message.role === 'guest')
               const mutable = isOwn && canMutateOwnMessage(message)
               const sideClass = isOwn ? 'is-own' : 'is-other'
+              const avatarSrc = avatarSrcForMessage(message)
               return (
-                <ChatSwipeBubble
-                  key={message.id}
-                  className={`${sideClass} is-${message.role}`}
-                  canReply={!message.deleted}
-                  canEdit={mutable}
-                  canDelete={mutable}
-                  onReply={() => startReply(message)}
-                  onEdit={() => startEdit(message)}
-                  onDelete={() => handleDelete(message)}
-                >
-                  <div
-                    className={`hana-chat-bubble ${sideClass} is-${message.role}${message.kind === 'human-switch' || message.kind === 'intro' ? ' is-notice' : ''}${message.deleted ? ' is-deleted' : ''}`}
+                <div key={message.id} className={`hana-chat-msg-row ${sideClass}`}>
+                  {!isOwn ? (
+                    <img className="hana-chat-msg-avatar" src={avatarSrc} alt="" />
+                  ) : null}
+                  <ChatSwipeBubble
+                    className={`${sideClass} is-${message.role}`}
+                    canReply={!message.deleted}
+                    canEdit={mutable}
+                    canDelete={mutable}
+                    onReply={() => startReply(message)}
+                    onEdit={() => startEdit(message)}
+                    onDelete={() => handleDelete(message)}
                   >
-                    <span className="hana-chat-bubble-label">
-                      {labelForMessage(message)}
-                    </span>
-                    {message.replyTo ? (
-                      <div className="hana-chat-quote">
-                        <strong>{labelForRole(message.replyTo.sender || message.replyTo.role)}</strong>
-                        <span>{message.replyTo.text}</span>
+                    <div
+                      className={`hana-chat-bubble ${sideClass} is-${message.role}${message.kind === 'human-switch' || message.kind === 'intro' ? ' is-notice' : ''}${message.deleted ? ' is-deleted' : ''}`}
+                    >
+                      <span className="hana-chat-bubble-label">
+                        {labelForMessage(message)}
+                      </span>
+                      {message.replyTo ? (
+                        <div className="hana-chat-quote">
+                          <strong>{labelForRole(message.replyTo.sender || message.replyTo.role)}</strong>
+                          <span>{message.replyTo.text}</span>
+                        </div>
+                      ) : null}
+                      <p>{message.text}</p>
+                      <div className="hana-chat-bubble-meta">
+                        {message.editedAt && !message.deleted ? <span>編集済</span> : null}
+                        <time dateTime={message.createdAt || undefined}>
+                          {timeLabel || '—'}
+                        </time>
+                        {isOwn && delivery ? (
+                          <span className={`hana-chat-delivery is-${delivery}`}>
+                            {deliveryStatusLabel(delivery)}
+                          </span>
+                        ) : null}
+                        {isOwn && !delivery && !message.deleted ? (
+                          <span className="hana-chat-delivery is-sent">送信済</span>
+                        ) : null}
                       </div>
-                    ) : null}
-                    <p>{message.text}</p>
-                    <div className="hana-chat-bubble-meta">
-                      {message.editedAt && !message.deleted ? <span>編集済</span> : null}
-                      <time dateTime={message.createdAt || undefined}>
-                        {timeLabel || '—'}
-                      </time>
-                      {isOwn && delivery ? (
-                        <span className={`hana-chat-delivery is-${delivery}`}>
-                          {deliveryStatusLabel(delivery)}
-                        </span>
-                      ) : null}
-                      {isOwn && !delivery && !message.deleted ? (
-                        <span className="hana-chat-delivery is-sent">送信済</span>
-                      ) : null}
                     </div>
-                  </div>
-                </ChatSwipeBubble>
+                  </ChatSwipeBubble>
+                  {isOwn ? (
+                    <img className="hana-chat-msg-avatar" src={avatarSrc} alt="" />
+                  ) : null}
+                </div>
               )
             })}
           </div>

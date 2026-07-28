@@ -12,9 +12,12 @@ import {
   MAX_BOOK_FILE_SIZE,
   MAX_FILE_SIZE,
   recordAccessVisit,
+  resolveAvatarSrc,
+  resolveSessionProfile,
   saveSharedPlaylists,
   saveSharedSpaces,
   sortMediaItems,
+  subscribeChatProfile,
   subscribeToMediaItems,
   subscribeToSharedPlaylists,
   subscribeToSharedSpaces,
@@ -25,6 +28,7 @@ import {
   updateMediaName,
   updatePlaylistOrder,
   uploadMediaFile,
+  uploadUserAvatar,
 } from './firebase'
 import HanaChat from './HanaChat.jsx'
 import JapaneseMusic from './JapaneseMusic.jsx'
@@ -330,6 +334,19 @@ function App() {
   })
   const [authRole, setAuthRole] = useState(() => readStoredAuthRole())
   const [guestKey, setGuestKey] = useState(() => readStoredGuestKey())
+  const [sessionAvatarUrl, setSessionAvatarUrl] = useState('')
+  const [avatarUploading, setAvatarUploading] = useState(false)
+  const avatarInputRef = useRef(null)
+
+  const sessionProfile = useMemo(
+    () => resolveSessionProfile(authRole, guestKey),
+    [authRole, guestKey],
+  )
+
+  const sessionAvatarSrc = useMemo(
+    () => resolveAvatarSrc(sessionProfile.id, sessionProfile.displayName, sessionAvatarUrl),
+    [sessionProfile, sessionAvatarUrl],
+  )
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [items, setItems] = useState([])
@@ -1625,6 +1642,21 @@ const playPrevious = useCallback(() => {
 
   useEffect(() => {
     if (!isLoggedIn) {
+      setSessionAvatarUrl('')
+      return undefined
+    }
+    setSessionAvatarUrl('')
+    return subscribeChatProfile(
+      sessionProfile.id,
+      (profile) => {
+        setSessionAvatarUrl(profile?.avatarUrl || '')
+      },
+      () => {},
+    )
+  }, [isLoggedIn, sessionProfile.id])
+
+  useEffect(() => {
+    if (!isLoggedIn) {
       setItems([])
       setSelectedItemId(null)
       setLoadingItems(false)
@@ -2010,8 +2042,27 @@ const playPrevious = useCallback(() => {
     setIsLoggedIn(false)
     setAuthRole('guest')
     setGuestKey('')
+    setSessionAvatarUrl('')
     setPassword('')
     setError('')
+  }
+
+  const handleAvatarPick = async (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !isLoggedIn) return
+    setAvatarUploading(true)
+    setError('')
+    try {
+      const url = await uploadUserAvatar(sessionProfile.id, file, {
+        displayName: sessionProfile.displayName,
+      })
+      setSessionAvatarUrl(url)
+    } catch (avatarError) {
+      setError(getFirebaseErrorMessage(avatarError) || avatarError?.message || 'アバターの更新に失敗しました。')
+    } finally {
+      setAvatarUploading(false)
+    }
   }
 
   const handleUpload = async (event) => {
@@ -2579,6 +2630,36 @@ const playPrevious = useCallback(() => {
               <span className="stat-badge" title="全メディアの合計サイズ">
                 {mediaCounts.totalSize ? formatSize(mediaCounts.totalSize) : '0 MB'}
               </span>
+              <div className="session-user-chip" title={`${sessionProfile.displayName}（${sessionProfile.roleLabel}）`}>
+                <button
+                  type="button"
+                  className="session-user-avatar-btn"
+                  onClick={() => avatarInputRef.current?.click()}
+                  disabled={avatarUploading}
+                  aria-label="アバターを変更"
+                >
+                  <img src={sessionAvatarSrc} alt="" className="session-user-avatar" />
+                </button>
+                <div className="session-user-meta">
+                  <strong>{sessionProfile.displayName}</strong>
+                  <span>{sessionProfile.roleLabel}</span>
+                </div>
+                <button
+                  type="button"
+                  className="session-user-edit"
+                  onClick={() => avatarInputRef.current?.click()}
+                  disabled={avatarUploading}
+                >
+                  {avatarUploading ? '…' : '変更'}
+                </button>
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={handleAvatarPick}
+                />
+              </div>
               <button type="button" className="secondary-button" onClick={handleLogout}>
                 ログアウト
               </button>

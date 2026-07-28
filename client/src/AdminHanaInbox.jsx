@@ -11,10 +11,13 @@ import {
     GUEST_PROFILES,
     isPresenceOnline,
     markThreadRead,
+    OWNER_PROFILE,
     pulseChatPresence,
+    resolveAvatarSrc,
     sendChatMessage,
     softDeleteChatMessage,
     subscribeChatMessages,
+    subscribeChatProfiles,
     subscribeChatThreads,
     updateChatMessage,
 } from './firebase'
@@ -37,6 +40,7 @@ export default function AdminHanaInbox() {
   const [presenceTick, setPresenceTick] = useState(() => Date.now())
   const [clearBusy, setClearBusy] = useState(false)
   const [statusNote, setStatusNote] = useState('')
+  const [chatProfiles, setChatProfiles] = useState({})
   const listRef = useRef(null)
 
   useEffect(() => {
@@ -46,6 +50,15 @@ export default function AdminHanaInbox() {
         setError('')
       },
       (err) => setError(getFirebaseErrorMessage(err) || 'チャットの読み込みに失敗しました。'),
+    )
+  }, [])
+
+  useEffect(() => {
+    const ids = [OWNER_PROFILE.key, ...KNOWN_GUESTS.map((g) => g.key)]
+    return subscribeChatProfiles(
+      ids,
+      (next) => setChatProfiles(next || {}),
+      () => {},
     )
   }, [])
 
@@ -124,6 +137,25 @@ export default function AdminHanaInbox() {
   }
 
   const labelForSender = (sender) => (sender === 'hana' ? 'はな' : activeGuestName)
+
+  const avatarSrcForProfile = (profileId, displayName) => {
+    const id = String(profileId || '').trim().toLowerCase() || 'guest'
+    return resolveAvatarSrc(id, displayName || id, chatProfiles[id]?.avatarUrl || '')
+  }
+
+  const activeGuestKey = useMemo(() => {
+    if (!activeId) return ''
+    const known = KNOWN_GUESTS.find((g) => `guest-${g.key}` === activeId)
+    if (known) return known.key
+    return String(activeThread?.guestKey || '').trim().toLowerCase()
+  }, [activeId, activeThread])
+
+  const avatarSrcForMessage = (message) => {
+    if (message.sender === 'hana') {
+      return avatarSrcForProfile(OWNER_PROFILE.key, OWNER_PROFILE.displayName)
+    }
+    return avatarSrcForProfile(activeGuestKey || 'guest', activeGuestName)
+  }
 
   const handleOpenGuest = (profile) => {
     const threadId = `guest-${profile.key}`
@@ -279,6 +311,11 @@ export default function AdminHanaInbox() {
               >
                 <div className="admin-guest-card-main">
                   <strong className="admin-guest-name">
+                    <img
+                      className="admin-guest-avatar"
+                      src={avatarSrcForProfile(profile.key, profile.displayName)}
+                      alt=""
+                    />
                     <span className={`admin-guest-dot ${online ? 'is-online' : 'is-offline'}`} aria-hidden="true" />
                     {profile.displayName}
                     <span className={`admin-guest-online-label${online ? ' is-online' : ''}`}>{online ? 'オンライン' : 'オフライン'}</span>
@@ -365,6 +402,11 @@ export default function AdminHanaInbox() {
                 onClick={() => handleOpenGuest(profile)}
               >
                 <strong className="admin-guest-name">
+                  <img
+                    className="admin-guest-avatar admin-guest-avatar--sm"
+                    src={avatarSrcForProfile(profile.key, profile.displayName)}
+                    alt=""
+                  />
                   <span
                     className={`admin-guest-dot ${isPresenceOnline(thread?.guestOnlineAt, presenceTick) ? 'is-online' : 'is-offline'}`}
                     aria-hidden="true"
@@ -398,6 +440,11 @@ export default function AdminHanaInbox() {
                 <div className="admin-chat-active-title">
                   <div>
                     <strong className="admin-guest-name">
+                      <img
+                        className="admin-guest-avatar admin-guest-avatar--sm"
+                        src={avatarSrcForProfile(activeGuestKey || 'guest', activeGuestName)}
+                        alt=""
+                      />
                       <span
                         className={`admin-guest-dot ${activeGuestOnline ? 'is-online' : 'is-offline'}`}
                         aria-hidden="true"
@@ -425,39 +472,48 @@ export default function AdminHanaInbox() {
                       : getMessageDeliveryStatus(message, activeThread, 'hana')
                     const timeLabel = formatChatTimestamp(message.createdAt)
                     const mutable = message.sender === 'hana' && canMutateOwnMessage(message)
+                    const isOwn = message.sender === 'hana'
+                    const avatarSrc = avatarSrcForMessage(message)
                     return (
-                      <ChatSwipeBubble
-                        key={message.id}
-                        className={`is-${message.sender}`}
-                        canReply={!message.deleted}
-                        canEdit={mutable}
-                        canDelete={mutable}
-                        onReply={() => startReply(message)}
-                        onEdit={() => startEdit(message)}
-                        onDelete={() => handleDelete(message)}
-                      >
-                        <div className={`admin-chat-bubble is-${message.sender}${message.deleted ? ' is-deleted' : ''}`}>
-                          <span>{labelForSender(message.sender)}</span>
-                          {message.replyTo ? (
-                            <div className="hana-chat-quote">
-                              <strong>{labelForSender(message.replyTo.sender)}</strong>
-                              <span>{message.replyTo.text}</span>
-                            </div>
-                          ) : null}
-                          <p>{message.text}</p>
-                          {(timeLabel || delivery || message.editedAt) ? (
-                            <div className="admin-chat-bubble-meta">
-                              {message.editedAt && !message.deleted ? <span>編集済</span> : null}
-                              {timeLabel ? <time dateTime={message.createdAt || undefined}>{timeLabel}</time> : null}
-                              {delivery ? (
-                                <span className={`admin-chat-delivery is-${delivery}`}>
-                                  {deliveryStatusLabel(delivery)}
-                                </span>
-                              ) : null}
-                            </div>
-                          ) : null}
-                        </div>
-                      </ChatSwipeBubble>
+                      <div key={message.id} className={`hana-chat-msg-row ${isOwn ? 'is-own' : 'is-other'}`}>
+                        {!isOwn ? (
+                          <img className="hana-chat-msg-avatar" src={avatarSrc} alt="" />
+                        ) : null}
+                        <ChatSwipeBubble
+                          className={`is-${message.sender}`}
+                          canReply={!message.deleted}
+                          canEdit={mutable}
+                          canDelete={mutable}
+                          onReply={() => startReply(message)}
+                          onEdit={() => startEdit(message)}
+                          onDelete={() => handleDelete(message)}
+                        >
+                          <div className={`admin-chat-bubble is-${message.sender}${message.deleted ? ' is-deleted' : ''}`}>
+                            <span>{labelForSender(message.sender)}</span>
+                            {message.replyTo ? (
+                              <div className="hana-chat-quote">
+                                <strong>{labelForSender(message.replyTo.sender)}</strong>
+                                <span>{message.replyTo.text}</span>
+                              </div>
+                            ) : null}
+                            <p>{message.text}</p>
+                            {(timeLabel || delivery || message.editedAt) ? (
+                              <div className="admin-chat-bubble-meta">
+                                {message.editedAt && !message.deleted ? <span>編集済</span> : null}
+                                {timeLabel ? <time dateTime={message.createdAt || undefined}>{timeLabel}</time> : null}
+                                {delivery ? (
+                                  <span className={`admin-chat-delivery is-${delivery}`}>
+                                    {deliveryStatusLabel(delivery)}
+                                  </span>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </div>
+                        </ChatSwipeBubble>
+                        {isOwn ? (
+                          <img className="hana-chat-msg-avatar" src={avatarSrc} alt="" />
+                        ) : null}
+                      </div>
                     )
                   })}
                 </div>

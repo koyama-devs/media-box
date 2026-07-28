@@ -37,6 +37,7 @@ import {
     getDownloadURL,
     getStorage,
     ref as storageRef,
+    uploadBytes,
     uploadBytesResumable,
 } from 'firebase/storage'
 import { collectAccessLogPayload } from './accessLog'
@@ -71,6 +72,8 @@ const SHARED_STATE_COLLECTION = 'shared-state'
 const SHARED_PLAYLISTS_DOC = 'playlists'
 const SHARED_SPACES_DOC = 'spaces'
 const CHAT_THREADS_COLLECTION = 'chatThreads'
+const CHAT_PROFILES_COLLECTION = 'chatProfiles'
+const AVATAR_CACHE_PREFIX = 'hana-chat-avatar-'
 const GUEST_CHAT_ID_KEY = 'hana-chat-guest-id'
 const GUEST_LABELS = ['桜', '蜜', '月', '風', '霧', '蝶', '鈴', '露', '霞', '羽']
 
@@ -81,9 +84,226 @@ export const GUEST_PROFILES = {
   gabusan: { key: 'gabusan', displayName: 'ガブリエル', addressAs: 'ガブさん' },
 }
 
+/** Owner session identity (password `hana`). */
+export const OWNER_PROFILE = {
+  key: 'hana',
+  displayName: 'はな',
+  addressAs: 'はな',
+  roleLabel: 'オーナー',
+}
+
+const AVATAR_PALETTE = ['#c45c4a', '#d97706', '#059669', '#2563eb', '#7c3aed', '#db2777']
+
 export function getGuestProfile(guestKey) {
   const key = String(guestKey || '').trim().toLowerCase()
   return GUEST_PROFILES[key] || null
+}
+
+/**
+ * Resolve who is logged in for topbar / chat.
+ * @param {'owner'|'guest'} authRole
+ * @param {string} guestKey
+ */
+export function resolveSessionProfile(authRole, guestKey = '') {
+  if (authRole === 'owner') {
+    return {
+      id: OWNER_PROFILE.key,
+      key: OWNER_PROFILE.key,
+      displayName: OWNER_PROFILE.displayName,
+      addressAs: OWNER_PROFILE.addressAs,
+      role: 'owner',
+      roleLabel: OWNER_PROFILE.roleLabel,
+    }
+  }
+  const guest = getGuestProfile(guestKey)
+  if (guest) {
+    return {
+      id: guest.key,
+      key: guest.key,
+      displayName: guest.displayName,
+      addressAs: guest.addressAs,
+      role: 'guest',
+      roleLabel: 'ゲスト',
+    }
+  }
+  return {
+    id: 'guest',
+    key: 'guest',
+    displayName: 'ゲスト',
+    addressAs: 'ゲスト',
+    role: 'guest',
+    roleLabel: 'ゲスト',
+  }
+}
+
+function avatarCacheKey(profileId) {
+  return `${AVATAR_CACHE_PREFIX}${String(profileId || 'guest')}`
+}
+
+export function getCachedAvatarUrl(profileId) {
+  try {
+    return window.localStorage.getItem(avatarCacheKey(profileId)) || ''
+  } catch {
+    return ''
+  }
+}
+
+export function setCachedAvatarUrl(profileId, url) {
+  try {
+    if (!url) {
+      window.localStorage.removeItem(avatarCacheKey(profileId))
+      return
+    }
+    window.localStorage.setItem(avatarCacheKey(profileId), String(url))
+  } catch {
+    /* ignore */
+  }
+}
+
+function hashString(value) {
+  const raw = String(value || '')
+  let hash = 0
+  for (let i = 0; i < raw.length; i += 1) {
+    hash = (hash * 31 + raw.charCodeAt(i)) >>> 0
+  }
+  return hash
+}
+
+/** Initials SVG data URL used when no custom avatar is set. */
+export function getDefaultAvatarDataUrl(profileId, displayName = '') {
+  const label = String(displayName || profileId || '?').trim()
+  const initial = Array.from(label)[0] || '?'
+  const color = AVATAR_PALETTE[hashString(profileId || label) % AVATAR_PALETTE.length]
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="64" fill="${color}"/>
+  <text x="64" y="72" text-anchor="middle" font-size="56" font-family="system-ui,sans-serif" font-weight="600" fill="#fff8f0">${initial}</text>
+</svg>`
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+}
+
+/** Prefer custom URL, else cached, else default initials. */
+export function resolveAvatarSrc(profileId, displayName, customUrl = '') {
+  const url = String(customUrl || getCachedAvatarUrl(profileId) || '').trim()
+  if (url) return url
+  return getDefaultAvatarDataUrl(profileId, displayName)
+}
+
+function serializeChatProfile(id, data) {
+  return {
+    id,
+    displayName: String(data?.displayName || ''),
+    avatarUrl: String(data?.avatarUrl || ''),
+    updatedAt: data?.updatedAt?.toDate?.()?.toISOString?.() || data?.updatedAtIso || null,
+  }
+}
+
+/** @returns {() => void} */
+export function subscribeChatProfile(profileId, onData, onError) {
+  if (!profileId) {
+    onData?.(null)
+    return () => {}
+  }
+  return onSnapshot(
+    doc(db, CHAT_PROFILES_COLLECTION, profileId),
+    (snap) => {
+      if (!snap.exists()) {
+        onData?.(null)
+        return
+      }
+      const profile = serializeChatProfile(snap.id, snap.data())
+      if (profile.avatarUrl) setCachedAvatarUrl(profileId, profile.avatarUrl)
+      onData?.(profile)
+    },
+    (error) => onError?.(error),
+  )
+}
+
+/**
+ * Watch several chat profiles (known guests + hana).
+ * @param {string[]} profileIds
+ * @returns {() => void}
+ */
+export function subscribeChatProfiles(profileIds, onData, onError) {
+  const ids = [...new Set((profileIds || []).filter(Boolean))]
+  if (ids.length === 0) {
+    onData?.({})
+    return () => {}
+  }
+  const map = {}
+  const unsubs = ids.map((id) => subscribeChatProfile(
+    id,
+    (profile) => {
+      if (profile) map[id] = profile
+      else delete map[id]
+      onData?.({ ...map })
+    },
+    onError,
+  ))
+  return () => unsubs.forEach((unsub) => unsub())
+}
+
+async function resizeImageToJpegBlob(file, maxSize = 256) {
+  const objectUrl = URL.createObjectURL(file)
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const img = new Image()
+      img.onload = () => resolve(img)
+      img.onerror = () => reject(new Error('画像の読み込みに失敗しました。'))
+      img.src = objectUrl
+    })
+    const scale = Math.min(1, maxSize / Math.max(image.width, image.height))
+    const width = Math.max(1, Math.round(image.width * scale))
+    const height = Math.max(1, Math.round(image.height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('画像の変換に失敗しました。')
+    ctx.drawImage(image, 0, 0, width, height)
+    const blob = await new Promise((resolve) => {
+      canvas.toBlob((next) => resolve(next), 'image/jpeg', 0.88)
+    })
+    if (!blob) throw new Error('画像の変換に失敗しました。')
+    return blob
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
+/**
+ * Upload a user avatar and persist URL to chatProfiles.
+ * @param {string} profileId
+ * @param {File} file
+ * @param {{ displayName?: string }} [meta]
+ */
+export async function uploadUserAvatar(profileId, file, meta = {}) {
+  const id = String(profileId || '').trim().toLowerCase()
+  if (!id) throw new Error('プロフィールIDがありません。')
+  if (!file || !String(file.type || '').startsWith('image/')) {
+    throw new Error('画像ファイルを選んでください。')
+  }
+  if (file.size > 8 * 1024 * 1024) {
+    throw new Error('画像は8MB以下にしてください。')
+  }
+
+  const blob = await resizeImageToJpegBlob(file, 256)
+  const objectRef = storageRef(storage, `avatars/${id}.jpg`)
+  await uploadBytes(objectRef, blob, { contentType: 'image/jpeg' })
+  const avatarUrl = await getDownloadURL(objectRef)
+  const nowIso = new Date().toISOString()
+  const displayName = String(meta.displayName || '').trim()
+  await setDoc(
+    doc(db, CHAT_PROFILES_COLLECTION, id),
+    {
+      avatarUrl,
+      ...(displayName ? { displayName } : {}),
+      updatedAt: serverTimestamp(),
+      updatedAtIso: nowIso,
+    },
+    { merge: true },
+  )
+  setCachedAvatarUrl(id, avatarUrl)
+  return avatarUrl
 }
 
 /** Resolve a friendly guest display name from thread id / guestKey / stored label. */
