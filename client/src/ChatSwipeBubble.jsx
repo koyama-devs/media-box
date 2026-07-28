@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
     CHAT_DEFAULT_REACTION,
     CHAT_REACTION_EMOJIS,
@@ -9,6 +10,7 @@ import {
 const HOVER_LEAVE_MS = 180
 const LONG_PRESS_MS = 450
 const LONG_PRESS_MOVE_PX = 28
+const MENU_ARM_MS = 280
 
 const MENU_EXTRA_ACTIONS = [
   { id: 'pin', label: 'ピン', icon: '📌' },
@@ -198,6 +200,7 @@ export default function ChatSwipeBubble({
   const onCopyRef = useRef(onCopy)
 
   const [menuOpen, setMenuOpen] = useState(false)
+  const [menuArmed, setMenuArmed] = useState(false)
   const [desktopOpen, setDesktopOpen] = useState(false)
   const [copiedFlash, setCopiedFlash] = useState(false)
   const [soonNote, setSoonNote] = useState('')
@@ -260,6 +263,7 @@ export default function ChatSwipeBubble({
   const openActionMenu = () => {
     pressOpened.current = true
     clearPressTimer()
+    setMenuArmed(false)
     setMenuOpen(true)
     try {
       navigator.vibrate?.(16)
@@ -270,6 +274,7 @@ export default function ChatSwipeBubble({
 
   const closeActionMenu = () => {
     setMenuOpen(false)
+    setMenuArmed(false)
     setSoonNote('')
   }
 
@@ -354,33 +359,19 @@ export default function ChatSwipeBubble({
     clearPressTimer()
   }, [])
 
-  // Outside tap closes the inline menu (delayed so the long-press lift doesn't kill it).
+  // Fixed center menu via portal — always fully visible regardless of bubble position.
   useEffect(() => {
-    if (!menuOpen) return undefined
-    const onDocPointer = (event) => {
-      const root = rootRef.current
-      if (!root) {
-        setMenuOpen(false)
-        return
-      }
-      if (root.contains(event.target)) {
-        if (event.target instanceof Element && event.target.closest('.chat-msg-menu')) return
-        // Tap on same bubble (not menu) closes.
-        setMenuOpen(false)
-        return
-      }
-      setMenuOpen(false)
+    if (!menuOpen) {
+      setMenuArmed(false)
+      return undefined
     }
+    const armTimer = window.setTimeout(() => setMenuArmed(true), MENU_ARM_MS)
     const onKey = (event) => {
       if (event.key === 'Escape') closeActionMenu()
     }
-    const timer = window.setTimeout(() => {
-      document.addEventListener('pointerdown', onDocPointer, true)
-    }, 280)
     window.addEventListener('keydown', onKey)
     return () => {
-      window.clearTimeout(timer)
-      document.removeEventListener('pointerdown', onDocPointer, true)
+      window.clearTimeout(armTimer)
       window.removeEventListener('keydown', onKey)
     }
   }, [menuOpen])
@@ -392,66 +383,106 @@ export default function ChatSwipeBubble({
   const copiedClass = copiedFlash ? ' is-copied' : ''
   const menuClass = menuOpen ? ' is-menu-open' : ''
 
-  const menuNode = menuOpen ? (
-    <div
-      className="chat-msg-menu"
-      role="menu"
-      aria-label="メッセージメニュー"
-      onPointerDown={(event) => event.stopPropagation()}
-      onTouchStart={(event) => event.stopPropagation()}
-    >
-      <div className="chat-msg-menu-reacts" role="listbox" aria-label="リアクション">
-        {emojiList.map((emoji) => (
-          <button
-            key={emoji}
-            type="button"
-            className={`chat-msg-menu-react${emoji === CHAT_DEFAULT_REACTION ? ' is-default' : ''}`}
-            onClick={() => pickReaction(emoji, emoji === CHAT_DEFAULT_REACTION ? 'increment' : 'set')}
-          >
-            {emoji}
-          </button>
-        ))}
-      </div>
-      <div className="chat-msg-menu-actions">
-        {canCopy ? (
-          <button type="button" className="chat-msg-menu-action" onClick={() => runMenuAction('copy')}>
-            <span className="chat-msg-menu-icon" aria-hidden="true">📋</span>
-            <span>コピー</span>
-          </button>
-        ) : null}
-        {canReply ? (
-          <button type="button" className="chat-msg-menu-action" onClick={() => runMenuAction('reply')}>
-            <span className="chat-msg-menu-icon" aria-hidden="true">↩️</span>
-            <span>返信</span>
-          </button>
-        ) : null}
-        {MENU_EXTRA_ACTIONS.map((action) => (
-          <button
-            key={action.id}
-            type="button"
-            className="chat-msg-menu-action"
-            onClick={() => runMenuAction(action.id)}
-          >
-            <span className="chat-msg-menu-icon" aria-hidden="true">{action.icon}</span>
-            <span>{action.label}</span>
-          </button>
-        ))}
-        {canEdit ? (
-          <button type="button" className="chat-msg-menu-action" onClick={() => runMenuAction('edit')}>
-            <span className="chat-msg-menu-icon" aria-hidden="true">✏️</span>
-            <span>編集</span>
-          </button>
-        ) : null}
-        {canDelete ? (
-          <button type="button" className="chat-msg-menu-action is-danger" onClick={() => runMenuAction('delete')}>
-            <span className="chat-msg-menu-icon" aria-hidden="true">🗑️</span>
-            <span>削除</span>
-          </button>
-        ) : null}
-      </div>
-      {soonNote ? <p className="chat-msg-menu-note" role="status">{soonNote}</p> : null}
-    </div>
-  ) : null
+  const menuPortal = menuOpen
+    ? createPortal(
+      <div
+        className={`chat-msg-menu-overlay${menuArmed ? ' is-armed' : ' is-arming'}`}
+        role="presentation"
+        onPointerDown={(event) => {
+          // Keep composer focus; don't let overlay steal keyboard.
+          if (event.target === event.currentTarget) event.preventDefault()
+        }}
+        onClick={(event) => {
+          if (!menuArmed) return
+          if (event.target === event.currentTarget) closeActionMenu()
+        }}
+      >
+        <div
+          className="chat-msg-menu is-fixed"
+          role="dialog"
+          aria-modal="true"
+          aria-label="メッセージメニュー"
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+          onTouchStart={(event) => event.stopPropagation()}
+        >
+          <div className="chat-msg-menu-reacts" role="listbox" aria-label="リアクション">
+            {emojiList.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                className={`chat-msg-menu-react${emoji === CHAT_DEFAULT_REACTION ? ' is-default' : ''}`}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => pickReaction(emoji, emoji === CHAT_DEFAULT_REACTION ? 'increment' : 'set')}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+          <div className="chat-msg-menu-actions">
+            {canCopy ? (
+              <button
+                type="button"
+                className="chat-msg-menu-action"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => runMenuAction('copy')}
+              >
+                <span className="chat-msg-menu-icon" aria-hidden="true">📋</span>
+                <span>コピー</span>
+              </button>
+            ) : null}
+            {canReply ? (
+              <button
+                type="button"
+                className="chat-msg-menu-action"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => runMenuAction('reply')}
+              >
+                <span className="chat-msg-menu-icon" aria-hidden="true">↩️</span>
+                <span>返信</span>
+              </button>
+            ) : null}
+            {MENU_EXTRA_ACTIONS.map((action) => (
+              <button
+                key={action.id}
+                type="button"
+                className="chat-msg-menu-action"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => runMenuAction(action.id)}
+              >
+                <span className="chat-msg-menu-icon" aria-hidden="true">{action.icon}</span>
+                <span>{action.label}</span>
+              </button>
+            ))}
+            {canEdit ? (
+              <button
+                type="button"
+                className="chat-msg-menu-action"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => runMenuAction('edit')}
+              >
+                <span className="chat-msg-menu-icon" aria-hidden="true">✏️</span>
+                <span>編集</span>
+              </button>
+            ) : null}
+            {canDelete ? (
+              <button
+                type="button"
+                className="chat-msg-menu-action is-danger"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => runMenuAction('delete')}
+              >
+                <span className="chat-msg-menu-icon" aria-hidden="true">🗑️</span>
+                <span>削除</span>
+              </button>
+            ) : null}
+          </div>
+          {soonNote ? <p className="chat-msg-menu-note" role="status">{soonNote}</p> : null}
+        </div>
+      </div>,
+      document.body,
+    )
+    : null
 
   return (
     <div
@@ -496,7 +527,6 @@ export default function ChatSwipeBubble({
                 onLongPress={openActionMenu}
               />
             ) : null}
-            {menuNode}
           </div>
           {canReact || (reactions && Object.keys(reactions).length > 0) ? (
             <ChatReactionChips
@@ -570,6 +600,7 @@ export default function ChatSwipeBubble({
           ) : null}
         </div>
       </div>
+      {menuPortal}
     </div>
   )
 }

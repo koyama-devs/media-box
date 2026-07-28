@@ -723,12 +723,25 @@ body.hana-chat-scroll-lock #root {
   box-sizing: border-box;
 }
 
+/* Space for absolutely-positioned reaction chips — on the ROW, not the bubble,
+   otherwise flex-end pulls the avatar down to the chip line. */
+.hana-chat-msg-row:has(.hana-chat-reactions) {
+  margin-bottom: 34px;
+}
+
 .hana-chat-msg-row.is-own {
   justify-content: flex-end;
 }
 
 .hana-chat-msg-row.is-other {
   justify-content: flex-start;
+}
+
+.hana-chat-msg-row.is-other .hana-chat-msg-avatar {
+  /* Stay glued to the bubble bottom corner; ignore overflow chips below */
+  align-self: flex-end;
+  position: relative;
+  z-index: 1;
 }
 
 .hana-chat-msg-main {
@@ -1270,12 +1283,8 @@ body.hana-chat-scroll-lock #root {
   gap: 4px;
   margin-top: 0;
   max-width: min(280px, 72vw);
-  /* Out of normal flow so avatar stays locked to the bubble, not the chips */
-}
-
-.chat-swipe:has(.hana-chat-reactions) {
-  /* Reserve room under the bubble so the next row isn't covered */
-  margin-bottom: 34px;
+  /* Out of flow: must not change bubble/chat-swipe height (avatar uses flex-end) */
+  pointer-events: auto;
 }
 
 .chat-swipe.is-own .hana-chat-reactions {
@@ -1449,15 +1458,16 @@ body.hana-chat-scroll-lock #root {
 .chat-msg-menu-overlay {
   position: fixed;
   inset: 0;
-  z-index: 400;
+  z-index: 2400; /* above .hana-chat (1200) */
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 18px;
+  padding: max(16px, env(safe-area-inset-top, 0px)) 18px max(16px, env(safe-area-inset-bottom, 0px));
   background: rgba(6, 3, 5, 0.58);
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
   animation: chat-menu-overlay-in 0.16s ease-out;
+  box-sizing: border-box;
 }
 
 .chat-msg-menu-overlay.is-arming {
@@ -1475,33 +1485,41 @@ body.hana-chat-scroll-lock #root {
 }
 
 .chat-msg-menu {
-  position: absolute;
-  left: 0;
-  top: calc(100% + 6px);
+  position: relative;
+  left: auto;
+  right: auto;
+  top: auto;
   bottom: auto;
-  z-index: 40;
-  width: min(260px, 78vw);
+  z-index: 1;
+  width: min(320px, 92vw);
+  max-height: min(70vh, 520px);
+  overflow: auto;
   transform: none;
-  padding: 10px;
-  border-radius: 16px;
+  padding: 14px 12px 12px;
+  border-radius: 18px;
   border: 1px solid rgba(255, 248, 240, 0.14);
   background: rgba(22, 14, 14, 0.98);
-  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.42);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.48);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+  animation: chat-menu-panel-in 0.18s ease-out;
 }
 
-.chat-swipe.is-own .chat-msg-menu {
-  left: auto;
-  right: 0;
+.chat-msg-menu.is-fixed {
+  /* Centered by the overlay flex container — never clipped by bubble/scroll */
+  margin: 0;
 }
 
-.chat-swipe.is-other .chat-msg-menu,
-.chat-swipe.is-hanachan .chat-msg-menu,
-.chat-swipe.is-hana:not(.is-own) .chat-msg-menu {
-  left: 0;
-  right: auto;
+@keyframes chat-menu-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .chat-msg-menu-reacts {
