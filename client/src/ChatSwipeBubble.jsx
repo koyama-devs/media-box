@@ -292,10 +292,16 @@ export default function ChatSwipeBubble({
     }, HOVER_LEAVE_MS)
   }
 
-  const openActionMenu = () => {
-    // Ignore the synthetic click / lift that follows a long-press so the modal stays open.
-    suppressMenuDismissUntil.current = Date.now() + MENU_DISMISS_GUARD_MS
-    setMenuDismissArmed(false)
+  const openActionMenu = (options = {}) => {
+    const immediate = Boolean(options.immediate)
+    if (immediate) {
+      suppressMenuDismissUntil.current = 0
+      setMenuDismissArmed(true)
+    } else {
+      // Ignore the synthetic click / lift that follows a long-press so the modal stays open.
+      suppressMenuDismissUntil.current = Date.now() + MENU_DISMISS_GUARD_MS
+      setMenuDismissArmed(false)
+    }
     setMenuOpen(true)
     setActions(false)
     applyOffset(0)
@@ -720,21 +726,25 @@ export default function ChatSwipeBubble({
                 onLongPress={openActionMenu}
               />
             ) : null}
-            {swipeMode ? (
-              <button
-                type="button"
-                className="chat-bubble-menu-btn"
-                data-no-bubble-press="true"
-                aria-label="メニュー"
-                title="メニュー"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  openActionMenu()
-                }}
-              >
-                <IconMore />
-              </button>
-            ) : null}
+            <button
+              type="button"
+              className="chat-bubble-menu-btn"
+              data-no-bubble-press="true"
+              aria-label="メニュー"
+              title="メニュー"
+              onPointerUp={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                openActionMenu({ immediate: true })
+              }}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                openActionMenu({ immediate: true })
+              }}
+            >
+              <IconMore />
+            </button>
           </div>
           {canReact || (reactions && Object.keys(reactions).length > 0) ? (
             <ChatReactionChips

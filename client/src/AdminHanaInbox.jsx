@@ -606,17 +606,17 @@ export default function AdminHanaInbox() {
                           <img className="hana-chat-msg-avatar" src={avatarSrc} alt="" />
                         ) : null}
                         <div className="hana-chat-msg-main">
-                          {(timeLabel || (isOwn && !message.deleted) || (message.editedAt && !message.deleted)) ? (
+                          {isOwn && (timeLabel || !message.deleted || (message.editedAt && !message.deleted)) ? (
                             <div className="hana-chat-msg-aside">
-                              {message.editedAt && !message.deleted ? <span className="hana-chat-msg-edited">編集済</span> : null}
-                              {timeLabel ? (
-                                <time dateTime={message.createdAt || undefined}>{timeLabel}</time>
-                              ) : null}
                               {isOwn && !message.deleted ? (
                                 <span className={`hana-chat-delivery is-${delivery || 'sent'}`}>
                                   {delivery ? deliveryStatusLabel(delivery) : '送信済'}
                                 </span>
                               ) : null}
+                              {timeLabel ? (
+                                <time dateTime={message.createdAt || undefined}>{timeLabel}</time>
+                              ) : null}
+                              {message.editedAt && !message.deleted ? <span className="hana-chat-msg-edited">編集済</span> : null}
                             </div>
                           ) : null}
                           <ChatSwipeBubble
@@ -648,6 +648,14 @@ export default function AdminHanaInbox() {
                               ) : null}
                             </div>
                           </ChatSwipeBubble>
+                          {!isOwn && (timeLabel || (message.editedAt && !message.deleted)) ? (
+                            <div className="hana-chat-msg-aside">
+                              {timeLabel ? (
+                                <time dateTime={message.createdAt || undefined}>{timeLabel}</time>
+                              ) : null}
+                              {message.editedAt && !message.deleted ? <span className="hana-chat-msg-edited">編集済</span> : null}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     )

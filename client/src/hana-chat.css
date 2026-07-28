@@ -733,7 +733,7 @@ body.hana-chat-scroll-lock #root {
 
 .hana-chat-msg-main {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 6px;
   min-width: 0;
   max-width: calc(100% - 40px);
@@ -743,17 +743,20 @@ body.hana-chat-scroll-lock #root {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  justify-content: flex-end;
+  justify-content: center;
   gap: 2px;
   flex: 0 0 auto;
   min-width: 2.4em;
-  padding-bottom: 2px;
   font-family: system-ui, sans-serif;
   font-size: 0.62rem;
   line-height: 1.25;
   letter-spacing: 0.02em;
   color: rgba(255, 248, 240, 0.55);
   white-space: nowrap;
+}
+
+.hana-chat-msg-row.is-other .hana-chat-msg-aside {
+  align-items: flex-start;
 }
 
 .hana-chat-msg-aside time {
@@ -1277,31 +1280,20 @@ body.hana-chat-scroll-lock #root {
   display: block;
   width: fit-content;
   max-width: 100%;
+  overflow: visible;
+  /* Room for the side menu button */
+  margin-inline: 34px;
 }
 
 .chat-swipe-bubble-wrap.has-flower {
-  /* Room for the corner flower on the bubble corner. */
-  margin-right: 6px;
-  margin-bottom: 6px;
-}
-
-.chat-swipe.is-own .chat-swipe-bubble-wrap.has-flower,
-.chat-swipe.is-guest:not(.is-other) .chat-swipe-bubble-wrap.has-flower {
-  margin-right: 6px;
-  margin-left: 0;
-}
-
-.chat-swipe.is-other .chat-swipe-bubble-wrap.has-flower,
-.chat-swipe.is-hanachan .chat-swipe-bubble-wrap.has-flower,
-.chat-swipe.is-hana:not(.is-own) .chat-swipe-bubble-wrap.has-flower {
-  margin-left: 0;
-  margin-right: 6px;
+  /* Space so the corner flower isn't clipped under the next row */
+  margin-bottom: 10px;
 }
 
 .hana-chat-flower-fab {
   position: absolute;
-  right: -5px;
-  bottom: -3px;
+  right: -6px;
+  bottom: -7px;
   z-index: 8;
   display: inline-flex;
   align-items: center;
@@ -1316,9 +1308,11 @@ body.hana-chat-scroll-lock #root {
   cursor: pointer;
   line-height: 1;
   -webkit-tap-highlight-color: transparent;
+  pointer-events: auto;
 }
 
-.chat-swipe-bubble-wrap > :not(.hana-chat-flower-fab) {
+.chat-swipe-bubble-wrap > .hana-chat-bubble,
+.chat-swipe-bubble-wrap > .admin-chat-bubble {
   position: relative;
   z-index: 1;
 }
@@ -1427,33 +1421,38 @@ body.hana-chat-scroll-lock #root {
 
 .chat-bubble-menu-btn {
   position: absolute;
-  top: -6px;
-  right: -6px;
-  z-index: 9;
+  top: 50%;
+  /* Outer side by default (received / other): left, toward avatar gap */
+  left: -34px;
+  right: auto;
+  z-index: 12;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   padding: 0;
-  border: 0;
+  border: 1px solid rgba(255, 248, 240, 0.18);
   border-radius: 999px;
-  background: rgba(22, 14, 14, 0.82);
-  color: rgba(255, 248, 240, 0.88);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  background: rgba(22, 14, 14, 0.92);
+  color: rgba(255, 248, 240, 0.92);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  transform: translateY(-50%);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
+/* Own bubbles: keep menu on the outer (right) side so it doesn't cover 既読 */
 .chat-swipe.is-own .chat-bubble-menu-btn,
 .chat-swipe.is-guest:not(.is-other) .chat-bubble-menu-btn {
-  right: auto;
-  left: -6px;
+  left: auto;
+  right: -34px;
 }
 
 .chat-bubble-menu-btn:hover,
 .chat-bubble-menu-btn:focus-visible {
-  background: rgba(40, 24, 24, 0.92);
+  background: rgba(50, 28, 28, 0.96);
 }
 
 .chat-msg-menu-overlay {
