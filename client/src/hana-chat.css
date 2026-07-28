@@ -1279,24 +1279,52 @@ body.hana-chat-scroll-lock #root {
   top: calc(100% + 4px);
   z-index: 2;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 4px;
   margin-top: 0;
-  max-width: min(280px, 72vw);
-  /* Out of flow: must not change bubble/chat-swipe height (avatar uses flex-end) */
+  /* Explicit width — abspos shrink-to-fit was capped by short bubble width and wrapped early */
+  width: min(72vw, 300px);
+  max-width: min(72vw, 300px);
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
   pointer-events: auto;
+}
+
+.hana-chat-reactions::-webkit-scrollbar {
+  display: none;
 }
 
 .chat-swipe.is-own .hana-chat-reactions {
   left: auto;
   right: 0;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .chat-swipe.is-other .hana-chat-reactions,
 .chat-swipe.is-hanachan .hana-chat-reactions,
 .chat-swipe.is-hana:not(.is-own) .hana-chat-reactions {
   justify-content: flex-start;
+}
+
+.hana-chat-reaction {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+  min-height: 26px;
+  padding: 2px 8px;
+  border: 1px solid rgba(255, 248, 240, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 248, 240, 0.08);
+  color: var(--hana-cream, #fff8f0);
+  font-size: 0.82rem;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
 .chat-swipe-bubble-wrap {
@@ -1389,21 +1417,6 @@ body.hana-chat-scroll-lock #root {
 .hana-chat-flower-fab .hana-chat-reaction-badge {
   top: -6px;
   right: -8px;
-}
-
-.hana-chat-reaction {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  min-height: 26px;
-  padding: 2px 8px;
-  border: 1px solid rgba(255, 248, 240, 0.14);
-  border-radius: 999px;
-  background: rgba(255, 248, 240, 0.08);
-  color: var(--hana-cream, #fff8f0);
-  font-size: 0.82rem;
-  line-height: 1;
-  cursor: pointer;
 }
 
 .hana-chat-reaction.is-mine {
