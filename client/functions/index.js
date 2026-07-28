@@ -204,3 +204,73 @@ exports.suggestHanaChat = onCall({ cors: true }, async (request) => {
     return { replies: [], topics: [], expressions: [], reason: 'error' }
   }
 })
+
+const TRANSLATE_SYSTEM_PROMPT = `あなたは翻訳アシスタントです。入力文を自然で読みやすい日本語に翻訳してください。
+すでに日本語なら、より自然な日本語に整えてください。
+説明や注釈は書かず、翻訳文だけを返してください。`
+
+async function callGeminiTranslate({ apiKey, text, targetLang }) {
+  const lang = String(targetLang || 'ja').trim().toLowerCase()
+  const langLabel = lang === 'en' ? 'English' : lang === 'vi' ? 'Vietnamese' : 'Japanese'
+  const systemText = lang === 'ja'
+    ? TRANSLATE_SYSTEM_PROMPT
+    : `You are a translation assistant. Translate the input into natural ${langLabel}. Return only the translation, no notes.`
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${encodeURIComponent(apiKey)}`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: systemText }] },
+      contents: [{ role: 'user', parts: [{ text }] }],
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: 1024,
+      },
+    }),
+  })
+
+  if (!response.ok) {
+    const body = await response.text()
+    const error = new Error(`Gemini ${response.status}: ${body.slice(0, 240)}`)
+    error.status = response.status
+    throw error
+  }
+
+  const json = await response.json()
+  return json?.candidates?.[0]?.content?.parts
+    ?.map((part) => part.text || '')
+    .join('')
+    .trim() || ''
+}
+
+/** Translate a chat message (default target: Japanese). */
+exports.translateHanaChat = onCall({ cors: true }, async (request) => {
+  const text = String(request.data?.text || '').trim()
+  if (!text) {
+    throw new HttpsError('invalid-argument', 'text is required')
+  }
+  if (text.length > 2000) {
+    throw new HttpsError('invalid-argument', 'text too long')
+  }
+
+  const targetLang = String(request.data?.targetLang || 'ja').trim().toLowerCase() || 'ja'
+  const key = process.env.GEMINI_API_KEY || ''
+  if (!key) {
+    return { translation: null, reason: 'quota' }
+  }
+
+  try {
+    const translation = await callGeminiTranslate({ apiKey: key, text, targetLang })
+    return {
+      translation: translation || null,
+      reason: translation ? null : 'empty',
+    }
+  } catch (error) {
+    console.error('translateHanaChat', error)
+    if (error?.status === 429 || /credits? are depleted|quota|RESOURCE_EXHAUSTED/i.test(String(error?.message || ''))) {
+      return { translation: null, reason: 'quota' }
+    }
+    throw new HttpsError('internal', '翻訳できませんでした')
+  }
+})

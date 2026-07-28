@@ -1109,6 +1109,23 @@ export async function suggestHanaChat(payload) {
   }
 }
 
+/**
+ * Translate chat text via Cloud Function `translateHanaChat`.
+ * @param {{ text: string, targetLang?: string }} payload
+ */
+export async function translateChatMessage(payload) {
+  const callable = httpsCallable(functions, 'translateHanaChat')
+  const result = await callable({
+    text: String(payload?.text || '').trim().slice(0, 2000),
+    targetLang: String(payload?.targetLang || 'ja').trim().toLowerCase() || 'ja',
+  })
+  const data = result?.data || {}
+  return {
+    translation: data.translation ? String(data.translation) : null,
+    reason: data.reason || null,
+  }
+}
+
 export async function completeAdminRedirectLogin() {
   const result = await getRedirectResult(auth)
   if (!result?.user) return null

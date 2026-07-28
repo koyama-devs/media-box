@@ -21,8 +21,15 @@ import {
     subscribeChatProfiles,
     subscribeChatThreads,
     toggleChatReaction,
+    translateChatMessage,
     updateChatMessage,
 } from './firebase'
+import {
+    addChatReminder,
+    remindAtFromChoice,
+    saveChatDocument,
+    toggleChatPin,
+} from './chatExtras'
 import './hana-chat.css'
 
 const KNOWN_GUESTS = Object.values(GUEST_PROFILES)
@@ -43,6 +50,9 @@ export default function AdminHanaInbox() {
   const [clearBusy, setClearBusy] = useState(false)
   const [statusNote, setStatusNote] = useState('')
   const [chatProfiles, setChatProfiles] = useState({})
+  const [translations, setTranslations] = useState({})
+  const [forwardMessage, setForwardMessage] = useState(null)
+  const [remindMessage, setRemindMessage] = useState(null)
   const listRef = useRef(null)
 
   useEffect(() => {
@@ -220,6 +230,83 @@ export default function AdminHanaInbox() {
       })
     } catch (err) {
       setError(getFirebaseErrorMessage(err) || 'リアクションに失敗しました。')
+    }
+  }
+
+  const handleMenuAction = (actionId, message) => {
+    if (!message || message.deleted) return false
+    const profileId = OWNER_PROFILE.key
+
+    if (actionId === 'pin') {
+      const result = toggleChatPin(profileId, message, { threadId: activeId || '' })
+      setStatusNote(result.pinned ? 'ピン留めしました' : 'ピンを外しました')
+      return true
+    }
+    if (actionId === 'saveDoc') {
+      const saved = saveChatDocument(profileId, message, { threadId: activeId || '' })
+      setStatusNote(saved ? 'マイドキュメントに保存しました' : '保存できるテキストがありません')
+      return true
+    }
+    if (actionId === 'remind') {
+      setRemindMessage(message)
+      return true
+    }
+    if (actionId === 'forward') {
+      setForwardMessage(message)
+      return true
+    }
+    if (actionId === 'translate') {
+      const text = String(message.rawText || message.text || '').trim()
+      if (!text) return true
+      setStatusNote('翻訳中…')
+      void translateChatMessage({ text, targetLang: 'ja' })
+        .then((data) => {
+          if (!data.translation) {
+            setStatusNote(data.reason === 'quota' ? '翻訳クォータ不足です' : '翻訳に失敗しました')
+            return
+          }
+          setTranslations((prev) => ({ ...prev, [message.id]: data.translation }))
+          setStatusNote('翻訳しました')
+        })
+        .catch((err) => {
+          setStatusNote(getFirebaseErrorMessage(err) || '翻訳に失敗しました')
+        })
+      return true
+    }
+    return false
+  }
+
+  const confirmReminder = (choice) => {
+    if (!remindMessage) return
+    const remindAt = remindAtFromChoice(choice)
+    if (!remindAt) {
+      setRemindMessage(null)
+      return
+    }
+    addChatReminder(OWNER_PROFILE.key, remindMessage, remindAt, { threadId: activeId || '' })
+    setRemindMessage(null)
+    setStatusNote('リマインダーをセットしました')
+  }
+
+  const handleForwardTo = async (thread) => {
+    if (!forwardMessage || !thread?.id) return
+    const text = String(forwardMessage.rawText || forwardMessage.text || '').trim()
+    if (!text) {
+      setForwardMessage(null)
+      return
+    }
+    try {
+      await sendChatMessage({
+        threadId: thread.id,
+        text: `【転送】\n${text}`,
+        sender: 'hana',
+        guestLabel: thread.guestLabel,
+        guestKey: thread.guestKey,
+      })
+      setStatusNote(`${thread.guestLabel || 'ゲスト'}へ転送しました`)
+      setForwardMessage(null)
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || '転送に失敗しました。')
     }
   }
 
@@ -510,6 +597,7 @@ export default function AdminHanaInbox() {
                           onEdit={() => startEdit(message)}
                           onDelete={() => handleDelete(message)}
                           onReact={(emoji, options) => { void handleReact(message, emoji, options) }}
+                          onMenuAction={(actionId) => handleMenuAction(actionId, message)}
                         >
                           <div className={`admin-chat-bubble is-${message.sender}${message.deleted ? ' is-deleted' : ''}`}>
                             <span>{labelForSender(message.sender)}</span>
@@ -520,6 +608,9 @@ export default function AdminHanaInbox() {
                               </div>
                             ) : null}
                             <p>{message.text}</p>
+                            {translations[message.id] ? (
+                              <p className="hana-chat-translation">{translations[message.id]}</p>
+                            ) : null}
                             {(timeLabel || delivery || message.editedAt) ? (
                               <div className="admin-chat-bubble-meta">
                                 {message.editedAt && !message.deleted ? <span>編集済</span> : null}
@@ -581,6 +672,35 @@ export default function AdminHanaInbox() {
                     {editingId ? '更新' : '送る'}
                   </button>
                 </form>
+                {remindMessage ? (
+                  <div className="hana-chat-action-sheet" role="dialog" aria-label="リマインダー">
+                    <strong>いつ知らせる？</strong>
+                    <div className="hana-chat-action-sheet-row">
+                      <button type="button" onClick={() => confirmReminder('1h')}>1時間後</button>
+                      <button type="button" onClick={() => confirmReminder('3h')}>3時間後</button>
+                      <button type="button" onClick={() => confirmReminder('tonight')}>今夜</button>
+                      <button type="button" onClick={() => confirmReminder('tomorrow')}>明日の朝</button>
+                    </div>
+                    <button type="button" className="is-cancel" onClick={() => setRemindMessage(null)}>キャンセル</button>
+                  </div>
+                ) : null}
+                {forwardMessage ? (
+                  <div className="hana-chat-action-sheet" role="dialog" aria-label="転送先">
+                    <strong>転送先を選ぶ</strong>
+                    <div className="hana-chat-forward-list">
+                      {threads.filter((thread) => thread.id !== activeId).map((thread) => (
+                        <button
+                          key={`fwd-${thread.id}`}
+                          type="button"
+                          onClick={() => { void handleForwardTo(thread) }}
+                        >
+                          {thread.guestLabel || thread.id}
+                        </button>
+                      ))}
+                    </div>
+                    <button type="button" className="is-cancel" onClick={() => setForwardMessage(null)}>キャンセル</button>
+                  </div>
+                ) : null}
               </>
             )}
           </div>

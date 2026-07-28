@@ -30,8 +30,20 @@ import {
   suggestHanaChat,
   threadUnreadCount,
   toggleChatReaction,
+  translateChatMessage,
   updateChatMessage,
 } from './firebase'
+import {
+  addChatReminder,
+  dueChatReminders,
+  loadChatDocuments,
+  loadChatPins,
+  markChatReminderDone,
+  remindAtFromChoice,
+  saveChatDocument,
+  toggleChatPin,
+  unpinChatMessage,
+} from './chatExtras'
 import './hana-chat.css'
 
 const AI_HISTORY_PREFIX = 'hana-chat-ai-history-'
@@ -176,6 +188,13 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [mobileFullscreen, setMobileFullscreen] = useState(true)
   const [guestMenuOpen, setGuestMenuOpen] = useState(false)
   const [copyNote, setCopyNote] = useState('')
+  const [actionNote, setActionNote] = useState('')
+  const [pins, setPins] = useState([])
+  const [translations, setTranslations] = useState({})
+  const [forwardMessage, setForwardMessage] = useState(null)
+  const [remindMessage, setRemindMessage] = useState(null)
+  const [dueReminders, setDueReminders] = useState([])
+  const [docsCount, setDocsCount] = useState(0)
   const listRef = useRef(null)
   const panelRef = useRef(null)
   const inputRef = useRef(null)
@@ -201,6 +220,25 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     () => resolveSessionProfile(actingAsOwner ? 'owner' : 'guest', guestKey),
     [actingAsOwner, guestKey],
   )
+  const extrasProfileId = sessionProfile?.id || 'guest'
+
+  useEffect(() => {
+    setPins(loadChatPins(extrasProfileId))
+    setDocsCount(loadChatDocuments(extrasProfileId).length)
+    setDueReminders(dueChatReminders(extrasProfileId))
+  }, [extrasProfileId, open])
+
+  useEffect(() => {
+    if (!open || !actionNote) return undefined
+    const timer = window.setTimeout(() => setActionNote(''), 2200)
+    return () => window.clearTimeout(timer)
+  }, [actionNote, open])
+
+  useEffect(() => {
+    if (!open || !copyNote) return undefined
+    const timer = window.setTimeout(() => setCopyNote(''), 1800)
+    return () => window.clearTimeout(timer)
+  }, [copyNote, open])
 
   const ownerActiveGuestLabel = useMemo(() => {
     if (!actingAsOwner || !activeThreadId) return 'ゲスト'
@@ -1104,6 +1142,118 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     }
   }
 
+  const currentThreadId = actingAsOwner ? activeThreadId : (guestOnHuman ? guestChatId : 'ai')
+
+  const notifyAction = (text) => {
+    setActionNote(text)
+  }
+
+  const handleMenuAction = (actionId, message) => {
+    if (!message || message.deleted) return false
+    const threadId = currentThreadId || ''
+
+    if (actionId === 'pin') {
+      const result = toggleChatPin(extrasProfileId, message, { threadId })
+      setPins(result.list)
+      notifyAction(result.pinned ? 'ピン留めしました' : 'ピンを外しました')
+      return true
+    }
+
+    if (actionId === 'saveDoc') {
+      const saved = saveChatDocument(extrasProfileId, message, { threadId })
+      if (!saved) {
+        notifyAction('保存できるテキストがありません')
+        return true
+      }
+      setDocsCount(loadChatDocuments(extrasProfileId).length)
+      notifyAction('マイドキュメントに保存しました')
+      return true
+    }
+
+    if (actionId === 'remind') {
+      setRemindMessage(message)
+      return true
+    }
+
+    if (actionId === 'forward') {
+      if (actingAsOwner) {
+        setForwardMessage(message)
+        return true
+      }
+      // Guest: put into composer as a forward draft.
+      const text = String(message.rawText || message.text || '').trim()
+      if (!text) return true
+      setDraft((prev) => (prev ? `${prev}\n\n転送:\n${text}` : `転送:\n${text}`))
+      setReplyTo(null)
+      setEditingId(null)
+      notifyAction('転送文を入力欄に入れました')
+      return true
+    }
+
+    if (actionId === 'translate') {
+      const text = String(message.rawText || message.text || '').trim()
+      if (!text) return true
+      notifyAction('翻訳中…')
+      void translateChatMessage({ text, targetLang: 'ja' })
+        .then((data) => {
+          if (!data.translation) {
+            notifyAction(data.reason === 'quota' ? '翻訳クォータ不足です' : '翻訳に失敗しました')
+            return
+          }
+          setTranslations((prev) => ({ ...prev, [message.id]: data.translation }))
+          notifyAction('翻訳しました')
+        })
+        .catch((err) => {
+          notifyAction(getFirebaseErrorMessage(err) || '翻訳に失敗しました')
+        })
+      return true
+    }
+
+    return false
+  }
+
+  const confirmReminder = (choice) => {
+    if (!remindMessage) return
+    const remindAt = remindAtFromChoice(choice)
+    if (!remindAt) {
+      setRemindMessage(null)
+      return
+    }
+    addChatReminder(extrasProfileId, remindMessage, remindAt, {
+      threadId: currentThreadId || '',
+    })
+    setDueReminders(dueChatReminders(extrasProfileId))
+    setRemindMessage(null)
+    notifyAction('リマインダーをセットしました')
+  }
+
+  const handleForwardToThread = async (targetThreadId, label, guestKeyForThread = '') => {
+    if (!forwardMessage || !targetThreadId) return
+    const text = String(forwardMessage.rawText || forwardMessage.text || '').trim()
+    if (!text) {
+      setForwardMessage(null)
+      return
+    }
+    try {
+      await ensureChatThread({
+        threadId: targetThreadId,
+        guestLabel: label,
+        guestKey: guestKeyForThread,
+      })
+      await sendChatMessage({
+        threadId: targetThreadId,
+        text: `【転送】\n${text}`,
+        sender: 'hana',
+        guestLabel: label,
+        guestKey: guestKeyForThread,
+      })
+      notifyAction(`${label}へ転送しました`)
+      setForwardMessage(null)
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || '転送に失敗しました。')
+    }
+  }
+
   const handleSend = async (event) => {
     event.preventDefault()
     const text = draft.trim()
@@ -1443,6 +1593,48 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             </div>
           ) : null}
 
+          {dueReminders.length > 0 ? (
+            <div className="hana-chat-reminder-banner" role="status">
+              {dueReminders.slice(0, 2).map((item) => (
+                <div key={item.id} className="hana-chat-reminder-item">
+                  <div>
+                    <strong>リマインダー</strong>
+                    <span>{item.text}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      markChatReminderDone(extrasProfileId, item.id)
+                      setDueReminders(dueChatReminders(extrasProfileId))
+                    }}
+                  >
+                    OK
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {pins.filter((pin) => !currentThreadId || pin.threadId === currentThreadId || (!pin.threadId && currentThreadId === 'ai')).length > 0 ? (
+            <div className="hana-chat-pin-strip" aria-label="ピン留め">
+              {pins
+                .filter((pin) => !currentThreadId || pin.threadId === currentThreadId || (!pin.threadId && currentThreadId === 'ai'))
+                .slice(0, 3)
+                .map((pin) => (
+                  <div key={pin.messageId} className="hana-chat-pin-chip">
+                    <span>📌 {pin.text}</span>
+                    <button
+                      type="button"
+                      aria-label="ピンを外す"
+                      onClick={() => setPins(unpinChatMessage(extrasProfileId, pin.messageId))}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+            </div>
+          ) : null}
+
           <div className="hana-chat-messages" ref={listRef} role="log" aria-live="polite">
             {actingAsOwner && !activeThreadId ? (
               <p className="hana-chat-empty">上のメニューから返信する相手を選んでね。</p>
@@ -1477,6 +1669,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     onEdit={() => startEdit(message)}
                     onDelete={() => handleDelete(message)}
                     onReact={(emoji, options) => { void handleReact(message, emoji, options) }}
+                    onMenuAction={(actionId) => handleMenuAction(actionId, message)}
                   >
                     <div
                       className={`hana-chat-bubble ${sideClass} is-${message.role}${message.kind === 'human-switch' || message.kind === 'intro' ? ' is-notice' : ''}${message.deleted ? ' is-deleted' : ''}`}
@@ -1491,6 +1684,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                         </div>
                       ) : null}
                       <p>{message.text}</p>
+                      {translations[message.id] ? (
+                        <p className="hana-chat-translation">{translations[message.id]}</p>
+                      ) : null}
                       <div className="hana-chat-bubble-meta">
                         {message.editedAt && !message.deleted ? <span>編集済</span> : null}
                         <time dateTime={message.createdAt || undefined}>
@@ -1693,7 +1889,48 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           ) : null}
 
           {copyNote ? <p className="hana-chat-copy-note" role="status">{copyNote}</p> : null}
+          {actionNote ? <p className="hana-chat-action-note" role="status">{actionNote}</p> : null}
+          {docsCount > 0 ? (
+            <p className="hana-chat-docs-hint">マイドキュメント {docsCount}件</p>
+          ) : null}
           {error ? <p className="hana-chat-error">{error}</p> : null}
+
+          {remindMessage ? (
+            <div className="hana-chat-action-sheet" role="dialog" aria-label="リマインダー">
+              <strong>いつ知らせる？</strong>
+              <div className="hana-chat-action-sheet-row">
+                <button type="button" onClick={() => confirmReminder('1h')}>1時間後</button>
+                <button type="button" onClick={() => confirmReminder('3h')}>3時間後</button>
+                <button type="button" onClick={() => confirmReminder('tonight')}>今夜</button>
+                <button type="button" onClick={() => confirmReminder('tomorrow')}>明日の朝</button>
+              </div>
+              <button type="button" className="is-cancel" onClick={() => setRemindMessage(null)}>キャンセル</button>
+            </div>
+          ) : null}
+
+          {forwardMessage && actingAsOwner ? (
+            <div className="hana-chat-action-sheet" role="dialog" aria-label="転送先">
+              <strong>転送先を選ぶ</strong>
+              <div className="hana-chat-forward-list">
+                {ownerGuestRoster.map((entry) => (
+                  <button
+                    key={`fwd-${entry.canonicalId}`}
+                    type="button"
+                    onClick={() => {
+                      void handleForwardToThread(
+                        entry.canonicalId || entry.threadId,
+                        entry.label,
+                        entry.guestKey || entry.thread?.guestKey || '',
+                      )
+                    }}
+                  >
+                    {entry.label}
+                  </button>
+                ))}
+              </div>
+              <button type="button" className="is-cancel" onClick={() => setForwardMessage(null)}>キャンセル</button>
+            </div>
+          ) : null}
 
           {replyTo || editingId ? (
             <div className="hana-chat-composer-context">

@@ -16,11 +16,11 @@ const LONG_PRESS_MOVE_PX = 10
 const AXIS_LOCK_PX = 8
 
 const MENU_EXTRA_ACTIONS = [
-  { id: 'pin', label: 'ピン留め', soon: true },
-  { id: 'forward', label: '転送', soon: true },
-  { id: 'saveDoc', label: 'マイドキュメントに保存', soon: true },
-  { id: 'remind', label: 'リマインダー', soon: true },
-  { id: 'translate', label: '翻訳', soon: true },
+  { id: 'pin', label: 'ピン留め' },
+  { id: 'forward', label: '転送' },
+  { id: 'saveDoc', label: 'マイドキュメントに保存' },
+  { id: 'remind', label: 'リマインダー' },
+  { id: 'translate', label: '翻訳' },
 ]
 
 function IconReply() {
@@ -340,10 +340,13 @@ export default function ChatSwipeBubble({
       return
     }
     const handled = onMenuAction?.(actionId)
-    if (handled === false || handled == null) {
-      setSoonNote('準備中です')
-      window.setTimeout(() => setSoonNote(''), 1400)
+    if (handled) {
+      setMenuOpen(false)
+      reset()
+      return
     }
+    setSoonNote('準備中です')
+    window.setTimeout(() => setSoonNote(''), 1400)
   }
 
   const handleCopy = async () => {
@@ -653,11 +656,10 @@ export default function ChatSwipeBubble({
               <button
                 key={action.id}
                 type="button"
-                className="chat-msg-menu-action is-soon"
+                className="chat-msg-menu-action"
                 onClick={() => runMenuAction(action.id)}
               >
-                <span>{action.label}</span>
-                <span className="chat-msg-menu-soon">準備中</span>
+                {action.label}
               </button>
             ))}
             {canEdit ? (
