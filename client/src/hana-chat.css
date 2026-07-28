@@ -733,7 +733,7 @@ body.hana-chat-scroll-lock #root {
 
 .hana-chat-msg-main {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 3px;
   min-width: 0;
   max-width: calc(100% - 40px);
@@ -743,10 +743,12 @@ body.hana-chat-scroll-lock #root {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 1px;
   flex: 0 0 auto;
   min-width: 0;
+  /* Sit against the bubble's top edge (not vertically centered) */
+  padding-top: 2px;
   font-family: system-ui, sans-serif;
   font-size: 0.62rem;
   line-height: 1.25;
@@ -1259,14 +1261,26 @@ body.hana-chat-scroll-lock #root {
 }
 
 .hana-chat-reactions {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-top: 6px;
-  max-width: 100%;
+  margin-top: 0;
+  max-width: min(280px, 72vw);
+  /* Out of normal flow so avatar stays locked to the bubble, not the chips */
+}
+
+.chat-swipe:has(.hana-chat-reactions) {
+  /* Reserve room under the bubble so the next row isn't covered */
+  margin-bottom: 34px;
 }
 
 .chat-swipe.is-own .hana-chat-reactions {
+  left: auto;
+  right: 0;
   justify-content: flex-end;
 }
 
