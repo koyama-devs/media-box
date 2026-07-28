@@ -317,6 +317,7 @@
   padding: 12px;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 10px;
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -485,30 +486,36 @@
 
 .chat-swipe {
   position: relative;
-  width: min(88%, 100%);
-  max-width: 100%;
+  display: block;
+  width: 100%;
+  flex: 0 0 auto;
+  flex-shrink: 0;
   touch-action: pan-y;
   box-sizing: border-box;
-  overflow: hidden;
-}
-
-.chat-swipe.is-own,
-.chat-swipe.is-guest:not(.is-other) {
-  align-self: flex-end;
-}
-
-.chat-swipe.is-other,
-.chat-swipe.is-hanachan,
-.chat-swipe.is-hana:not(.is-own) {
-  align-self: flex-start;
+  overflow: visible;
 }
 
 .chat-swipe-sheet {
   position: relative;
   z-index: 1;
+  display: block;
+  width: fit-content;
+  max-width: min(88%, 100%);
   touch-action: pan-y;
   transition: transform 0.12s ease-out;
-  will-change: transform;
+}
+
+.chat-swipe.is-own .chat-swipe-sheet,
+.chat-swipe.is-guest:not(.is-other) .chat-swipe-sheet {
+  margin-left: auto;
+  margin-right: 0;
+}
+
+.chat-swipe.is-other .chat-swipe-sheet,
+.chat-swipe.is-hanachan .chat-swipe-sheet,
+.chat-swipe.is-hana:not(.is-own) .chat-swipe-sheet {
+  margin-left: 0;
+  margin-right: auto;
 }
 
 .chat-swipe-actions {
@@ -652,8 +659,8 @@
     overflow-x: hidden;
   }
 
-  .chat-swipe {
-    width: min(86%, 100%);
+  .chat-swipe-sheet {
+    max-width: min(86%, 100%);
   }
 }
 
