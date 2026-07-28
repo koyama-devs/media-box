@@ -274,17 +274,15 @@
   display: flex;
   gap: 6px;
   overflow-x: auto;
-  padding-bottom: 2px;
-  scrollbar-width: thin;
+  overscroll-behavior-x: contain;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 .hana-chat-suggest-chips::-webkit-scrollbar {
-  height: 3px;
-}
-
-.hana-chat-suggest-chips::-webkit-scrollbar-thumb {
-  background: rgba(255, 248, 240, 0.2);
-  border-radius: 999px;
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .hana-chat-suggest--owner .hana-chat-suggest-chip {
