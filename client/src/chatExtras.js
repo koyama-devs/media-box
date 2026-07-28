@@ -1,4 +1,4 @@
-/** Personal chat extras (pin / docs / reminders) — keyed by profile id. */
+/** Personal chat extras (pin / reminders) — keyed by profile id. */
 
 function safeParse(raw, fallback) {
   try {
@@ -27,10 +27,6 @@ function writeList(key, list) {
 
 function pinsKey(profileId) {
   return `hana-chat-pins-${String(profileId || 'guest')}`
-}
-
-function docsKey(profileId) {
-  return `hana-chat-docs-${String(profileId || 'guest')}`
 }
 
 function remindersKey(profileId) {
@@ -77,31 +73,6 @@ export function unpinChatMessage(profileId, messageId) {
   const next = loadChatPins(profileId).filter((entry) => entry.messageId !== messageId)
   writeList(key, next)
   return next
-}
-
-export function loadChatDocuments(profileId) {
-  const list = readList(docsKey(profileId))
-  return Array.isArray(list) ? list : []
-}
-
-export function saveChatDocument(profileId, message, meta = {}) {
-  const key = docsKey(profileId)
-  const text = String(message?.rawText || message?.text || '').trim()
-  if (!text) return null
-  const entry = {
-    id: `doc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    text: text.slice(0, 4000),
-    title: text.slice(0, 40),
-    source: {
-      threadId: String(meta.threadId || ''),
-      messageId: String(message.id || ''),
-      sender: String(message.sender || message.role || ''),
-    },
-    savedAt: new Date().toISOString(),
-  }
-  const next = [entry, ...loadChatDocuments(profileId)].slice(0, 100)
-  writeList(key, next)
-  return entry
 }
 
 export function loadChatReminders(profileId) {

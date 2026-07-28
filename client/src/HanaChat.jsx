@@ -3,11 +3,9 @@ import hanachanArt from './assets/hanachan.svg'
 import {
   addChatReminder,
   dueChatReminders,
-  loadChatDocuments,
   loadChatPins,
   markChatReminderDone,
   remindAtFromChoice,
-  saveChatDocument,
   toggleChatPin,
   unpinChatMessage,
 } from './chatExtras'
@@ -190,10 +188,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [actionNote, setActionNote] = useState('')
   const [pins, setPins] = useState([])
   const [translations, setTranslations] = useState({})
-  const [forwardMessage, setForwardMessage] = useState(null)
   const [remindMessage, setRemindMessage] = useState(null)
   const [dueReminders, setDueReminders] = useState([])
-  const [docsCount, setDocsCount] = useState(0)
   const listRef = useRef(null)
   const panelRef = useRef(null)
   const inputRef = useRef(null)
@@ -224,7 +220,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   useEffect(() => {
     setPins(loadChatPins(extrasProfileId))
-    setDocsCount(loadChatDocuments(extrasProfileId).length)
     setDueReminders(dueChatReminders(extrasProfileId))
   }, [extrasProfileId, open])
 
@@ -744,36 +739,19 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       }, 60)
     }
 
-    const blockBackgroundScroll = (event) => {
-      const target = event.target
-      if (!(target instanceof Element)) {
-        event.preventDefault()
-        return
-      }
-      // Allow vertical scroll only in chat scroll regions.
-      if (target.closest('.hana-chat-messages, .hana-chat-guest-menu, .hana-chat-suggest-popover, textarea')) {
-        return
-      }
-      // Chat is open: don't let the page behind move.
-      event.preventDefault()
-    }
-
     syncMobileViewport({ immediate: true })
     syncPanelViewportRef.current = syncMobileViewport
     const vv = window.visualViewport
-    const touchMoveOpts = { passive: false }
     // resize only — scroll events on iOS cause constant jitter
     vv?.addEventListener('resize', syncMobileViewport)
     window.addEventListener('resize', syncMobileViewport)
     window.addEventListener('orientationchange', syncMobileViewport)
-    document.addEventListener('touchmove', blockBackgroundScroll, touchMoveOpts)
     return () => {
       syncPanelViewportRef.current = () => {}
       if (viewportDebounceRef.current) window.clearTimeout(viewportDebounceRef.current)
       vv?.removeEventListener('resize', syncMobileViewport)
       window.removeEventListener('resize', syncMobileViewport)
       window.removeEventListener('orientationchange', syncMobileViewport)
-      document.removeEventListener('touchmove', blockBackgroundScroll, touchMoveOpts)
       clearInline()
       lockPageScroll(false)
     }
@@ -1232,34 +1210,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       return true
     }
 
-    if (actionId === 'saveDoc') {
-      const saved = saveChatDocument(extrasProfileId, message, { threadId })
-      if (!saved) {
-        notifyAction('保存できるテキストがありません')
-        return true
-      }
-      setDocsCount(loadChatDocuments(extrasProfileId).length)
-      notifyAction('マイドキュメントに保存しました')
-      return true
-    }
-
     if (actionId === 'remind') {
       setRemindMessage(message)
-      return true
-    }
-
-    if (actionId === 'forward') {
-      if (actingAsOwner) {
-        setForwardMessage(message)
-        return true
-      }
-      // Guest: put into composer as a forward draft.
-      const text = String(message.rawText || message.text || '').trim()
-      if (!text) return true
-      setDraft((prev) => (prev ? `${prev}\n\n転送:\n${text}` : `転送:\n${text}`))
-      setReplyTo(null)
-      setEditingId(null)
-      notifyAction('転送文を入力欄に入れました')
       return true
     }
 
@@ -1298,33 +1250,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     setDueReminders(dueChatReminders(extrasProfileId))
     setRemindMessage(null)
     notifyAction('リマインダーをセットしました')
-  }
-
-  const handleForwardToThread = async (targetThreadId, label, guestKeyForThread = '') => {
-    if (!forwardMessage || !targetThreadId) return
-    const text = String(forwardMessage.rawText || forwardMessage.text || '').trim()
-    if (!text) {
-      setForwardMessage(null)
-      return
-    }
-    try {
-      await ensureChatThread({
-        threadId: targetThreadId,
-        guestLabel: label,
-        guestKey: guestKeyForThread,
-      })
-      await sendChatMessage({
-        threadId: targetThreadId,
-        text: `【転送】\n${text}`,
-        sender: 'hana',
-        guestLabel: label,
-        guestKey: guestKeyForThread,
-      })
-      notifyAction(`${label}へ転送しました`)
-      setForwardMessage(null)
-    } catch (err) {
-      setError(getFirebaseErrorMessage(err) || '転送に失敗しました。')
-    }
   }
 
   const handleSend = async (event) => {
@@ -1972,9 +1897,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
           {copyNote ? <p className="hana-chat-copy-note" role="status">{copyNote}</p> : null}
           {actionNote ? <p className="hana-chat-action-note" role="status">{actionNote}</p> : null}
-          {docsCount > 0 ? (
-            <p className="hana-chat-docs-hint">マイドキュメント {docsCount}件</p>
-          ) : null}
           {error ? <p className="hana-chat-error">{error}</p> : null}
 
           {remindMessage ? (
@@ -1987,30 +1909,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 <button type="button" onClick={() => confirmReminder('tomorrow')}>明日の朝</button>
               </div>
               <button type="button" className="is-cancel" onClick={() => setRemindMessage(null)}>キャンセル</button>
-            </div>
-          ) : null}
-
-          {forwardMessage && actingAsOwner ? (
-            <div className="hana-chat-action-sheet" role="dialog" aria-label="転送先">
-              <strong>転送先を選ぶ</strong>
-              <div className="hana-chat-forward-list">
-                {ownerGuestRoster.map((entry) => (
-                  <button
-                    key={`fwd-${entry.canonicalId}`}
-                    type="button"
-                    onClick={() => {
-                      void handleForwardToThread(
-                        entry.canonicalId || entry.threadId,
-                        entry.label,
-                        entry.guestKey || entry.thread?.guestKey || '',
-                      )
-                    }}
-                  >
-                    {entry.label}
-                  </button>
-                ))}
-              </div>
-              <button type="button" className="is-cancel" onClick={() => setForwardMessage(null)}>キャンセル</button>
             </div>
           ) : null}
 

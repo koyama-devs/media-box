@@ -965,7 +965,8 @@ body.hana-chat-scroll-lock #root {
   touch-action: auto;
 }
 
-.chat-swipe.is-touch.is-dragging {
+.chat-swipe.is-touch.is-dragging,
+.chat-swipe.is-touch.is-long-pressing {
   touch-action: none;
 }
 
@@ -1619,12 +1620,6 @@ body.hana-chat-scroll-lock #root {
   font-size: 0.78rem;
 }
 
-.hana-chat-docs-hint {
-  margin: 0 12px 4px;
-  color: rgba(255, 248, 240, 0.45);
-  font-size: 0.7rem;
-}
-
 .hana-chat-translation {
   margin: 6px 0 0;
   padding: 6px 8px;
@@ -1736,15 +1731,13 @@ body.hana-chat-scroll-lock #root {
   color: #fff8f0;
 }
 
-.hana-chat-action-sheet-row,
-.hana-chat-forward-list {
+.hana-chat-action-sheet-row {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
 .hana-chat-action-sheet-row button,
-.hana-chat-forward-list button,
 .hana-chat-action-sheet > button.is-cancel {
   border: 0;
   border-radius: 999px;
@@ -1849,16 +1842,6 @@ body.hana-chat-scroll-lock #root {
     left: auto;
     bottom: max(10px, env(safe-area-inset-bottom));
     display: block;
-  }
-
-  /* Opaque veil so keyboard animation never flashes the page behind. */
-  .hana-chat.is-open::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    z-index: 89;
-    background: #0e0a0c;
-    pointer-events: none;
   }
 
   .hana-chat.is-open .hana-chat-panel {

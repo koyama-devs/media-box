@@ -12,15 +12,13 @@ const ACTION_THRESHOLD = 56
 const MAX_RIGHT = 72
 const MAX_LEFT = -108
 const HOVER_LEAVE_MS = 180
-const LONG_PRESS_MS = 420
-const LONG_PRESS_MOVE_PX = 12
+const LONG_PRESS_MS = 380
+const LONG_PRESS_MOVE_PX = 18
 const MENU_DISMISS_GUARD_MS = 700
 const AXIS_LOCK_PX = 8
 
 const MENU_EXTRA_ACTIONS = [
   { id: 'pin', label: 'ピン', icon: '📌' },
-  { id: 'forward', label: '転送', icon: '↪️' },
-  { id: 'saveDoc', label: '保存', icon: '📄' },
   { id: 'remind', label: 'リマインド', icon: '⏰' },
   { id: 'translate', label: '翻訳', icon: '🌐' },
 ]
@@ -152,12 +150,28 @@ async function copyTextToClipboard(text) {
 }
 
 function useTouchSwipeMode() {
-  const [enabled, setEnabled] = useState(false)
+  const [enabled, setEnabled] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return (
+      'ontouchstart' in window
+      || (navigator.maxTouchPoints || 0) > 0
+      || window.matchMedia('(pointer: coarse)').matches
+      || window.matchMedia('(hover: none)').matches
+    )
+  })
 
   useEffect(() => {
-    const media = window.matchMedia('(hover: hover) and (pointer: fine)')
-    const sync = () => setEnabled(!media.matches)
+    const sync = () => {
+      setEnabled(
+        'ontouchstart' in window
+        || (navigator.maxTouchPoints || 0) > 0
+        || window.matchMedia('(pointer: coarse)').matches
+        || window.matchMedia('(hover: none)').matches
+        || !window.matchMedia('(hover: hover) and (pointer: fine)').matches,
+      )
+    }
     sync()
+    const media = window.matchMedia('(hover: hover) and (pointer: fine)')
     media.addEventListener('change', sync)
     return () => media.removeEventListener('change', sync)
   }, [])
@@ -430,10 +444,10 @@ export default function ChatSwipeBubble({
     }
   }, [swipeMode])
 
-  // Unified touch: long-press opens menu; still finger → swipe reply/menu.
-  // One handler set so scroll/swipe cannot cancel the press inconsistently.
+  // Unified touch: long-press opens menu; swipe when touch-mode is on.
+  // Always register touch long-press (do not gate on swipeMode — some phones
+  // report fine pointer and would otherwise never get a handler).
   useEffect(() => {
-    if (!swipeMode) return undefined
     const root = rootRef.current
     if (!root) return undefined
 
@@ -516,7 +530,6 @@ export default function ChatSwipeBubble({
       const dy = touch.clientY - originY
       const moved = Math.abs(dx) > LONG_PRESS_MOVE_PX || Math.abs(dy) > LONG_PRESS_MOVE_PX
 
-      // Menu already open from long-press — freeze gesture.
       if (longPressFired.current || locking.current === 'hold') {
         event.preventDefault()
         return
@@ -528,10 +541,12 @@ export default function ChatSwipeBubble({
         return
       }
 
-      // User started scrolling/swiping — cancel long-press.
       if (pressTimer && moved) {
         clearPress()
       }
+
+      // Swipe only in touch swipe mode.
+      if (!swipeMode) return
 
       const swipeDx = touch.clientX - startX.current
       const swipeDy = touch.clientY - startY.current
@@ -563,7 +578,7 @@ export default function ChatSwipeBubble({
         return
       }
 
-      if (locking.current === 'h') {
+      if (swipeMode && locking.current === 'h') {
         const current = offsetRef.current
         if (current >= REPLY_THRESHOLD && canReplyRef.current) {
           onReplyRef.current?.()
@@ -678,6 +693,10 @@ export default function ChatSwipeBubble({
   const actionReady = offset <= -ACTION_THRESHOLD
   const showReplyHint = swipeMode && canReply && offset > 8
   const showActionHint = swipeMode && canSwipeLeft && (offset < -8 || actionsOpen)
+  const flowerCount = reactionTotal(reactions?.[CHAT_DEFAULT_REACTION])
+  // Keep the same corner FAB skin/position: invite on latest peer, and stay there once reacted
+  // (don't morph into a chip under older bubbles).
+  const showFlowerFab = Boolean(showFlowerReact || flowerCount > 0)
 
   return (
     <div
@@ -712,13 +731,14 @@ export default function ChatSwipeBubble({
           className="chat-swipe-sheet"
           style={swipeMode ? { transform: `translateX(${offset}px)` } : undefined}
         >
-          <div className={`chat-swipe-bubble-wrap${canReact && showFlowerReact ? ' has-flower' : ''}`}>
+          <div className={`chat-swipe-bubble-wrap${showFlowerFab ? ' has-flower' : ''}`}>
             {children}
-            {canReact && showFlowerReact ? (
+            {showFlowerFab ? (
               <FlowerReactionButton
-                total={reactionTotal(reactions?.[CHAT_DEFAULT_REACTION])}
+                total={flowerCount}
                 mine={reactionMine(reactions?.[CHAT_DEFAULT_REACTION], reactorId)}
-                onTap={handleFlowerTap}
+                disabled={!canReact}
+                onTap={canReact ? handleFlowerTap : undefined}
                 onLongPress={openActionMenu}
               />
             ) : null}
@@ -727,7 +747,7 @@ export default function ChatSwipeBubble({
             <ChatReactionChips
               reactions={reactions}
               reactorId={reactorId}
-              includeDefaultReaction={!showFlowerReact}
+              includeDefaultReaction={false}
               disabled={!canReact}
               onToggle={canReact ? (emoji) => onReact?.(emoji, { mode: 'toggle' }) : undefined}
             />
