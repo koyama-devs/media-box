@@ -518,27 +518,54 @@ export function guestLabelFromUid(uid) {
   return `ゲスト${petal}${num}`
 }
 
-/** Fixed emoji set for per-message reactions (Hana ↔ guest). */
-export const CHAT_REACTION_EMOJIS = ['❤️', '👍', '🌸', '😂', '😮', '😢', '✨', '🎉']
+/** Default quick-tap reaction (flower). */
+export const CHAT_DEFAULT_REACTION = '🌸'
 
+/** Fixed emoji set for per-message reactions (Hana ↔ guest). */
+export const CHAT_REACTION_EMOJIS = ['🌸', '❤️', '👍', '😂', '😮', '😢', '✨', '🎉']
+
+/**
+ * Normalize reactions to { emoji: { reactorId: count } }.
+ * Legacy array form (unique or duplicate ids) is supported.
+ */
 function normalizeChatReactions(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
   const out = {}
   for (const [emoji, value] of Object.entries(raw)) {
     const key = String(emoji || '').trim()
     if (!key || key.length > 8) continue
-    let ids = []
+    const counts = {}
     if (Array.isArray(value)) {
-      ids = value.map((id) => String(id || '').trim().toLowerCase()).filter(Boolean)
+      for (const id of value) {
+        const rid = String(id || '').trim().toLowerCase()
+        if (!rid) continue
+        counts[rid] = Math.min(99, (counts[rid] || 0) + 1)
+      }
     } else if (value && typeof value === 'object') {
-      ids = Object.keys(value)
-        .filter((id) => value[id])
-        .map((id) => String(id).trim().toLowerCase())
-        .filter(Boolean)
+      for (const [id, n] of Object.entries(value)) {
+        const rid = String(id || '').trim().toLowerCase()
+        if (!rid) continue
+        const count = typeof n === 'number' ? n : (n ? 1 : 0)
+        if (count <= 0) continue
+        counts[rid] = Math.min(99, Math.floor(count))
+      }
     }
-    if (ids.length) out[key] = [...new Set(ids)]
+    if (Object.keys(counts).length) out[key] = counts
   }
   return out
+}
+
+export function reactionTotal(counts) {
+  if (!counts) return 0
+  if (Array.isArray(counts)) return counts.length
+  return Object.values(counts).reduce((sum, n) => sum + (Number(n) || 0), 0)
+}
+
+export function reactionMine(counts, reactorId) {
+  const rid = String(reactorId || '').trim().toLowerCase()
+  if (!rid || !counts) return 0
+  if (Array.isArray(counts)) return counts.filter((id) => id === rid).length
+  return Number(counts[rid]) || 0
 }
 
 function serializeChatMessage(id, data) {
@@ -888,10 +915,17 @@ export async function softDeleteChatMessage({ threadId, messageId }) {
 }
 
 /**
- * Toggle an emoji reaction on a chat message.
+ * Add / toggle / increment an emoji reaction on a chat message.
  * reactorId should be a stable profile key (`hana`, `hiro`, `zen`, `gabusan`, …).
+ * @param {'toggle'|'increment'|'set'} [mode]
  */
-export async function toggleChatReaction({ threadId, messageId, emoji, reactorId }) {
+export async function reactToChatMessage({
+  threadId,
+  messageId,
+  emoji,
+  reactorId,
+  mode = 'toggle',
+}) {
   const em = String(emoji || '').trim()
   const rid = String(reactorId || '').trim().toLowerCase()
   if (!threadId || !messageId || !em || !rid) return
@@ -902,15 +936,28 @@ export async function toggleChatReaction({ threadId, messageId, emoji, reactorId
   if (!snap.exists()) return
 
   const reactions = normalizeChatReactions(snap.data()?.reactions)
-  const list = reactions[em] ? [...reactions[em]] : []
-  const idx = list.indexOf(rid)
-  if (idx >= 0) list.splice(idx, 1)
-  else list.push(rid)
+  const counts = { ...(reactions[em] || {}) }
+  const mine = Number(counts[rid]) || 0
 
-  if (list.length) reactions[em] = list
+  if (mode === 'increment') {
+    counts[rid] = Math.min(99, mine + 1)
+  } else if (mode === 'set') {
+    counts[rid] = 1
+  } else {
+    // toggle: clear all of mine, or set to 1
+    if (mine > 0) delete counts[rid]
+    else counts[rid] = 1
+  }
+
+  if (Object.keys(counts).length) reactions[em] = counts
   else delete reactions[em]
 
   await updateDoc(messageRef, { reactions })
+}
+
+/** @deprecated Prefer reactToChatMessage — kept for call-site compatibility. */
+export async function toggleChatReaction(args) {
+  return reactToChatMessage({ ...args, mode: args?.mode || 'toggle' })
 }
 
 export async function markThreadRead(threadId, reader) {

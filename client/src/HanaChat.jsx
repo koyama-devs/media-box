@@ -36,6 +36,17 @@ import './hana-chat.css'
 
 const AI_HISTORY_PREFIX = 'hana-chat-ai-history-'
 const CHANNEL_PREFIX = 'hana-chat-channel-'
+const OWNER_SUGGEST_PREF_KEY = 'hana-chat-owner-suggest-enabled'
+
+function readOwnerSuggestEnabled() {
+  try {
+    const raw = window.localStorage.getItem(OWNER_SUGGEST_PREF_KEY)
+    if (raw == null) return true
+    return raw !== '0' && raw !== 'false'
+  } catch {
+    return true
+  }
+}
 
 const INTRO_ID = 'welcome-intro'
 const HUMAN_SWITCH_NOTICE_ID = 'notice-human-switch'
@@ -161,6 +172,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [ownerSuggestions, setOwnerSuggestions] = useState({ replies: [], topics: [], expressions: [] })
   const [suggestBusy, setSuggestBusy] = useState(false)
   const [suggestPickerGroup, setSuggestPickerGroup] = useState(null) // 'reply' | 'topic' | 'expr' | null
+  const [ownerSuggestEnabled, setOwnerSuggestEnabled] = useState(() => readOwnerSuggestEnabled())
   const [mobileFullscreen, setMobileFullscreen] = useState(true)
   const [guestMenuOpen, setGuestMenuOpen] = useState(false)
   const [copyNote, setCopyNote] = useState('')
@@ -762,17 +774,18 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const canUseReactions = actingAsOwner || guestOnHuman
 
   const suggestContextKey = useMemo(() => {
-    if (!actingAsOwner || !activeThreadId) return ''
+    if (!actingAsOwner || !activeThreadId || !ownerSuggestEnabled) return ''
     const usable = hanaMessages.filter((m) => !m.deleted && String(m.text || '').trim())
     if (usable.length === 0) return `empty:${activeThreadId}`
     const last = usable[usable.length - 1]
     return `${activeThreadId}:${usable.length}:${last.id}:${last.sender}:${String(last.text || '').slice(0, 48)}`
-  }, [actingAsOwner, activeThreadId, hanaMessages])
+  }, [actingAsOwner, activeThreadId, hanaMessages, ownerSuggestEnabled])
 
   useEffect(() => {
-    if (!actingAsOwner || !activeThreadId || !open) {
+    if (!actingAsOwner || !activeThreadId || !open || !ownerSuggestEnabled) {
       setOwnerSuggestions({ replies: [], topics: [], expressions: [] })
       setSuggestBusy(false)
+      setSuggestPickerGroup(null)
       return undefined
     }
     const usable = hanaMessages.filter((m) => !m.deleted && String(m.text || '').trim())
@@ -822,10 +835,28 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     actingAsOwner,
     activeThreadId,
     open,
+    ownerSuggestEnabled,
     suggestContextKey,
     ownerActiveGuestLabel,
     hanaMessages,
   ])
+
+  const toggleOwnerSuggest = () => {
+    setOwnerSuggestEnabled((prev) => {
+      const next = !prev
+      try {
+        window.localStorage.setItem(OWNER_SUGGEST_PREF_KEY, next ? '1' : '0')
+      } catch {
+        /* ignore */
+      }
+      if (!next) {
+        setSuggestPickerGroup(null)
+        setOwnerSuggestions({ replies: [], topics: [], expressions: [] })
+        setSuggestBusy(false)
+      }
+      return next
+    })
+  }
 
   useEffect(() => {
     setSuggestPickerGroup(null)
@@ -1056,7 +1087,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     }
   }
 
-  const handleReact = async (message, emoji) => {
+  const handleReact = async (message, emoji, options = {}) => {
     if (!canUseReactions || message?.deleted || !emoji) return
     const threadId = actingAsOwner ? activeThreadId : guestChatId
     if (!threadId || !message?.id) return
@@ -1066,6 +1097,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         messageId: message.id,
         emoji,
         reactorId,
+        mode: options.mode || 'toggle',
       })
     } catch (err) {
       setError(getFirebaseErrorMessage(err) || 'リアクションに失敗しました。')
@@ -1444,7 +1476,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     onReply={() => startReply(message)}
                     onEdit={() => startEdit(message)}
                     onDelete={() => handleDelete(message)}
-                    onReact={(emoji) => { void handleReact(message, emoji) }}
+                    onReact={(emoji, options) => { void handleReact(message, emoji, options) }}
                   >
                     <div
                       className={`hana-chat-bubble ${sideClass} is-${message.role}${message.kind === 'human-switch' || message.kind === 'intro' ? ' is-notice' : ''}${message.deleted ? ' is-deleted' : ''}`}
@@ -1496,6 +1528,27 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
           {actingAsOwner && activeThreadId ? (
             <div className="hana-chat-suggest hana-chat-suggest--owner" aria-label="返信のヒント">
+              <div className="hana-chat-suggest-toolbar">
+                <span className="hana-chat-suggest-toolbar-label">ヒント</span>
+                <button
+                  type="button"
+                  className={`hana-chat-suggest-toggle${ownerSuggestEnabled ? ' is-on' : ''}`}
+                  aria-pressed={ownerSuggestEnabled}
+                  title={ownerSuggestEnabled ? 'ヒントをオフ' : 'ヒントをオン'}
+                  onClick={toggleOwnerSuggest}
+                >
+                  <span className="hana-chat-suggest-toggle-track" aria-hidden="true">
+                    <span className="hana-chat-suggest-toggle-thumb" />
+                  </span>
+                  <span className="hana-chat-suggest-toggle-text">
+                    {ownerSuggestEnabled ? 'ON' : 'OFF'}
+                  </span>
+                </button>
+              </div>
+              {!ownerSuggestEnabled ? (
+                <p className="hana-chat-suggest-off-note">ヒントはオフです。ONにすると返信案が出ます。</p>
+              ) : (
+                <>
               <div className={`hana-chat-suggest-group${suggestPickerGroup === 'reply' ? ' is-open' : ''}`}>
                 <span className="hana-chat-suggest-label">返信</span>
                 <div className="hana-chat-suggest-chips">
@@ -1634,6 +1687,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   </div>
                 ) : null}
               </div>
+                </>
+              )}
             </div>
           ) : null}
 

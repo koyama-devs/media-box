@@ -208,7 +208,7 @@ export default function AdminHanaInbox() {
     }
   }
 
-  const handleReact = async (message, emoji) => {
+  const handleReact = async (message, emoji, options = {}) => {
     if (!activeId || message?.deleted || !emoji || !message?.id) return
     try {
       await toggleChatReaction({
@@ -216,6 +216,7 @@ export default function AdminHanaInbox() {
         messageId: message.id,
         emoji,
         reactorId: OWNER_PROFILE.key,
+        mode: options.mode || 'toggle',
       })
     } catch (err) {
       setError(getFirebaseErrorMessage(err) || 'リアクションに失敗しました。')
@@ -508,7 +509,7 @@ export default function AdminHanaInbox() {
                           onReply={() => startReply(message)}
                           onEdit={() => startEdit(message)}
                           onDelete={() => handleDelete(message)}
-                          onReact={(emoji) => { void handleReact(message, emoji) }}
+                          onReact={(emoji, options) => { void handleReact(message, emoji, options) }}
                         >
                           <div className={`admin-chat-bubble is-${message.sender}${message.deleted ? ' is-deleted' : ''}`}>
                             <span>{labelForSender(message.sender)}</span>
