@@ -136,6 +136,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [editingId, setEditingId] = useState(null)
   const [presenceTick, setPresenceTick] = useState(() => Date.now())
   const listRef = useRef(null)
+  const panelRef = useRef(null)
+  const syncPanelViewportRef = useRef(() => {})
 
   const guestProfile = useMemo(() => getGuestProfile(guestKey), [guestKey])
   const guestDisplayName = guestProfile?.displayName || 'ゲスト'
@@ -393,6 +395,77 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     if (channel === 'ai') return true
     return isPresenceOnline(activeThreadMeta?.hanaOnlineAt)
   }, [actingAsOwner, channel, activeThreadMeta, presenceTick])
+
+  useEffect(() => {
+    if (hidden || !open) return undefined
+    const panel = panelRef.current
+    if (!panel) return undefined
+
+    const clearInline = () => {
+      panel.style.left = ''
+      panel.style.right = ''
+      panel.style.top = ''
+      panel.style.bottom = ''
+      panel.style.width = ''
+      panel.style.height = ''
+      panel.style.maxHeight = ''
+      panel.classList.remove('is-keyboard')
+    }
+
+    const syncMobileViewport = () => {
+      if (!window.matchMedia('(max-width: 640px)').matches) {
+        clearInline()
+        return
+      }
+      const vv = window.visualViewport
+      const margin = 10
+      if (!vv) {
+        clearInline()
+        return
+      }
+
+      // Keep panel inside the visual viewport (keyboard / iOS focus zoom).
+      const keyboardOpen = vv.height < window.innerHeight - 80
+      const left = Math.max(0, vv.offsetLeft) + margin
+      const width = Math.max(240, vv.width - margin * 2)
+
+      panel.style.left = `${left}px`
+      panel.style.right = 'auto'
+      panel.style.width = `${width}px`
+
+      if (keyboardOpen) {
+        const top = Math.max(0, vv.offsetTop) + margin
+        const height = Math.max(180, vv.height - margin * 2)
+        panel.style.top = `${top}px`
+        panel.style.bottom = 'auto'
+        panel.style.height = `${height}px`
+        panel.style.maxHeight = `${height}px`
+        panel.classList.add('is-keyboard')
+      } else {
+        panel.style.top = ''
+        panel.style.bottom = ''
+        panel.style.height = ''
+        panel.style.maxHeight = ''
+        panel.classList.remove('is-keyboard')
+      }
+    }
+
+    syncMobileViewport()
+    syncPanelViewportRef.current = syncMobileViewport
+    const vv = window.visualViewport
+    vv?.addEventListener('resize', syncMobileViewport)
+    vv?.addEventListener('scroll', syncMobileViewport)
+    window.addEventListener('resize', syncMobileViewport)
+    window.addEventListener('orientationchange', syncMobileViewport)
+    return () => {
+      syncPanelViewportRef.current = () => {}
+      vv?.removeEventListener('resize', syncMobileViewport)
+      vv?.removeEventListener('scroll', syncMobileViewport)
+      window.removeEventListener('resize', syncMobileViewport)
+      window.removeEventListener('orientationchange', syncMobileViewport)
+      clearInline()
+    }
+  }, [hidden, open])
 
   if (hidden) return null
 
@@ -722,6 +795,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
       {open ? (
         <section
+          ref={panelRef}
           id="hana-chat-panel"
           className="hana-chat-panel"
           aria-label="はなちゃんチャット"
@@ -904,6 +978,14 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               type="text"
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
+              onFocus={() => {
+                window.setTimeout(() => syncPanelViewportRef.current(), 50)
+                window.setTimeout(() => syncPanelViewportRef.current(), 300)
+              }}
+              onBlur={() => {
+                window.setTimeout(() => syncPanelViewportRef.current(), 50)
+                window.setTimeout(() => syncPanelViewportRef.current(), 300)
+              }}
               placeholder={
                 editingId
                   ? '編集して更新…'
@@ -918,6 +1000,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               maxLength={2000}
               disabled={busy || (actingAsOwner && !activeThreadId)}
               autoComplete="off"
+              enterKeyHint="send"
             />
             <button type="submit" disabled={busy || !draft.trim()}>
               {busy ? '…' : editingId ? '更新' : '送る'}

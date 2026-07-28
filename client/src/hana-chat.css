@@ -674,17 +674,29 @@
     right: max(10px, env(safe-area-inset-right));
     bottom: calc(76px + env(safe-area-inset-bottom, 0px));
     width: auto;
-    max-width: none;
-    height: min(68dvh, calc(100dvh - 100px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)));
+    max-width: min(100vw, 100%);
+    height: min(68svh, calc(100svh - 100px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)));
     margin: 0;
     box-sizing: border-box;
+    overflow: hidden;
+    /* Avoid transform containing-block quirks while typing */
+    animation: none;
+  }
+
+  .hana-chat.is-open .hana-chat-panel.is-keyboard {
+    /* Inline visualViewport styles take over; keep overflow clipped */
     overflow: hidden;
   }
 
   .hana-chat-composer {
-    padding: 10px 12px max(12px, env(safe-area-inset-bottom));
+    padding: 10px 12px 12px;
     grid-template-columns: minmax(0, 1fr) 52px;
     gap: 10px;
+  }
+
+  .hana-chat-composer input {
+    /* Prevent iOS Safari zoom-on-focus (requires >= 16px) */
+    font-size: 16px;
   }
 
   .hana-chat-composer button {
