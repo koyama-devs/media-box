@@ -1156,6 +1156,13 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     const rid = String(reactorId || '').trim().toLowerCase() || 'guest'
     if (!em || !rid) return
 
+    // Keep composer focused if the keyboard was already open.
+    const keepKb = document.activeElement === inputRef.current || keyboardPinnedRef.current
+    if (keepKb) {
+      retainComposerFocusRef.current = true
+      keyboardPinnedRef.current = true
+    }
+
     // Local AI channel: keep reactions in memory only.
     if (!canUseReactions) {
       setAiMessages((prev) => prev.map((m) => {
@@ -1172,6 +1179,15 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         else delete reactions[em]
         return { ...m, reactions }
       }))
+      if (keepKb) {
+        window.requestAnimationFrame(() => {
+          try {
+            inputRef.current?.focus({ preventScroll: true })
+          } catch {
+            inputRef.current?.focus()
+          }
+        })
+      }
       return
     }
 
@@ -1190,6 +1206,17 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       })
     } catch (err) {
       setError(getFirebaseErrorMessage(err) || 'リアクションに失敗しました。')
+    } finally {
+      if (keepKb) {
+        window.requestAnimationFrame(() => {
+          try {
+            inputRef.current?.focus({ preventScroll: true })
+          } catch {
+            inputRef.current?.focus()
+          }
+          syncPanelViewportRef.current({ forceKeyboard: true, force: true })
+        })
+      }
     }
   }
 

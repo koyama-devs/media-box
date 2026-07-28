@@ -1287,10 +1287,15 @@ body.hana-chat-scroll-lock #root {
 
 /* Claim the gesture on the bubble so iOS doesn't steal it for scroll mid long-press */
 .chat-swipe.is-touch .chat-swipe-bubble-wrap {
-  touch-action: none;
+  touch-action: manipulation;
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
+}
+
+.chat-swipe.is-menu-open {
+  position: relative;
+  z-index: 30;
 }
 
 .chat-swipe-bubble-wrap.has-flower {
@@ -1457,57 +1462,32 @@ body.hana-chat-scroll-lock #root {
 
 .chat-msg-menu {
   position: absolute;
-  left: 50%;
-  bottom: calc(100% + 8px);
-  z-index: 8;
+  left: 0;
+  top: calc(100% + 6px);
+  bottom: auto;
+  z-index: 40;
   width: min(260px, 78vw);
-  transform: translateX(-50%);
+  transform: none;
   padding: 10px;
   border-radius: 16px;
   border: 1px solid rgba(255, 248, 240, 0.14);
-  background: rgba(22, 14, 14, 0.97);
+  background: rgba(22, 14, 14, 0.98);
   box-shadow: 0 14px 32px rgba(0, 0, 0, 0.42);
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.chat-msg-menu.is-modal {
-  position: relative;
-  left: auto;
-  right: auto;
-  bottom: auto;
-  transform: none;
-  width: min(340px, 94vw);
-  max-height: min(70vh, 520px);
-  overflow: auto;
-  padding: 14px 12px 12px;
-  animation: chat-menu-panel-in 0.18s ease-out;
-}
-
-@keyframes chat-menu-panel-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-.chat-swipe.is-own .chat-msg-menu:not(.is-modal) {
+.chat-swipe.is-own .chat-msg-menu {
   left: auto;
   right: 0;
-  transform: none;
 }
 
-.chat-swipe.is-other .chat-msg-menu:not(.is-modal),
-.chat-swipe.is-hanachan .chat-msg-menu:not(.is-modal),
-.chat-swipe.is-hana:not(.is-own) .chat-msg-menu:not(.is-modal) {
+.chat-swipe.is-other .chat-msg-menu,
+.chat-swipe.is-hanachan .chat-msg-menu,
+.chat-swipe.is-hana:not(.is-own) .chat-msg-menu {
   left: 0;
   right: auto;
-  transform: none;
 }
 
 .chat-msg-menu-reacts {

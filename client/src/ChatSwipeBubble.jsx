@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import {
     CHAT_DEFAULT_REACTION,
     CHAT_REACTION_EMOJIS,
@@ -7,15 +6,9 @@ import {
     reactionTotal,
 } from './firebase'
 
-const REPLY_THRESHOLD = 52
-const ACTION_THRESHOLD = 56
-const MAX_RIGHT = 72
-const MAX_LEFT = -108
 const HOVER_LEAVE_MS = 180
-const LONG_PRESS_MS = 380
-const LONG_PRESS_MOVE_PX = 18
-const MENU_DISMISS_GUARD_MS = 700
-const AXIS_LOCK_PX = 8
+const LONG_PRESS_MS = 450
+const LONG_PRESS_MOVE_PX = 28
 
 const MENU_EXTRA_ACTIONS = [
   { id: 'pin', label: 'ピン', icon: '📌' },
@@ -78,17 +71,6 @@ function IconReact() {
   )
 }
 
-function IconMore() {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
-      <path
-        fill="currentColor"
-        d="M6 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"
-      />
-    </svg>
-  )
-}
-
 async function copyTextToClipboard(text) {
   const value = String(text || '')
   if (!value) return false
@@ -98,7 +80,6 @@ async function copyTextToClipboard(text) {
     area.value = value
     area.setAttribute('readonly', '')
     area.setAttribute('contenteditable', 'true')
-    // Keep in-viewport; iOS often rejects off-screen / display:none nodes.
     area.style.cssText = [
       'position:fixed',
       'top:0',
@@ -134,23 +115,20 @@ async function copyTextToClipboard(text) {
     return ok
   }
 
-  // Prefer sync legacy first — works inside touchend user-gesture on iOS.
   if (legacyCopy()) return true
-
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(value)
       return true
     }
   } catch {
-    /* retry legacy below */
+    /* retry */
   }
-
   return legacyCopy()
 }
 
-function useTouchSwipeMode() {
-  const [enabled, setEnabled] = useState(() => {
+function useIsCoarsePointer() {
+  const [coarse, setCoarse] = useState(() => {
     if (typeof window === 'undefined') return false
     return (
       'ontouchstart' in window
@@ -162,26 +140,34 @@ function useTouchSwipeMode() {
 
   useEffect(() => {
     const sync = () => {
-      setEnabled(
+      setCoarse(
         'ontouchstart' in window
         || (navigator.maxTouchPoints || 0) > 0
         || window.matchMedia('(pointer: coarse)').matches
-        || window.matchMedia('(hover: none)').matches
-        || !window.matchMedia('(hover: hover) and (pointer: fine)').matches,
+        || window.matchMedia('(hover: none)').matches,
       )
     }
     sync()
-    const media = window.matchMedia('(hover: hover) and (pointer: fine)')
+    const media = window.matchMedia('(pointer: coarse)')
     media.addEventListener('change', sync)
     return () => media.removeEventListener('change', sync)
   }, [])
 
-  return enabled
+  return coarse
+}
+
+function isIgnoredPressTarget(target) {
+  return (
+    target instanceof Element
+    && Boolean(target.closest(
+      'button, a, textarea, input, [data-no-bubble-press], .hana-chat-reactions, .chat-desktop-actions, .chat-msg-menu',
+    ))
+  )
 }
 
 /**
- * Touch: long-press → action menu, swipe-right → reply, swipe-left → menu.
- * Desktop: hover toolbar + right-click / long-press → action menu.
+ * Long-press / right-click → inline action list (no modal overlay).
+ * Desktop: hover toolbar.
  */
 export default function ChatSwipeBubble({
   className = '',
@@ -202,62 +188,28 @@ export default function ChatSwipeBubble({
   onMenuAction,
   children,
 }) {
-  const swipeMode = useTouchSwipeMode()
+  const coarsePointer = useIsCoarsePointer()
   const rootRef = useRef(null)
-  const startX = useRef(0)
-  const startY = useRef(0)
-  const locking = useRef(null) // 'h' | 'v' | 'hold' | null
-  const offsetRef = useRef(0)
-  const actionsOpenRef = useRef(false)
   const leaveTimer = useRef(null)
-  const longPressTimer = useRef(null)
-  const longPressFired = useRef(false)
-  const suppressMenuDismissUntil = useRef(0)
-  const activeTouchId = useRef(null)
-  const canReplyRef = useRef(canReply)
-  const canSwipeLeftRef = useRef(false)
-  const canCopyRef = useRef(false)
-  const onReplyRef = useRef(onReply)
+  const pressTimer = useRef(null)
+  const pressOrigin = useRef({ x: 0, y: 0 })
+  const pressOpened = useRef(false)
   const copyTextRef = useRef(copyText)
   const onCopyRef = useRef(onCopy)
-  const [offset, setOffset] = useState(0)
-  const [dragging, setDragging] = useState(false)
-  const [actionsOpen, setActionsOpen] = useState(false)
+
   const [menuOpen, setMenuOpen] = useState(false)
-  const [menuDismissArmed, setMenuDismissArmed] = useState(false)
   const [desktopOpen, setDesktopOpen] = useState(false)
   const [copiedFlash, setCopiedFlash] = useState(false)
   const [soonNote, setSoonNote] = useState('')
 
   const canCopy = Boolean(String(copyText || '').trim())
-  const canSwipeLeft = canEdit || canDelete || canReact || canCopy
   const hasDesktopActions = canReply || canEdit || canDelete || canCopy || canReact
   const emojiList = Array.isArray(reactionEmojis) && reactionEmojis.length
     ? reactionEmojis
     : CHAT_REACTION_EMOJIS
 
-  canReplyRef.current = canReply
-  canSwipeLeftRef.current = canSwipeLeft
-  canCopyRef.current = canCopy
-  onReplyRef.current = onReply
   copyTextRef.current = copyText
   onCopyRef.current = onCopy
-
-  const applyOffset = (next) => {
-    offsetRef.current = next
-    setOffset(next)
-  }
-
-  const setActions = (open) => {
-    actionsOpenRef.current = open
-    setActionsOpen(open)
-  }
-
-  const reset = () => {
-    applyOffset(0)
-    locking.current = null
-    setDragging(false)
-  }
 
   const clearLeaveTimer = () => {
     if (leaveTimer.current != null) {
@@ -266,10 +218,10 @@ export default function ChatSwipeBubble({
     }
   }
 
-  const clearLongPressTimer = () => {
-    if (longPressTimer.current != null) {
-      window.clearTimeout(longPressTimer.current)
-      longPressTimer.current = null
+  const clearPressTimer = () => {
+    if (pressTimer.current != null) {
+      window.clearTimeout(pressTimer.current)
+      pressTimer.current = null
     }
   }
 
@@ -291,63 +243,43 @@ export default function ChatSwipeBubble({
   }
 
   const openDesktopActions = () => {
-    if (swipeMode || !hasDesktopActions) return
+    if (coarsePointer || !hasDesktopActions) return
     clearLeaveTimer()
     setDesktopOpen(true)
   }
 
   const scheduleCloseDesktopActions = () => {
-    if (swipeMode) return
+    if (coarsePointer) return
     clearLeaveTimer()
     leaveTimer.current = window.setTimeout(() => {
       setDesktopOpen(false)
-      setMenuOpen(false)
       leaveTimer.current = null
     }, HOVER_LEAVE_MS)
   }
 
-  const openActionMenu = (options = {}) => {
-    const immediate = Boolean(options.immediate)
-    if (immediate) {
-      suppressMenuDismissUntil.current = 0
-      setMenuDismissArmed(true)
-    } else {
-      // Ignore the synthetic click / lift that follows a long-press so the modal stays open.
-      suppressMenuDismissUntil.current = Date.now() + MENU_DISMISS_GUARD_MS
-      setMenuDismissArmed(false)
-    }
+  const openActionMenu = () => {
+    pressOpened.current = true
+    clearPressTimer()
     setMenuOpen(true)
-    setActions(false)
-    applyOffset(0)
-    setDragging(false)
-    if (!swipeMode) setDesktopOpen(true)
     try {
-      navigator.vibrate?.(12)
+      navigator.vibrate?.(16)
     } catch {
       /* ignore */
     }
   }
 
   const closeActionMenu = () => {
-    if (!menuDismissArmed) return
     setMenuOpen(false)
-    setMenuDismissArmed(false)
     setSoonNote('')
   }
 
-  const openActionMenuRef = useRef(() => {})
-  openActionMenuRef.current = openActionMenu
-
   const pickReaction = (emoji, mode = 'toggle') => {
-    setMenuOpen(false)
-    setActions(false)
-    reset()
-    // Defer so the portal unmounts before parent async work / state updates.
+    closeActionMenu()
     window.setTimeout(() => {
       try {
         onReact?.(emoji, { mode })
       } catch {
-        /* parent handles async errors */
+        /* parent handles */
       }
     }, 0)
   }
@@ -363,13 +295,11 @@ export default function ChatSwipeBubble({
   }
 
   const runMenuAction = (actionId) => {
-    setMenuOpen(false)
-    setSoonNote('')
-    reset()
+    closeActionMenu()
     window.setTimeout(() => {
       try {
         if (actionId === 'copy') {
-          void handleCopy()
+          void runCopy()
           return
         }
         if (actionId === 'reply') {
@@ -396,342 +326,166 @@ export default function ChatSwipeBubble({
     }, 0)
   }
 
-  const handleCopy = async () => {
-    await runCopy()
+  const onPressStart = (clientX, clientY) => {
+    pressOpened.current = false
+    pressOrigin.current = { x: clientX, y: clientY }
+    clearPressTimer()
+    pressTimer.current = window.setTimeout(() => {
+      pressTimer.current = null
+      openActionMenu()
+    }, LONG_PRESS_MS)
+  }
+
+  const onPressMove = (clientX, clientY) => {
+    if (!pressTimer.current) return
+    const dx = clientX - pressOrigin.current.x
+    const dy = clientY - pressOrigin.current.y
+    if (Math.abs(dx) > LONG_PRESS_MOVE_PX || Math.abs(dy) > LONG_PRESS_MOVE_PX) {
+      clearPressTimer()
+    }
+  }
+
+  const onPressEnd = () => {
+    clearPressTimer()
   }
 
   useEffect(() => () => {
     clearLeaveTimer()
-    clearLongPressTimer()
+    clearPressTimer()
   }, [])
 
+  // Outside tap closes the inline menu (delayed so the long-press lift doesn't kill it).
   useEffect(() => {
-    if (!menuOpen) {
-      setMenuDismissArmed(false)
-      return undefined
-    }
-    const armTimer = window.setTimeout(() => {
-      setMenuDismissArmed(true)
-      suppressMenuDismissUntil.current = 0
-    }, MENU_DISMISS_GUARD_MS)
-    const onKey = (event) => {
-      if (event.key === 'Escape') {
+    if (!menuOpen) return undefined
+    const onDocPointer = (event) => {
+      const root = rootRef.current
+      if (!root) {
         setMenuOpen(false)
-        setMenuDismissArmed(false)
-        setSoonNote('')
+        return
       }
+      if (root.contains(event.target)) {
+        if (event.target instanceof Element && event.target.closest('.chat-msg-menu')) return
+        // Tap on same bubble (not menu) closes.
+        setMenuOpen(false)
+        return
+      }
+      setMenuOpen(false)
     }
-    const prevOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
+    const onKey = (event) => {
+      if (event.key === 'Escape') closeActionMenu()
+    }
+    const timer = window.setTimeout(() => {
+      document.addEventListener('pointerdown', onDocPointer, true)
+    }, 280)
     window.addEventListener('keydown', onKey)
     return () => {
-      window.clearTimeout(armTimer)
-      document.body.style.overflow = prevOverflow
+      window.clearTimeout(timer)
+      document.removeEventListener('pointerdown', onDocPointer, true)
       window.removeEventListener('keydown', onKey)
     }
   }, [menuOpen])
 
-  useEffect(() => {
-    if (!swipeMode) {
-      applyOffset(0)
-      setActions(false)
-      locking.current = null
-      setDragging(false)
-      clearLongPressTimer()
-    } else {
-      setDesktopOpen(false)
-      clearLeaveTimer()
-    }
-  }, [swipeMode])
-
-  // Unified touch: long-press opens menu; swipe when touch-mode is on.
-  // Always register touch long-press (do not gate on swipeMode — some phones
-  // report fine pointer and would otherwise never get a handler).
-  useEffect(() => {
-    const root = rootRef.current
-    if (!root) return undefined
-
-    let pressTimer = null
-    let originX = 0
-    let originY = 0
-    let tracking = false
-    let openedByPress = false
-
-    const isIgnoredTarget = (target) => (
-      target instanceof Element
-      && Boolean(target.closest(
-        'button, a, textarea, input, [data-no-bubble-press], .hana-chat-reactions, .chat-desktop-actions',
-      ))
-    )
-
-    const clearPress = () => {
-      if (pressTimer != null) {
-        window.clearTimeout(pressTimer)
-        pressTimer = null
-      }
-      root.classList.remove('is-long-pressing')
-    }
-
-    const clampOffset = (dx) => {
-      let next = dx
-      if (next > 0 && !canReplyRef.current) next = 0
-      if (next < 0 && !canSwipeLeftRef.current) next = 0
-      return Math.max(MAX_LEFT, Math.min(MAX_RIGHT, next))
-    }
-
-    const fireMenu = (options = {}) => {
-      openedByPress = true
-      longPressFired.current = true
-      locking.current = 'hold'
-      setActions(false)
-      applyOffset(0)
-      setDragging(false)
-      clearPress()
-      openActionMenuRef.current(options)
-      try {
-        navigator.vibrate?.(16)
-      } catch {
-        /* ignore */
-      }
-    }
-
-    const onTouchStart = (event) => {
-      if (event.touches.length !== 1) return
-      if (isIgnoredTarget(event.target)) return
-      const touch = event.touches[0]
-      tracking = true
-      openedByPress = false
-      originX = touch.clientX
-      originY = touch.clientY
-      startX.current = touch.clientX
-      startY.current = touch.clientY
-      locking.current = null
-      longPressFired.current = false
-      activeTouchId.current = touch.identifier
-      if (actionsOpenRef.current) {
-        setActions(false)
-        applyOffset(0)
-      }
-      clearPress()
-      root.classList.add('is-long-pressing')
-      pressTimer = window.setTimeout(() => {
-        pressTimer = null
-        fireMenu()
-      }, LONG_PRESS_MS)
-    }
-
-    const onTouchMove = (event) => {
-      if (!tracking) return
-      if (event.touches.length !== 1) return
-      const touch = event.touches[0]
-      if (activeTouchId.current != null && touch.identifier !== activeTouchId.current) return
-
-      const dx = touch.clientX - originX
-      const dy = touch.clientY - originY
-      const moved = Math.abs(dx) > LONG_PRESS_MOVE_PX || Math.abs(dy) > LONG_PRESS_MOVE_PX
-
-      if (longPressFired.current || locking.current === 'hold') {
-        event.preventDefault()
-        return
-      }
-
-      // Finger still: block scroll so the long-press timer can finish.
-      if (pressTimer && !moved) {
-        event.preventDefault()
-        return
-      }
-
-      if (pressTimer && moved) {
-        clearPress()
-      }
-
-      // Swipe only in touch swipe mode.
-      if (!swipeMode) return
-
-      const swipeDx = touch.clientX - startX.current
-      const swipeDy = touch.clientY - startY.current
-
-      if (!locking.current) {
-        if (Math.abs(swipeDx) < AXIS_LOCK_PX && Math.abs(swipeDy) < AXIS_LOCK_PX) return
-        locking.current = Math.abs(swipeDx) > Math.abs(swipeDy) ? 'h' : 'v'
-        if (locking.current === 'h') setDragging(true)
-      }
-
-      if (locking.current !== 'h') return
-      event.preventDefault()
-      applyOffset(clampOffset(swipeDx))
-    }
-
-    const finishTouch = () => {
-      clearPress()
-      tracking = false
-      activeTouchId.current = null
-
-      if (openedByPress || longPressFired.current || locking.current === 'hold') {
-        openedByPress = false
-        window.setTimeout(() => {
-          longPressFired.current = false
-          if (locking.current === 'hold') locking.current = null
-        }, MENU_DISMISS_GUARD_MS)
-        setDragging(false)
-        applyOffset(0)
-        return
-      }
-
-      if (swipeMode && locking.current === 'h') {
-        const current = offsetRef.current
-        if (current >= REPLY_THRESHOLD && canReplyRef.current) {
-          onReplyRef.current?.()
-          try {
-            navigator.vibrate?.(10)
-          } catch {
-            /* ignore */
-          }
-          setActions(false)
-          reset()
-          return
-        }
-        if (current <= -ACTION_THRESHOLD && canSwipeLeftRef.current) {
-          fireMenu({ immediate: true })
-          locking.current = null
-          setDragging(false)
-          applyOffset(0)
-          return
-        }
-      }
-      if (!actionsOpenRef.current) reset()
-      else {
-        applyOffset(MAX_LEFT + 12)
-        setDragging(false)
-        locking.current = null
-      }
-    }
-
-    root.addEventListener('touchstart', onTouchStart, { passive: true })
-    root.addEventListener('touchmove', onTouchMove, { passive: false })
-    root.addEventListener('touchend', finishTouch, { passive: true })
-    root.addEventListener('touchcancel', finishTouch, { passive: true })
-    return () => {
-      clearPress()
-      root.removeEventListener('touchstart', onTouchStart)
-      root.removeEventListener('touchmove', onTouchMove)
-      root.removeEventListener('touchend', finishTouch)
-      root.removeEventListener('touchcancel', finishTouch)
-    }
-  }, [swipeMode])
-
-  // Desktop: right-click + mouse long-press → action modal.
-  useEffect(() => {
-    const root = rootRef.current
-    if (!root) return undefined
-
-    const isIgnoredTarget = (target) => (
-      target instanceof Element
-      && Boolean(target.closest(
-        'button, a, textarea, input, [data-no-bubble-press], .hana-chat-reactions, .chat-desktop-actions',
-      ))
-    )
-
-    const fireMenu = () => {
-      longPressFired.current = true
-      locking.current = 'hold'
-      setActions(false)
-      applyOffset(0)
-      setDragging(false)
-      openActionMenuRef.current()
-      window.setTimeout(() => {
-        longPressFired.current = false
-        if (locking.current === 'hold') locking.current = null
-      }, MENU_DISMISS_GUARD_MS)
-    }
-
-    const onContextMenu = (event) => {
-      if (isIgnoredTarget(event.target)) return
-      event.preventDefault()
-      fireMenu()
-    }
-
-    let mouseTimer = null
-    const clearMouse = () => {
-      if (mouseTimer != null) {
-        window.clearTimeout(mouseTimer)
-        mouseTimer = null
-      }
-    }
-    const onMouseDown = (event) => {
-      if (swipeMode) return
-      if (event.button !== 0) return
-      if (isIgnoredTarget(event.target)) return
-      if (event.sourceCapabilities?.firesTouchEvents) return
-      clearMouse()
-      mouseTimer = window.setTimeout(() => {
-        mouseTimer = null
-        fireMenu()
-      }, LONG_PRESS_MS)
-    }
-    const onMouseUp = () => clearMouse()
-
-    root.addEventListener('contextmenu', onContextMenu)
-    root.addEventListener('mousedown', onMouseDown)
-    root.addEventListener('mouseup', onMouseUp)
-    root.addEventListener('mouseleave', onMouseUp)
-    return () => {
-      clearMouse()
-      root.removeEventListener('contextmenu', onContextMenu)
-      root.removeEventListener('mousedown', onMouseDown)
-      root.removeEventListener('mouseup', onMouseUp)
-      root.removeEventListener('mouseleave', onMouseUp)
-    }
-  }, [swipeMode])
-
-  const modeClass = swipeMode ? 'is-touch' : 'is-desktop'
-  const desktopClass = !swipeMode && desktopOpen ? ' is-desktop-open' : ''
+  const flowerCount = reactionTotal(reactions?.[CHAT_DEFAULT_REACTION])
+  const showFlowerFab = Boolean(showFlowerReact || flowerCount > 0)
+  const modeClass = coarsePointer ? 'is-touch' : 'is-desktop'
+  const desktopClass = !coarsePointer && desktopOpen ? ' is-desktop-open' : ''
   const copiedClass = copiedFlash ? ' is-copied' : ''
   const menuClass = menuOpen ? ' is-menu-open' : ''
-  const draggingClass = dragging ? ' is-dragging' : ''
-  const replyReady = offset >= REPLY_THRESHOLD
-  const actionReady = offset <= -ACTION_THRESHOLD
-  const showReplyHint = swipeMode && canReply && offset > 8
-  const showActionHint = swipeMode && canSwipeLeft && (offset < -8 || actionsOpen)
-  const flowerCount = reactionTotal(reactions?.[CHAT_DEFAULT_REACTION])
-  // Keep the same corner FAB skin/position: invite on latest peer, and stay there once reacted
-  // (don't morph into a chip under older bubbles).
-  const showFlowerFab = Boolean(showFlowerReact || flowerCount > 0)
+
+  const menuNode = menuOpen ? (
+    <div
+      className="chat-msg-menu"
+      role="menu"
+      aria-label="メッセージメニュー"
+      onPointerDown={(event) => event.stopPropagation()}
+      onTouchStart={(event) => event.stopPropagation()}
+    >
+      <div className="chat-msg-menu-reacts" role="listbox" aria-label="リアクション">
+        {emojiList.map((emoji) => (
+          <button
+            key={emoji}
+            type="button"
+            className={`chat-msg-menu-react${emoji === CHAT_DEFAULT_REACTION ? ' is-default' : ''}`}
+            onClick={() => pickReaction(emoji, emoji === CHAT_DEFAULT_REACTION ? 'increment' : 'set')}
+          >
+            {emoji}
+          </button>
+        ))}
+      </div>
+      <div className="chat-msg-menu-actions">
+        {canCopy ? (
+          <button type="button" className="chat-msg-menu-action" onClick={() => runMenuAction('copy')}>
+            <span className="chat-msg-menu-icon" aria-hidden="true">📋</span>
+            <span>コピー</span>
+          </button>
+        ) : null}
+        {canReply ? (
+          <button type="button" className="chat-msg-menu-action" onClick={() => runMenuAction('reply')}>
+            <span className="chat-msg-menu-icon" aria-hidden="true">↩️</span>
+            <span>返信</span>
+          </button>
+        ) : null}
+        {MENU_EXTRA_ACTIONS.map((action) => (
+          <button
+            key={action.id}
+            type="button"
+            className="chat-msg-menu-action"
+            onClick={() => runMenuAction(action.id)}
+          >
+            <span className="chat-msg-menu-icon" aria-hidden="true">{action.icon}</span>
+            <span>{action.label}</span>
+          </button>
+        ))}
+        {canEdit ? (
+          <button type="button" className="chat-msg-menu-action" onClick={() => runMenuAction('edit')}>
+            <span className="chat-msg-menu-icon" aria-hidden="true">✏️</span>
+            <span>編集</span>
+          </button>
+        ) : null}
+        {canDelete ? (
+          <button type="button" className="chat-msg-menu-action is-danger" onClick={() => runMenuAction('delete')}>
+            <span className="chat-msg-menu-icon" aria-hidden="true">🗑️</span>
+            <span>削除</span>
+          </button>
+        ) : null}
+      </div>
+      {soonNote ? <p className="chat-msg-menu-note" role="status">{soonNote}</p> : null}
+    </div>
+  ) : null
 
   return (
     <div
       ref={rootRef}
-      className={`chat-swipe ${modeClass}${desktopClass}${actionsOpen ? ' is-actions' : ''}${menuClass}${copiedClass}${draggingClass}${className ? ` ${className}` : ''}`}
+      className={`chat-swipe ${modeClass}${desktopClass}${menuClass}${copiedClass}${className ? ` ${className}` : ''}`}
       onMouseEnter={openDesktopActions}
       onMouseLeave={scheduleCloseDesktopActions}
     >
       <div className="chat-swipe-track">
-        {swipeMode && canReply ? (
+        <div className="chat-swipe-sheet">
           <div
-            className={`chat-swipe-hint is-reply${showReplyHint ? ' is-visible' : ''}${replyReady ? ' is-ready' : ''}`}
-            aria-hidden="true"
+            className={`chat-swipe-bubble-wrap${showFlowerFab ? ' has-flower' : ''}`}
+            onPointerDown={(event) => {
+              if (isIgnoredPressTarget(event.target)) return
+              if (event.pointerType === 'mouse' && event.button !== 0) return
+              onPressStart(event.clientX, event.clientY)
+            }}
+            onPointerMove={(event) => {
+              if (!pressTimer.current) return
+              onPressMove(event.clientX, event.clientY)
+            }}
+            onPointerUp={onPressEnd}
+            onPointerCancel={onPressEnd}
+            onPointerLeave={(event) => {
+              // Don't cancel on touch leave quirks; only mouse leave.
+              if (event.pointerType === 'mouse') onPressEnd()
+            }}
+            onContextMenu={(event) => {
+              if (isIgnoredPressTarget(event.target)) return
+              event.preventDefault()
+              event.stopPropagation()
+              openActionMenu()
+            }}
           >
-            <span className="chat-swipe-hint-icon">
-              <IconReply />
-            </span>
-          </div>
-        ) : null}
-        {swipeMode && canSwipeLeft ? (
-          <div
-            className={`chat-swipe-hint is-actions-hint${showActionHint ? ' is-visible' : ''}${actionReady || actionsOpen ? ' is-ready' : ''}`}
-            aria-hidden="true"
-          >
-            <span className="chat-swipe-hint-icon">
-              <IconMore />
-            </span>
-          </div>
-        ) : null}
-
-        <div
-          className="chat-swipe-sheet"
-          style={swipeMode ? { transform: `translateX(${offset}px)` } : undefined}
-        >
-          <div className={`chat-swipe-bubble-wrap${showFlowerFab ? ' has-flower' : ''}`}>
             {children}
             {showFlowerFab ? (
               <FlowerReactionButton
@@ -742,6 +496,7 @@ export default function ChatSwipeBubble({
                 onLongPress={openActionMenu}
               />
             ) : null}
+            {menuNode}
           </div>
           {canReact || (reactions && Object.keys(reactions).length > 0) ? (
             <ChatReactionChips
@@ -752,7 +507,7 @@ export default function ChatSwipeBubble({
               onToggle={canReact ? (emoji) => onReact?.(emoji, { mode: 'toggle' }) : undefined}
             />
           ) : null}
-          {!swipeMode && hasDesktopActions ? (
+          {!coarsePointer && hasDesktopActions ? (
             <div className="chat-desktop-actions" role="toolbar" aria-label="メッセージ操作">
               <button
                 type="button"
@@ -773,7 +528,7 @@ export default function ChatSwipeBubble({
                   className="chat-desktop-action is-copy"
                   title="コピー"
                   aria-label="コピー"
-                  onClick={() => { void handleCopy() }}
+                  onClick={() => { void runCopy() }}
                 >
                   <IconCopy />
                 </button>
@@ -815,81 +570,6 @@ export default function ChatSwipeBubble({
           ) : null}
         </div>
       </div>
-
-      {menuOpen
-        ? createPortal(
-          <div
-            className={`chat-msg-menu-overlay${menuDismissArmed ? ' is-armed' : ' is-arming'}`}
-            role="presentation"
-            onClick={(event) => {
-              if (!menuDismissArmed) return
-              if (event.target === event.currentTarget) closeActionMenu()
-            }}
-          >
-            <div
-              className="chat-msg-menu is-modal"
-              role="dialog"
-              aria-modal="true"
-              aria-label="メッセージメニュー"
-              onClick={(event) => event.stopPropagation()}
-              onPointerDown={(event) => event.stopPropagation()}
-              onTouchStart={(event) => event.stopPropagation()}
-            >
-              <div className="chat-msg-menu-reacts" role="listbox" aria-label="リアクション">
-                {emojiList.map((emoji) => (
-                  <button
-                    key={emoji}
-                    type="button"
-                    className={`chat-msg-menu-react${emoji === CHAT_DEFAULT_REACTION ? ' is-default' : ''}`}
-                    onClick={() => pickReaction(emoji, emoji === CHAT_DEFAULT_REACTION ? 'increment' : 'set')}
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-              <div className="chat-msg-menu-actions">
-                {canCopy ? (
-                  <button type="button" className="chat-msg-menu-action" onClick={() => runMenuAction('copy')}>
-                    <span className="chat-msg-menu-icon" aria-hidden="true">📋</span>
-                    <span>コピー</span>
-                  </button>
-                ) : null}
-                {canReply ? (
-                  <button type="button" className="chat-msg-menu-action" onClick={() => runMenuAction('reply')}>
-                    <span className="chat-msg-menu-icon" aria-hidden="true">↩️</span>
-                    <span>返信</span>
-                  </button>
-                ) : null}
-                {MENU_EXTRA_ACTIONS.map((action) => (
-                  <button
-                    key={action.id}
-                    type="button"
-                    className="chat-msg-menu-action"
-                    onClick={() => runMenuAction(action.id)}
-                  >
-                    <span className="chat-msg-menu-icon" aria-hidden="true">{action.icon}</span>
-                    <span>{action.label}</span>
-                  </button>
-                ))}
-                {canEdit ? (
-                  <button type="button" className="chat-msg-menu-action" onClick={() => runMenuAction('edit')}>
-                    <span className="chat-msg-menu-icon" aria-hidden="true">✏️</span>
-                    <span>編集</span>
-                  </button>
-                ) : null}
-                {canDelete ? (
-                  <button type="button" className="chat-msg-menu-action is-danger" onClick={() => runMenuAction('delete')}>
-                    <span className="chat-msg-menu-icon" aria-hidden="true">🗑️</span>
-                    <span>削除</span>
-                  </button>
-                ) : null}
-              </div>
-              {soonNote ? <p className="chat-msg-menu-note" role="status">{soonNote}</p> : null}
-            </div>
-          </div>,
-          document.body,
-        )
-        : null}
     </div>
   )
 }
@@ -944,6 +624,11 @@ export function ChatReactionChips({
             disabled={disabled || !onToggle}
             aria-pressed={mine > 0}
             title={mine ? 'リアクションを取り消す' : 'リアクションする'}
+            onMouseDown={(event) => event.preventDefault()}
+            onPointerDown={(event) => {
+              event.preventDefault()
+              stopBubble(event)
+            }}
             onClick={() => onToggle?.(emoji)}
           >
             <span aria-hidden="true">{emoji}</span>
@@ -978,11 +663,13 @@ function FlowerReactionButton({ total = 0, mine = 0, disabled = false, onTap, on
       data-no-bubble-press="true"
       aria-label="花のリアクション"
       title="タップで🌸 / 長押しでメニュー"
-      onTouchStart={(event) => {
+      onPointerDown={(event) => {
+        // Keep the soft keyboard open — don't let this button steal focus from the composer.
+        event.preventDefault()
         event.stopPropagation()
-        if (disabled || event.touches.length !== 1) return
-        const touch = event.touches[0]
-        originRef.current = { x: touch.clientX, y: touch.clientY }
+        if (disabled) return
+        if (event.pointerType === 'mouse' && event.button !== 0) return
+        originRef.current = { x: event.clientX, y: event.clientY }
         longRef.current = false
         clear()
         timerRef.current = window.setTimeout(() => {
@@ -996,25 +683,29 @@ function FlowerReactionButton({ total = 0, mine = 0, disabled = false, onTap, on
           }
         }, LONG_PRESS_MS)
       }}
-      onTouchMove={(event) => {
-        if (!timerRef.current || event.touches.length !== 1) return
-        const touch = event.touches[0]
-        const dx = touch.clientX - originRef.current.x
-        const dy = touch.clientY - originRef.current.y
+      onPointerMove={(event) => {
+        if (!timerRef.current) return
+        const dx = event.clientX - originRef.current.x
+        const dy = event.clientY - originRef.current.y
         if (Math.abs(dx) > LONG_PRESS_MOVE_PX || Math.abs(dy) > LONG_PRESS_MOVE_PX) {
           clear()
         }
       }}
-      onTouchEnd={(event) => {
+      onPointerUp={(event) => {
+        event.preventDefault()
         event.stopPropagation()
         const wasLong = longRef.current
         clear()
         if (!wasLong) onTap?.()
         longRef.current = false
       }}
-      onTouchCancel={() => {
+      onPointerCancel={() => {
         clear()
         longRef.current = false
+      }}
+      onMouseDown={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
       }}
       onContextMenu={(event) => {
         event.preventDefault()
@@ -1022,13 +713,6 @@ function FlowerReactionButton({ total = 0, mine = 0, disabled = false, onTap, on
         clear()
         longRef.current = true
         onLongPress?.()
-      }}
-      onClick={(event) => {
-        // Desktop / mouse fallback (touch already handled above).
-        if (event.detail === 0) return
-        if ('ontouchstart' in window) return
-        if (disabled) return
-        onTap?.()
       }}
     >
       <span className="hana-chat-flower-fab-icon" aria-hidden="true">{CHAT_DEFAULT_REACTION}</span>
