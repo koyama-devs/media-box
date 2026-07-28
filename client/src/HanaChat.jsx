@@ -27,6 +27,7 @@ import {
   subscribeChatThreads,
   subscribeOwnChatThread,
   subscribeToAuthUser,
+  suggestHanaChat,
   threadUnreadCount,
   updateChatMessage,
 } from './firebase'
@@ -46,6 +47,22 @@ const HUMAN_SWITCH_INTENT =
 
 const WANT_HUMAN_RE =
   /(本物|本当|リアル).{0,6}はな|はな本人|はな(と|に).{0,8}(話|しゃべ|チャット)|人間のはな|実在のはな|real\s*hana|talk\s*to\s*hana|hana\s*(thật|that)|muốn\s*.{0,20}hana\s*thật|nói\s*chuyện\s*với\s*hana\s*thật|chủ\s*nhân|オーナーのはな/i
+
+/** Local chips for owner (real Hana) drafting help. */
+const OWNER_EXPRESSION_CHIPS = ['😊', '🌸', '🎶', '✨', 'わくわく', 'だいすき', 'おやすみ', 'がんばって']
+const OWNER_TOPIC_CHIPS = [
+  '今日なに聴いてる？',
+  'おすすめの曲ある？',
+  'リスニングスペースどう？',
+  '今期アニメ見てる？',
+  '最近どう？',
+]
+const OWNER_FALLBACK_REPLIES = [
+  'うん、わかった！',
+  'ありがとう、うれしい！',
+  'もう少し教えて〜',
+  'いいね、それ好き！',
+]
 
 function storageKey(prefix, guestId) {
   return `${prefix}${guestId || 'default'}`
@@ -140,12 +157,15 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [editingId, setEditingId] = useState(null)
   const [presenceTick, setPresenceTick] = useState(() => Date.now())
   const [chatProfiles, setChatProfiles] = useState({})
+  const [ownerSuggestions, setOwnerSuggestions] = useState({ replies: [], topics: [] })
+  const [suggestBusy, setSuggestBusy] = useState(false)
   const listRef = useRef(null)
   const panelRef = useRef(null)
   const inputRef = useRef(null)
   const composerRef = useRef(null)
   const syncPanelViewportRef = useRef(() => {})
   const migrationCheckedRef = useRef(new Set())
+  const suggestReqRef = useRef(0)
   const threadsRef = useRef(threads)
   threadsRef.current = threads
 
@@ -653,6 +673,92 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   const ownSender = actingAsOwner ? 'hana' : 'guest'
 
+  const suggestContextKey = useMemo(() => {
+    if (!actingAsOwner || !activeThreadId) return ''
+    const usable = hanaMessages.filter((m) => !m.deleted && String(m.text || '').trim())
+    if (usable.length === 0) return `empty:${activeThreadId}`
+    const last = usable[usable.length - 1]
+    return `${activeThreadId}:${usable.length}:${last.id}:${last.sender}:${String(last.text || '').slice(0, 48)}`
+  }, [actingAsOwner, activeThreadId, hanaMessages])
+
+  useEffect(() => {
+    if (!actingAsOwner || !activeThreadId || !open) {
+      setOwnerSuggestions({ replies: [], topics: [] })
+      setSuggestBusy(false)
+      return undefined
+    }
+    const usable = hanaMessages.filter((m) => !m.deleted && String(m.text || '').trim())
+    if (usable.length === 0) {
+      setOwnerSuggestions({ replies: [], topics: [] })
+      return undefined
+    }
+
+    const history = usable.slice(-12).map((m) => ({
+      role: m.sender === 'hana' ? 'model' : 'user',
+      text: m.text,
+    }))
+    const lastGuest = [...usable].reverse().find((m) => m.sender === 'guest')
+    const reqId = ++suggestReqRef.current
+    const timer = window.setTimeout(() => {
+      setSuggestBusy(true)
+      suggestHanaChat({
+        history,
+        lastReply: lastGuest?.text || '',
+        guestName: ownerActiveGuestLabel,
+      })
+        .then((data) => {
+          if (suggestReqRef.current !== reqId) return
+          setOwnerSuggestions({
+            replies: data.replies?.length ? data.replies : OWNER_FALLBACK_REPLIES.slice(0, 3),
+            topics: Array.isArray(data.topics) ? data.topics : [],
+          })
+        })
+        .catch(() => {
+          if (suggestReqRef.current !== reqId) return
+          setOwnerSuggestions({
+            replies: OWNER_FALLBACK_REPLIES.slice(0, 3),
+            topics: [],
+          })
+        })
+        .finally(() => {
+          if (suggestReqRef.current === reqId) setSuggestBusy(false)
+        })
+    }, 450)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [
+    actingAsOwner,
+    activeThreadId,
+    open,
+    suggestContextKey,
+    ownerActiveGuestLabel,
+    hanaMessages,
+  ])
+
+  const ownerReplyChips = ownerSuggestions.replies.length
+    ? ownerSuggestions.replies
+    : OWNER_FALLBACK_REPLIES
+  const ownerTopicChips = [
+    ...ownerSuggestions.topics,
+    ...OWNER_TOPIC_CHIPS.filter((topic) => !ownerSuggestions.topics.includes(topic)),
+  ].slice(0, 5)
+
+  const applyOwnerSuggest = (text) => {
+    const next = String(text || '').trim()
+    if (!next) return
+    setDraft(next)
+    window.requestAnimationFrame(() => inputRef.current?.focus())
+  }
+
+  const appendOwnerExpression = (chip) => {
+    const token = String(chip || '')
+    if (!token) return
+    setDraft((prev) => `${prev}${token}`)
+    window.requestAnimationFrame(() => inputRef.current?.focus())
+  }
+
   const resolveDelivery = (message) => {
     if (message.deleted) return null
     if (actingAsOwner || guestOnHuman) {
@@ -1159,6 +1265,59 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               >
                 本物のはなと話したい
               </button>
+            </div>
+          ) : null}
+
+          {actingAsOwner && activeThreadId ? (
+            <div className="hana-chat-suggest hana-chat-suggest--owner" aria-label="返信のヒント">
+              <div className="hana-chat-suggest-group">
+                <span className="hana-chat-suggest-label">返信</span>
+                <div className="hana-chat-suggest-chips">
+                  {ownerReplyChips.map((chip) => (
+                    <button
+                      key={`reply-${chip}`}
+                      type="button"
+                      className="hana-chat-suggest-chip is-reply"
+                      disabled={busy || suggestBusy}
+                      onClick={() => applyOwnerSuggest(chip)}
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="hana-chat-suggest-group">
+                <span className="hana-chat-suggest-label">話題</span>
+                <div className="hana-chat-suggest-chips">
+                  {ownerTopicChips.map((chip) => (
+                    <button
+                      key={`topic-${chip}`}
+                      type="button"
+                      className="hana-chat-suggest-chip is-topic"
+                      disabled={busy}
+                      onClick={() => applyOwnerSuggest(chip)}
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="hana-chat-suggest-group">
+                <span className="hana-chat-suggest-label">表情</span>
+                <div className="hana-chat-suggest-chips">
+                  {OWNER_EXPRESSION_CHIPS.map((chip) => (
+                    <button
+                      key={`expr-${chip}`}
+                      type="button"
+                      className="hana-chat-suggest-chip is-expr"
+                      disabled={busy}
+                      onClick={() => appendOwnerExpression(chip)}
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           ) : null}
 

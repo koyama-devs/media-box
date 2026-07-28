@@ -992,6 +992,25 @@ export async function chatWithHanachan(payload) {
   return result?.data || { reply: '' }
 }
 
+/**
+ * Owner (real Hana) drafting help for guest threads.
+ * @param {{ history?: { role: string, text: string }[], lastReply?: string, guestName?: string }} payload
+ */
+export async function suggestHanaChat(payload) {
+  const callable = httpsCallable(functions, 'suggestHanaChat')
+  const result = await callable({
+    history: Array.isArray(payload?.history) ? payload.history.slice(-12) : [],
+    lastReply: String(payload?.lastReply || '').trim().slice(0, 400),
+    guestName: String(payload?.guestName || '').trim().slice(0, 40),
+  })
+  const data = result?.data || {}
+  return {
+    replies: Array.isArray(data.replies) ? data.replies.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 3) : [],
+    topics: Array.isArray(data.topics) ? data.topics.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 2) : [],
+    reason: data.reason || null,
+  }
+}
+
 export async function completeAdminRedirectLogin() {
   const result = await getRedirectResult(auth)
   if (!result?.user) return null
