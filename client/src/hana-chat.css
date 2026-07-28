@@ -1281,19 +1281,15 @@ body.hana-chat-scroll-lock #root {
   width: fit-content;
   max-width: 100%;
   overflow: visible;
-  /* Room for ⋯ only on the menu side — keep 既読/time tight to the bubble */
   margin-inline: 0;
 }
 
-.chat-swipe.is-own .chat-swipe-bubble-wrap,
-.chat-swipe.is-guest:not(.is-other) .chat-swipe-bubble-wrap {
-  margin-right: 34px;
-}
-
-.chat-swipe.is-other .chat-swipe-bubble-wrap,
-.chat-swipe.is-hanachan .chat-swipe-bubble-wrap,
-.chat-swipe.is-hana:not(.is-own) .chat-swipe-bubble-wrap {
-  margin-left: 34px;
+/* Claim the gesture on the bubble so iOS doesn't steal it for scroll mid long-press */
+.chat-swipe.is-touch .chat-swipe-bubble-wrap {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .chat-swipe-bubble-wrap.has-flower {
@@ -1428,42 +1424,6 @@ body.hana-chat-scroll-lock #root {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
-}
-
-.chat-bubble-menu-btn {
-  position: absolute;
-  top: 50%;
-  /* Outer side by default (received / other): left, toward avatar gap */
-  left: -34px;
-  right: auto;
-  z-index: 12;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border: 1px solid rgba(255, 248, 240, 0.18);
-  border-radius: 999px;
-  background: rgba(22, 14, 14, 0.92);
-  color: rgba(255, 248, 240, 0.92);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
-  transform: translateY(-50%);
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
-}
-
-/* Own bubbles: keep menu on the outer (right) side so it doesn't cover 既読 */
-.chat-swipe.is-own .chat-bubble-menu-btn,
-.chat-swipe.is-guest:not(.is-other) .chat-bubble-menu-btn {
-  left: auto;
-  right: -34px;
-}
-
-.chat-bubble-menu-btn:hover,
-.chat-bubble-menu-btn:focus-visible {
-  background: rgba(50, 28, 28, 0.96);
 }
 
 .chat-msg-menu-overlay {

@@ -12,8 +12,8 @@ const ACTION_THRESHOLD = 56
 const MAX_RIGHT = 72
 const MAX_LEFT = -108
 const HOVER_LEAVE_MS = 180
-const LONG_PRESS_MS = 380
-const LONG_PRESS_MOVE_PX = 14
+const LONG_PRESS_MS = 420
+const LONG_PRESS_MOVE_PX = 12
 const MENU_DISMISS_GUARD_MS = 700
 const AXIS_LOCK_PX = 8
 
@@ -166,8 +166,8 @@ function useTouchSwipeMode() {
 }
 
 /**
- * Touch: swipe-right → reply, swipe-left → actions, long-press → copy.
- * Desktop: hover icon toolbar (react / reply / edit / delete / copy).
+ * Touch: long-press → action menu, swipe-right → reply, swipe-left → menu.
+ * Desktop: hover toolbar + right-click / long-press → action menu.
  */
 export default function ChatSwipeBubble({
   className = '',
@@ -430,9 +430,10 @@ export default function ChatSwipeBubble({
     }
   }, [swipeMode])
 
-  // Long-press (touch) / context-menu (desktop) → action modal.
-  // Touch-based on purpose: iOS cancels PointerEvents during selection/scroll.
+  // Unified touch: long-press opens menu; still finger → swipe reply/menu.
+  // One handler set so scroll/swipe cannot cancel the press inconsistently.
   useEffect(() => {
+    if (!swipeMode) return undefined
     const root = rootRef.current
     if (!root) return undefined
 
@@ -444,7 +445,9 @@ export default function ChatSwipeBubble({
 
     const isIgnoredTarget = (target) => (
       target instanceof Element
-      && Boolean(target.closest('button, a, textarea, input, [data-no-bubble-press]'))
+      && Boolean(target.closest(
+        'button, a, textarea, input, [data-no-bubble-press], .hana-chat-reactions, .chat-desktop-actions',
+      ))
     )
 
     const clearPress = () => {
@@ -455,14 +458,22 @@ export default function ChatSwipeBubble({
       root.classList.remove('is-long-pressing')
     }
 
-    const fireMenu = () => {
+    const clampOffset = (dx) => {
+      let next = dx
+      if (next > 0 && !canReplyRef.current) next = 0
+      if (next < 0 && !canSwipeLeftRef.current) next = 0
+      return Math.max(MAX_LEFT, Math.min(MAX_RIGHT, next))
+    }
+
+    const fireMenu = (options = {}) => {
       openedByPress = true
       longPressFired.current = true
       locking.current = 'hold'
       setActions(false)
       applyOffset(0)
       setDragging(false)
-      openActionMenuRef.current()
+      clearPress()
+      openActionMenuRef.current(options)
       try {
         navigator.vibrate?.(16)
       } catch {
@@ -478,8 +489,16 @@ export default function ChatSwipeBubble({
       openedByPress = false
       originX = touch.clientX
       originY = touch.clientY
-      clearPress()
+      startX.current = touch.clientX
+      startY.current = touch.clientY
+      locking.current = null
       longPressFired.current = false
+      activeTouchId.current = touch.identifier
+      if (actionsOpenRef.current) {
+        setActions(false)
+        applyOffset(0)
+      }
+      clearPress()
       root.classList.add('is-long-pressing')
       pressTimer = window.setTimeout(() => {
         pressTimer = null
@@ -491,147 +510,59 @@ export default function ChatSwipeBubble({
       if (!tracking) return
       if (event.touches.length !== 1) return
       const touch = event.touches[0]
+      if (activeTouchId.current != null && touch.identifier !== activeTouchId.current) return
+
       const dx = touch.clientX - originX
       const dy = touch.clientY - originY
       const moved = Math.abs(dx) > LONG_PRESS_MOVE_PX || Math.abs(dy) > LONG_PRESS_MOVE_PX
 
-      // While finger is still (pending long-press), block scroll from stealing the gesture.
+      // Menu already open from long-press — freeze gesture.
+      if (longPressFired.current || locking.current === 'hold') {
+        event.preventDefault()
+        return
+      }
+
+      // Finger still: block scroll so the long-press timer can finish.
       if (pressTimer && !moved) {
         event.preventDefault()
         return
       }
 
+      // User started scrolling/swiping — cancel long-press.
       if (pressTimer && moved) {
         clearPress()
-        tracking = false
       }
-    }
 
-    const onTouchEnd = () => {
-      clearPress()
-      tracking = false
-      if (openedByPress) {
-        openedByPress = false
-        window.setTimeout(() => {
-          longPressFired.current = false
-          if (locking.current === 'hold') locking.current = null
-        }, MENU_DISMISS_GUARD_MS)
-      }
-    }
-
-    const onContextMenu = (event) => {
-      if (isIgnoredTarget(event.target)) return
-      event.preventDefault()
-      clearPress()
-      fireMenu()
-    }
-
-    // Mouse long-press for desktop (no reliable touch).
-    let mouseTimer = null
-    const clearMouse = () => {
-      if (mouseTimer != null) {
-        window.clearTimeout(mouseTimer)
-        mouseTimer = null
-      }
-    }
-    const onMouseDown = (event) => {
-      if (event.button !== 0) return
-      if (isIgnoredTarget(event.target)) return
-      // Touch devices also synthesize mouse events — ignore those.
-      if (event.sourceCapabilities?.firesTouchEvents) return
-      clearMouse()
-      mouseTimer = window.setTimeout(() => {
-        mouseTimer = null
-        fireMenu()
-      }, LONG_PRESS_MS)
-    }
-    const onMouseUp = () => clearMouse()
-
-    root.addEventListener('touchstart', onTouchStart, { passive: true })
-    root.addEventListener('touchmove', onTouchMove, { passive: false })
-    root.addEventListener('touchend', onTouchEnd, { passive: true })
-    root.addEventListener('touchcancel', onTouchEnd, { passive: true })
-    root.addEventListener('contextmenu', onContextMenu)
-    root.addEventListener('mousedown', onMouseDown)
-    root.addEventListener('mouseup', onMouseUp)
-    root.addEventListener('mouseleave', onMouseUp)
-    return () => {
-      clearPress()
-      clearMouse()
-      root.removeEventListener('touchstart', onTouchStart)
-      root.removeEventListener('touchmove', onTouchMove)
-      root.removeEventListener('touchend', onTouchEnd)
-      root.removeEventListener('touchcancel', onTouchEnd)
-      root.removeEventListener('contextmenu', onContextMenu)
-      root.removeEventListener('mousedown', onMouseDown)
-      root.removeEventListener('mouseup', onMouseUp)
-      root.removeEventListener('mouseleave', onMouseUp)
-    }
-  }, [])
-
-  // Native non-passive touch listeners for reliable left/right swipe on mobile.
-  useEffect(() => {
-    if (!swipeMode) return undefined
-    const root = rootRef.current
-    if (!root) return undefined
-
-    const clampOffset = (dx) => {
-      let next = dx
-      if (next > 0 && !canReplyRef.current) next = 0
-      if (next < 0 && !canSwipeLeftRef.current) next = 0
-      return Math.max(MAX_LEFT, Math.min(MAX_RIGHT, next))
-    }
-
-    const openMenuFromGesture = () => {
-      openActionMenuRef.current()
-    }
-
-    const onTouchStart = (event) => {
-      if (event.touches.length !== 1) return
-      const target = event.target
-      if (target instanceof Element && target.closest('button, a, textarea, input, [data-no-bubble-press]')) {
-        return
-      }
-      const touch = event.touches[0]
-      startX.current = touch.clientX
-      startY.current = touch.clientY
-      locking.current = null
-      longPressFired.current = false
-      activeTouchId.current = touch.identifier
-      if (actionsOpenRef.current) {
-        setActions(false)
-        applyOffset(0)
-      }
-    }
-
-    const onTouchMove = (event) => {
-      if (longPressFired.current || locking.current === 'hold') return
-      if (event.touches.length !== 1) return
-      const touch = event.touches[0]
-      if (activeTouchId.current != null && touch.identifier !== activeTouchId.current) return
-
-      const dx = touch.clientX - startX.current
-      const dy = touch.clientY - startY.current
+      const swipeDx = touch.clientX - startX.current
+      const swipeDy = touch.clientY - startY.current
 
       if (!locking.current) {
-        if (Math.abs(dx) < AXIS_LOCK_PX && Math.abs(dy) < AXIS_LOCK_PX) return
-        locking.current = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v'
+        if (Math.abs(swipeDx) < AXIS_LOCK_PX && Math.abs(swipeDy) < AXIS_LOCK_PX) return
+        locking.current = Math.abs(swipeDx) > Math.abs(swipeDy) ? 'h' : 'v'
         if (locking.current === 'h') setDragging(true)
       }
 
       if (locking.current !== 'h') return
       event.preventDefault()
-      applyOffset(clampOffset(dx))
+      applyOffset(clampOffset(swipeDx))
     }
 
     const finishTouch = () => {
+      clearPress()
+      tracking = false
       activeTouchId.current = null
-      if (longPressFired.current || locking.current === 'hold') {
-        locking.current = null
+
+      if (openedByPress || longPressFired.current || locking.current === 'hold') {
+        openedByPress = false
+        window.setTimeout(() => {
+          longPressFired.current = false
+          if (locking.current === 'hold') locking.current = null
+        }, MENU_DISMISS_GUARD_MS)
         setDragging(false)
         applyOffset(0)
         return
       }
+
       if (locking.current === 'h') {
         const current = offsetRef.current
         if (current >= REPLY_THRESHOLD && canReplyRef.current) {
@@ -646,7 +577,7 @@ export default function ChatSwipeBubble({
           return
         }
         if (current <= -ACTION_THRESHOLD && canSwipeLeftRef.current) {
-          openMenuFromGesture()
+          fireMenu({ immediate: true })
           locking.current = null
           setDragging(false)
           applyOffset(0)
@@ -666,10 +597,75 @@ export default function ChatSwipeBubble({
     root.addEventListener('touchend', finishTouch, { passive: true })
     root.addEventListener('touchcancel', finishTouch, { passive: true })
     return () => {
+      clearPress()
       root.removeEventListener('touchstart', onTouchStart)
       root.removeEventListener('touchmove', onTouchMove)
       root.removeEventListener('touchend', finishTouch)
       root.removeEventListener('touchcancel', finishTouch)
+    }
+  }, [swipeMode])
+
+  // Desktop: right-click + mouse long-press → action modal.
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return undefined
+
+    const isIgnoredTarget = (target) => (
+      target instanceof Element
+      && Boolean(target.closest(
+        'button, a, textarea, input, [data-no-bubble-press], .hana-chat-reactions, .chat-desktop-actions',
+      ))
+    )
+
+    const fireMenu = () => {
+      longPressFired.current = true
+      locking.current = 'hold'
+      setActions(false)
+      applyOffset(0)
+      setDragging(false)
+      openActionMenuRef.current()
+      window.setTimeout(() => {
+        longPressFired.current = false
+        if (locking.current === 'hold') locking.current = null
+      }, MENU_DISMISS_GUARD_MS)
+    }
+
+    const onContextMenu = (event) => {
+      if (isIgnoredTarget(event.target)) return
+      event.preventDefault()
+      fireMenu()
+    }
+
+    let mouseTimer = null
+    const clearMouse = () => {
+      if (mouseTimer != null) {
+        window.clearTimeout(mouseTimer)
+        mouseTimer = null
+      }
+    }
+    const onMouseDown = (event) => {
+      if (swipeMode) return
+      if (event.button !== 0) return
+      if (isIgnoredTarget(event.target)) return
+      if (event.sourceCapabilities?.firesTouchEvents) return
+      clearMouse()
+      mouseTimer = window.setTimeout(() => {
+        mouseTimer = null
+        fireMenu()
+      }, LONG_PRESS_MS)
+    }
+    const onMouseUp = () => clearMouse()
+
+    root.addEventListener('contextmenu', onContextMenu)
+    root.addEventListener('mousedown', onMouseDown)
+    root.addEventListener('mouseup', onMouseUp)
+    root.addEventListener('mouseleave', onMouseUp)
+    return () => {
+      clearMouse()
+      root.removeEventListener('contextmenu', onContextMenu)
+      root.removeEventListener('mousedown', onMouseDown)
+      root.removeEventListener('mouseup', onMouseUp)
+      root.removeEventListener('mouseleave', onMouseUp)
     }
   }, [swipeMode])
 
@@ -726,25 +722,6 @@ export default function ChatSwipeBubble({
                 onLongPress={openActionMenu}
               />
             ) : null}
-            <button
-              type="button"
-              className="chat-bubble-menu-btn"
-              data-no-bubble-press="true"
-              aria-label="メニュー"
-              title="メニュー"
-              onPointerUp={(event) => {
-                event.preventDefault()
-                event.stopPropagation()
-                openActionMenu({ immediate: true })
-              }}
-              onClick={(event) => {
-                event.preventDefault()
-                event.stopPropagation()
-                openActionMenu({ immediate: true })
-              }}
-            >
-              <IconMore />
-            </button>
           </div>
           {canReact || (reactions && Object.keys(reactions).length > 0) ? (
             <ChatReactionChips
