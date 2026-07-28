@@ -1041,8 +1041,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     return guestDisplayName
   }
 
-  const labelForMessage = (message) => labelForRole(message.sender || message.role)
-
   const avatarSrcForProfile = (profileId, displayName) => {
     const id = String(profileId || '').trim().toLowerCase() || 'guest'
     const fallback = id === OWNER_PROFILE.key || id === 'hana' ? hanachanArt : ''
@@ -1607,7 +1605,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 </div>
               ) : (
                 <>
-                  <p className="hana-chat-kicker">{modeSub}</p>
+                  <p className="hana-chat-kicker">{humanNotice || modeSub}</p>
                   <div className="hana-chat-heading-row">
                     <h2 className="hana-chat-heading">{modeTitle}</h2>
                     <p className={`hana-chat-presence-label${partnerOnline ? ' is-online' : ''}`}>
@@ -1618,6 +1616,19 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               )}
             </div>
             <div className="hana-chat-header-actions">
+              {!actingAsOwner && channel === 'human' ? (
+                <button
+                  type="button"
+                  className="hana-chat-back-ai"
+                  onClick={() => {
+                    setChannel('ai')
+                    setHumanNotice('')
+                  }}
+                  title="はなちゃんに戻る"
+                >
+                  はなちゃんに戻る
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="hana-chat-close"
@@ -1628,21 +1639,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               </button>
             </div>
           </header>
-
-          {!actingAsOwner && channel === 'human' ? (
-            <div className="hana-chat-channel-banner" role="status">
-              {humanNotice ? <p>{humanNotice}</p> : <p>はな本人モード</p>}
-              <button
-                type="button"
-                onClick={() => {
-                  setChannel('ai')
-                  setHumanNotice('')
-                }}
-              >
-                はなちゃんに戻る
-              </button>
-            </div>
-          ) : null}
 
           {dueReminders.length > 0 ? (
             <div className="hana-chat-reminder-banner" role="status">
@@ -1706,58 +1702,53 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   {!isOwn ? (
                     <img className="hana-chat-msg-avatar" src={avatarSrc} alt="" />
                   ) : null}
-                  <ChatSwipeBubble
-                    className={`${sideClass} is-${message.role}`}
-                    canReply={!message.deleted}
-                    canEdit={mutable}
-                    canDelete={mutable}
-                    canReact={!message.deleted}
-                    showFlowerReact={!message.deleted && !isOwn && message.id === latestOtherMessageId}
-                    reactions={message.reactions || {}}
-                    reactorId={reactorId}
-                    copyText={message.deleted ? '' : (message.rawText || message.text || '')}
-                    onCopy={notifyCopied}
-                    onReply={() => startReply(message)}
-                    onEdit={() => startEdit(message)}
-                    onDelete={() => handleDelete(message)}
-                    onReact={(emoji, options) => { void handleReact(message, emoji, options) }}
-                    onMenuAction={(actionId) => handleMenuAction(actionId, message)}
-                  >
-                    <div
-                      className={`hana-chat-bubble ${sideClass} is-${message.role}${message.kind === 'human-switch' || message.kind === 'intro' ? ' is-notice' : ''}${message.deleted ? ' is-deleted' : ''}`}
-                    >
-                      <span className="hana-chat-bubble-label">
-                        {labelForMessage(message)}
-                      </span>
-                      {message.replyTo ? (
-                        <div className="hana-chat-quote">
-                          <strong>{labelForRole(message.replyTo.sender || message.replyTo.role)}</strong>
-                          <span>{message.replyTo.text}</span>
-                        </div>
-                      ) : null}
-                      <p>{message.text}</p>
-                      {translations[message.id] ? (
-                        <p className="hana-chat-translation">{translations[message.id]}</p>
-                      ) : null}
-                      <div className="hana-chat-bubble-meta">
-                        {message.editedAt && !message.deleted ? <span>編集済</span> : null}
-                        <time dateTime={message.createdAt || undefined}>
-                          {timeLabel || '—'}
-                        </time>
-                        {isOwn && delivery ? (
-                          <span className={`hana-chat-delivery is-${delivery}`}>
-                            {deliveryStatusLabel(delivery)}
+                  <div className="hana-chat-msg-main">
+                    {(timeLabel || (isOwn && !message.deleted) || (message.editedAt && !message.deleted)) ? (
+                      <div className="hana-chat-msg-aside">
+                        {message.editedAt && !message.deleted ? <span className="hana-chat-msg-edited">編集済</span> : null}
+                        {timeLabel ? (
+                          <time dateTime={message.createdAt || undefined}>{timeLabel}</time>
+                        ) : null}
+                        {isOwn && !message.deleted ? (
+                          <span className={`hana-chat-delivery is-${delivery || 'sent'}`}>
+                            {delivery ? deliveryStatusLabel(delivery) : '送信済'}
                           </span>
                         ) : null}
-                        {isOwn && !delivery && !message.deleted ? (
-                          <span className="hana-chat-delivery is-sent">送信済</span>
+                      </div>
+                    ) : null}
+                    <ChatSwipeBubble
+                      className={`${sideClass} is-${message.role}`}
+                      canReply={!message.deleted}
+                      canEdit={mutable}
+                      canDelete={mutable}
+                      canReact={!message.deleted}
+                      showFlowerReact={!message.deleted && !isOwn && message.id === latestOtherMessageId}
+                      reactions={message.reactions || {}}
+                      reactorId={reactorId}
+                      copyText={message.deleted ? '' : (message.rawText || message.text || '')}
+                      onCopy={notifyCopied}
+                      onReply={() => startReply(message)}
+                      onEdit={() => startEdit(message)}
+                      onDelete={() => handleDelete(message)}
+                      onReact={(emoji, options) => { void handleReact(message, emoji, options) }}
+                      onMenuAction={(actionId) => handleMenuAction(actionId, message)}
+                    >
+                      <div
+                        className={`hana-chat-bubble ${sideClass} is-${message.role}${message.kind === 'human-switch' || message.kind === 'intro' ? ' is-notice' : ''}${message.deleted ? ' is-deleted' : ''}`}
+                      >
+                        {message.replyTo ? (
+                          <div className="hana-chat-quote">
+                            <strong>{labelForRole(message.replyTo.sender || message.replyTo.role)}</strong>
+                            <span>{message.replyTo.text}</span>
+                          </div>
+                        ) : null}
+                        <p>{message.text}</p>
+                        {translations[message.id] ? (
+                          <p className="hana-chat-translation">{translations[message.id]}</p>
                         ) : null}
                       </div>
-                    </div>
-                  </ChatSwipeBubble>
-                  {isOwn ? (
-                    <img className="hana-chat-msg-avatar" src={avatarSrc} alt="" />
-                  ) : null}
+                    </ChatSwipeBubble>
+                  </div>
                 </div>
               )
             })}

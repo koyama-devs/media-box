@@ -210,6 +210,29 @@
   flex-shrink: 0;
 }
 
+.hana-chat-back-ai {
+  box-sizing: border-box;
+  max-width: 7.5rem;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid rgba(232, 154, 170, 0.35);
+  border-radius: 999px;
+  background: rgba(232, 154, 170, 0.16);
+  color: var(--hana-cream);
+  font: inherit;
+  font-size: 0.62rem;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.hana-chat-back-ai:hover {
+  background: rgba(232, 154, 170, 0.26);
+}
+
 .hana-chat-close:hover {
   background: rgba(255, 248, 240, 0.14);
 }
@@ -230,35 +253,7 @@ body.hana-chat-scroll-lock #root {
 }
 
 .hana-chat-channel-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin: 10px 12px 0;
-  padding: 8px 10px;
-  border-radius: 12px;
-  background: rgba(232, 154, 170, 0.14);
-  border: 1px solid rgba(232, 154, 170, 0.28);
-}
-
-.hana-chat-channel-banner p {
-  margin: 0;
-  font-size: 0.78rem;
-  line-height: 1.45;
-  color: rgba(255, 248, 240, 0.82);
-}
-
-.hana-chat-channel-banner button {
-  flex: 0 0 auto;
-  border: 0;
-  border-radius: 999px;
-  padding: 6px 10px;
-  background: rgba(255, 248, 240, 0.12);
-  color: var(--hana-cream);
-  font: inherit;
-  font-size: 0.72rem;
-  cursor: pointer;
-  white-space: nowrap;
+  display: none;
 }
 
 .hana-chat-suggest {
@@ -736,11 +731,44 @@ body.hana-chat-scroll-lock #root {
   justify-content: flex-start;
 }
 
+.hana-chat-msg-main {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  min-width: 0;
+  max-width: calc(100% - 40px);
+}
+
+.hana-chat-msg-aside {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 2px;
+  flex: 0 0 auto;
+  min-width: 2.4em;
+  padding-bottom: 2px;
+  font-family: system-ui, sans-serif;
+  font-size: 0.62rem;
+  line-height: 1.25;
+  letter-spacing: 0.02em;
+  color: rgba(255, 248, 240, 0.55);
+  white-space: nowrap;
+}
+
+.hana-chat-msg-aside time {
+  font-variant-numeric: tabular-nums;
+}
+
+.hana-chat-msg-edited {
+  opacity: 0.75;
+}
+
 .hana-chat-msg-row .chat-swipe {
   /* Avoid shrink-to-fit min-content (was forcing 1-char-wide vertical wraps). */
   flex: 0 1 auto;
   width: max-content;
-  max-width: calc(100% - 40px);
+  max-width: 100%;
   min-width: 0;
 }
 
@@ -769,10 +797,12 @@ body.hana-chat-scroll-lock #root {
 }
 
 .chat-swipe.is-touch .hana-chat-bubble,
-.chat-swipe.is-touch .admin-chat-bubble {
-  -webkit-touch-callout: none;
-  -webkit-user-select: none;
-  user-select: none;
+.chat-swipe.is-touch .hana-chat-bubble *,
+.chat-swipe.is-touch .admin-chat-bubble,
+.chat-swipe.is-touch .admin-chat-bubble * {
+  -webkit-touch-callout: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
 }
 
 .hana-chat-bubble {
@@ -824,11 +854,7 @@ body.hana-chat-scroll-lock #root {
 }
 
 .hana-chat-bubble-label {
-  display: block;
-  margin-bottom: 4px;
-  font-size: 0.68rem;
-  letter-spacing: 0.06em;
-  opacity: 0.65;
+  display: none;
 }
 
 .hana-chat-bubble p {
@@ -843,25 +869,11 @@ body.hana-chat-scroll-lock #root {
 }
 
 .hana-chat-bubble-meta {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 6px;
-  font-size: 0.68rem;
-  letter-spacing: 0.02em;
-  opacity: 0.72;
-  font-family: system-ui, sans-serif;
-}
-
-.hana-chat-bubble.is-other .hana-chat-bubble-meta,
-.hana-chat-bubble.is-hanachan .hana-chat-bubble-meta,
-.hana-chat-bubble.is-hana:not(.is-own) .hana-chat-bubble-meta {
-  justify-content: flex-start;
+  display: none;
 }
 
 .hana-chat-delivery.is-sent {
-  color: rgba(255, 248, 240, 0.72);
+  color: rgba(255, 248, 240, 0.55);
 }
 
 .hana-chat-delivery.is-read {
@@ -1411,6 +1423,37 @@ body.hana-chat-scroll-lock #root {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+}
+
+.chat-bubble-menu-btn {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 9;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(22, 14, 14, 0.82);
+  color: rgba(255, 248, 240, 0.88);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.chat-swipe.is-own .chat-bubble-menu-btn,
+.chat-swipe.is-guest:not(.is-other) .chat-bubble-menu-btn {
+  right: auto;
+  left: -6px;
+}
+
+.chat-bubble-menu-btn:hover,
+.chat-bubble-menu-btn:focus-visible {
+  background: rgba(40, 24, 24, 0.92);
 }
 
 .chat-msg-menu-overlay {

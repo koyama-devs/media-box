@@ -605,50 +605,50 @@ export default function AdminHanaInbox() {
                         {!isOwn ? (
                           <img className="hana-chat-msg-avatar" src={avatarSrc} alt="" />
                         ) : null}
-                        <ChatSwipeBubble
-                          className={`${isOwn ? 'is-own' : 'is-other'} is-${message.sender}`}
-                          canReply={!message.deleted}
-                          canEdit={mutable}
-                          canDelete={mutable}
-                          canReact={!message.deleted}
-                          showFlowerReact={!message.deleted && !isOwn && message.id === latestOtherMessageId}
-                          reactions={message.reactions || {}}
-                          reactorId={OWNER_PROFILE.key}
-                          copyText={message.deleted ? '' : (message.rawText || message.text || '')}
-                          onReply={() => startReply(message)}
-                          onEdit={() => startEdit(message)}
-                          onDelete={() => handleDelete(message)}
-                          onReact={(emoji, options) => { void handleReact(message, emoji, options) }}
-                          onMenuAction={(actionId) => handleMenuAction(actionId, message)}
-                        >
-                          <div className={`admin-chat-bubble is-${message.sender}${message.deleted ? ' is-deleted' : ''}`}>
-                            <span>{labelForSender(message.sender)}</span>
-                            {message.replyTo ? (
-                              <div className="hana-chat-quote">
-                                <strong>{labelForSender(message.replyTo.sender)}</strong>
-                                <span>{message.replyTo.text}</span>
-                              </div>
-                            ) : null}
-                            <p>{message.text}</p>
-                            {translations[message.id] ? (
-                              <p className="hana-chat-translation">{translations[message.id]}</p>
-                            ) : null}
-                            {(timeLabel || delivery || message.editedAt) ? (
-                              <div className="admin-chat-bubble-meta">
-                                {message.editedAt && !message.deleted ? <span>編集済</span> : null}
-                                {timeLabel ? <time dateTime={message.createdAt || undefined}>{timeLabel}</time> : null}
-                                {delivery ? (
-                                  <span className={`admin-chat-delivery is-${delivery}`}>
-                                    {deliveryStatusLabel(delivery)}
-                                  </span>
-                                ) : null}
-                              </div>
-                            ) : null}
-                          </div>
-                        </ChatSwipeBubble>
-                        {isOwn ? (
-                          <img className="hana-chat-msg-avatar" src={avatarSrc} alt="" />
-                        ) : null}
+                        <div className="hana-chat-msg-main">
+                          {(timeLabel || (isOwn && !message.deleted) || (message.editedAt && !message.deleted)) ? (
+                            <div className="hana-chat-msg-aside">
+                              {message.editedAt && !message.deleted ? <span className="hana-chat-msg-edited">編集済</span> : null}
+                              {timeLabel ? (
+                                <time dateTime={message.createdAt || undefined}>{timeLabel}</time>
+                              ) : null}
+                              {isOwn && !message.deleted ? (
+                                <span className={`hana-chat-delivery is-${delivery || 'sent'}`}>
+                                  {delivery ? deliveryStatusLabel(delivery) : '送信済'}
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : null}
+                          <ChatSwipeBubble
+                            className={`${isOwn ? 'is-own' : 'is-other'} is-${message.sender}`}
+                            canReply={!message.deleted}
+                            canEdit={mutable}
+                            canDelete={mutable}
+                            canReact={!message.deleted}
+                            showFlowerReact={!message.deleted && !isOwn && message.id === latestOtherMessageId}
+                            reactions={message.reactions || {}}
+                            reactorId={OWNER_PROFILE.key}
+                            copyText={message.deleted ? '' : (message.rawText || message.text || '')}
+                            onReply={() => startReply(message)}
+                            onEdit={() => startEdit(message)}
+                            onDelete={() => handleDelete(message)}
+                            onReact={(emoji, options) => { void handleReact(message, emoji, options) }}
+                            onMenuAction={(actionId) => handleMenuAction(actionId, message)}
+                          >
+                            <div className={`admin-chat-bubble is-${message.sender}${message.deleted ? ' is-deleted' : ''}`}>
+                              {message.replyTo ? (
+                                <div className="hana-chat-quote">
+                                  <strong>{labelForSender(message.replyTo.sender)}</strong>
+                                  <span>{message.replyTo.text}</span>
+                                </div>
+                              ) : null}
+                              <p>{message.text}</p>
+                              {translations[message.id] ? (
+                                <p className="hana-chat-translation">{translations[message.id]}</p>
+                              ) : null}
+                            </div>
+                          </ChatSwipeBubble>
+                        </div>
                       </div>
                     )
                   })}

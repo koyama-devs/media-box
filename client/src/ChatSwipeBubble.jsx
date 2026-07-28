@@ -424,7 +424,8 @@ export default function ChatSwipeBubble({
     }
   }, [swipeMode])
 
-  // Long-press / context-menu → action modal (works on touch + mouse).
+  // Long-press (touch) / context-menu (desktop) → action modal.
+  // Touch-based on purpose: iOS cancels PointerEvents during selection/scroll.
   useEffect(() => {
     const root = rootRef.current
     if (!root) return undefined
@@ -432,7 +433,7 @@ export default function ChatSwipeBubble({
     let pressTimer = null
     let originX = 0
     let originY = 0
-    let activePointerId = null
+    let tracking = false
     let openedByPress = false
 
     const isIgnoredTarget = (target) => (
@@ -448,54 +449,62 @@ export default function ChatSwipeBubble({
       root.classList.remove('is-long-pressing')
     }
 
-    const onPointerDown = (event) => {
-      if (event.pointerType === 'mouse' && event.button !== 0) return
+    const fireMenu = () => {
+      openedByPress = true
+      longPressFired.current = true
+      locking.current = 'hold'
+      setActions(false)
+      applyOffset(0)
+      setDragging(false)
+      openActionMenuRef.current()
+      try {
+        navigator.vibrate?.(16)
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const onTouchStart = (event) => {
+      if (event.touches.length !== 1) return
       if (isIgnoredTarget(event.target)) return
+      const touch = event.touches[0]
+      tracking = true
       openedByPress = false
-      activePointerId = event.pointerId
-      originX = event.clientX
-      originY = event.clientY
+      originX = touch.clientX
+      originY = touch.clientY
       clearPress()
       longPressFired.current = false
       root.classList.add('is-long-pressing')
-      try {
-        root.setPointerCapture(event.pointerId)
-      } catch {
-        /* ignore */
-      }
       pressTimer = window.setTimeout(() => {
         pressTimer = null
-        openedByPress = true
-        longPressFired.current = true
-        locking.current = 'hold'
-        setActions(false)
-        applyOffset(0)
-        setDragging(false)
-        openActionMenuRef.current()
+        fireMenu()
       }, LONG_PRESS_MS)
     }
 
-    const onPointerMove = (event) => {
-      if (activePointerId != null && event.pointerId !== activePointerId) return
-      if (!pressTimer) return
-      const dx = event.clientX - originX
-      const dy = event.clientY - originY
-      if (Math.abs(dx) > LONG_PRESS_MOVE_PX || Math.abs(dy) > LONG_PRESS_MOVE_PX) {
+    const onTouchMove = (event) => {
+      if (!tracking) return
+      if (event.touches.length !== 1) return
+      const touch = event.touches[0]
+      const dx = touch.clientX - originX
+      const dy = touch.clientY - originY
+      const moved = Math.abs(dx) > LONG_PRESS_MOVE_PX || Math.abs(dy) > LONG_PRESS_MOVE_PX
+
+      // While finger is still (pending long-press), block scroll from stealing the gesture.
+      if (pressTimer && !moved) {
+        event.preventDefault()
+        return
+      }
+
+      if (pressTimer && moved) {
         clearPress()
+        tracking = false
       }
     }
 
-    const finishPointer = (event) => {
-      if (activePointerId != null && event.pointerId !== activePointerId) return
+    const onTouchEnd = () => {
       clearPress()
-      activePointerId = null
-      try {
-        root.releasePointerCapture(event.pointerId)
-      } catch {
-        /* ignore */
-      }
+      tracking = false
       if (openedByPress) {
-        // Keep hold lock until next gesture; prevent accidental swipe after menu open.
         openedByPress = false
         window.setTimeout(() => {
           longPressFired.current = false
@@ -508,35 +517,49 @@ export default function ChatSwipeBubble({
       if (isIgnoredTarget(event.target)) return
       event.preventDefault()
       clearPress()
-      openActionMenuRef.current()
+      fireMenu()
     }
 
-    // While waiting for long-press, block scroll jitter from canceling the hold.
-    const onTouchMoveGuard = (event) => {
-      if (!pressTimer && locking.current !== 'hold') return
-      if (event.touches.length !== 1) return
-      const touch = event.touches[0]
-      const dx = touch.clientX - originX
-      const dy = touch.clientY - originY
-      if (Math.abs(dx) <= LONG_PRESS_MOVE_PX && Math.abs(dy) <= LONG_PRESS_MOVE_PX) {
-        event.preventDefault()
+    // Mouse long-press for desktop (no reliable touch).
+    let mouseTimer = null
+    const clearMouse = () => {
+      if (mouseTimer != null) {
+        window.clearTimeout(mouseTimer)
+        mouseTimer = null
       }
     }
+    const onMouseDown = (event) => {
+      if (event.button !== 0) return
+      if (isIgnoredTarget(event.target)) return
+      // Touch devices also synthesize mouse events — ignore those.
+      if (event.sourceCapabilities?.firesTouchEvents) return
+      clearMouse()
+      mouseTimer = window.setTimeout(() => {
+        mouseTimer = null
+        fireMenu()
+      }, LONG_PRESS_MS)
+    }
+    const onMouseUp = () => clearMouse()
 
-    root.addEventListener('pointerdown', onPointerDown)
-    root.addEventListener('pointermove', onPointerMove)
-    root.addEventListener('pointerup', finishPointer)
-    root.addEventListener('pointercancel', finishPointer)
+    root.addEventListener('touchstart', onTouchStart, { passive: true })
+    root.addEventListener('touchmove', onTouchMove, { passive: false })
+    root.addEventListener('touchend', onTouchEnd, { passive: true })
+    root.addEventListener('touchcancel', onTouchEnd, { passive: true })
     root.addEventListener('contextmenu', onContextMenu)
-    root.addEventListener('touchmove', onTouchMoveGuard, { passive: false })
+    root.addEventListener('mousedown', onMouseDown)
+    root.addEventListener('mouseup', onMouseUp)
+    root.addEventListener('mouseleave', onMouseUp)
     return () => {
       clearPress()
-      root.removeEventListener('pointerdown', onPointerDown)
-      root.removeEventListener('pointermove', onPointerMove)
-      root.removeEventListener('pointerup', finishPointer)
-      root.removeEventListener('pointercancel', finishPointer)
+      clearMouse()
+      root.removeEventListener('touchstart', onTouchStart)
+      root.removeEventListener('touchmove', onTouchMove)
+      root.removeEventListener('touchend', onTouchEnd)
+      root.removeEventListener('touchcancel', onTouchEnd)
       root.removeEventListener('contextmenu', onContextMenu)
-      root.removeEventListener('touchmove', onTouchMoveGuard)
+      root.removeEventListener('mousedown', onMouseDown)
+      root.removeEventListener('mouseup', onMouseUp)
+      root.removeEventListener('mouseleave', onMouseUp)
     }
   }, [])
 
@@ -696,6 +719,21 @@ export default function ChatSwipeBubble({
                 onTap={handleFlowerTap}
                 onLongPress={openActionMenu}
               />
+            ) : null}
+            {swipeMode ? (
+              <button
+                type="button"
+                className="chat-bubble-menu-btn"
+                data-no-bubble-press="true"
+                aria-label="メニュー"
+                title="メニュー"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  openActionMenu()
+                }}
+              >
+                <IconMore />
+              </button>
             ) : null}
           </div>
           {canReact || (reactions && Object.keys(reactions).length > 0) ? (
@@ -913,6 +951,7 @@ export function ChatReactionChips({
 function FlowerReactionButton({ total = 0, mine = 0, disabled = false, onTap, onLongPress }) {
   const timerRef = useRef(null)
   const longRef = useRef(false)
+  const originRef = useRef({ x: 0, y: 0 })
   const filled = mine > 0 || total > 0
 
   const clear = () => {
@@ -932,16 +971,13 @@ function FlowerReactionButton({ total = 0, mine = 0, disabled = false, onTap, on
       data-no-bubble-press="true"
       aria-label="花のリアクション"
       title="タップで🌸 / 長押しでメニュー"
-      onPointerDown={(event) => {
+      onTouchStart={(event) => {
         event.stopPropagation()
-        if (disabled || event.button === 2) return
+        if (disabled || event.touches.length !== 1) return
+        const touch = event.touches[0]
+        originRef.current = { x: touch.clientX, y: touch.clientY }
         longRef.current = false
         clear()
-        try {
-          event.currentTarget.setPointerCapture?.(event.pointerId)
-        } catch {
-          /* ignore */
-        }
         timerRef.current = window.setTimeout(() => {
           timerRef.current = null
           longRef.current = true
@@ -953,20 +989,23 @@ function FlowerReactionButton({ total = 0, mine = 0, disabled = false, onTap, on
           }
         }, LONG_PRESS_MS)
       }}
-      onPointerUp={(event) => {
-        event.stopPropagation()
-        try {
-          event.currentTarget.releasePointerCapture?.(event.pointerId)
-        } catch {
-          /* ignore */
+      onTouchMove={(event) => {
+        if (!timerRef.current || event.touches.length !== 1) return
+        const touch = event.touches[0]
+        const dx = touch.clientX - originRef.current.x
+        const dy = touch.clientY - originRef.current.y
+        if (Math.abs(dx) > LONG_PRESS_MOVE_PX || Math.abs(dy) > LONG_PRESS_MOVE_PX) {
+          clear()
         }
+      }}
+      onTouchEnd={(event) => {
+        event.stopPropagation()
         const wasLong = longRef.current
         clear()
         if (!wasLong) onTap?.()
         longRef.current = false
       }}
-      onPointerCancel={(event) => {
-        event.stopPropagation()
+      onTouchCancel={() => {
         clear()
         longRef.current = false
       }}
@@ -976,6 +1015,13 @@ function FlowerReactionButton({ total = 0, mine = 0, disabled = false, onTap, on
         clear()
         longRef.current = true
         onLongPress?.()
+      }}
+      onClick={(event) => {
+        // Desktop / mouse fallback (touch already handled above).
+        if (event.detail === 0) return
+        if ('ontouchstart' in window) return
+        if (disabled) return
+        onTap?.()
       }}
     >
       <span className="hana-chat-flower-fab-icon" aria-hidden="true">{CHAT_DEFAULT_REACTION}</span>
