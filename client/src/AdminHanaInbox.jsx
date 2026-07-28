@@ -125,23 +125,21 @@ export default function AdminHanaInbox() {
 
   const labelForSender = (sender) => (sender === 'hana' ? 'はな' : activeGuestName)
 
-  const handleOpenGuest = async (profile) => {
+  const handleOpenGuest = (profile) => {
     const threadId = `guest-${profile.key}`
-    setBusy(true)
     setError('')
     clearComposerExtras()
-    try {
-      await ensureChatThread({
-        threadId,
-        guestLabel: profile.displayName,
-        guestKey: profile.key,
-      })
-      setActiveId(threadId)
-    } catch (err) {
+    // Subscribe immediately; ensure thread doc in the background if missing.
+    setActiveId(threadId)
+    const exists = threads.some((thread) => thread.id === threadId)
+    if (exists) return
+    void ensureChatThread({
+      threadId,
+      guestLabel: profile.displayName,
+      guestKey: profile.key,
+    }).catch((err) => {
       setError(getFirebaseErrorMessage(err) || 'ゲストの準備に失敗しました。')
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   const startReply = (message) => {

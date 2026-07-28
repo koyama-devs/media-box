@@ -444,17 +444,18 @@ export async function migrateLegacyGuestThread({
     return canonicalId || legacyThreadId
   }
 
+  // Fast path: if canonical already has any message, keep using the caller's preferred id.
   const canonMessagesRef = collection(db, CHAT_THREADS_COLLECTION, canonicalId, 'messages')
+  const canonSnap = await getDocs(query(canonMessagesRef, limit(1)))
+  if (!canonSnap.empty) return legacyThreadId
+
   const legacyMessagesRef = collection(db, CHAT_THREADS_COLLECTION, legacyThreadId, 'messages')
-  const [canonSnap, legacySnap, legacyThreadSnap] = await Promise.all([
-    getDocs(query(canonMessagesRef, limit(1))),
+  const [legacySnap, legacyThreadSnap] = await Promise.all([
     getDocs(query(legacyMessagesRef, limit(200))),
     getDoc(doc(db, CHAT_THREADS_COLLECTION, legacyThreadId)),
   ])
 
   if (legacySnap.empty) return canonicalId
-  // Canonical already has its own history — open whichever caller preferred.
-  if (!canonSnap.empty) return legacyThreadId
 
   const legacyMeta = legacyThreadSnap.exists() ? legacyThreadSnap.data() : {}
   const nowIso = new Date().toISOString()
@@ -725,15 +726,24 @@ export async function clearAllChatHistories() {
 /** Ensure a known guest thread doc exists (admin roster / open chat). */
 export async function ensureChatThread({ threadId, guestLabel, guestKey }) {
   if (!threadId) return null
+  const threadRef = doc(db, CHAT_THREADS_COLLECTION, threadId)
+  const existing = await getDoc(threadRef)
+  if (existing.exists()) return threadId
+
   const nowIso = new Date().toISOString()
   const profile = getGuestProfile(guestKey) || getGuestProfile(String(threadId).replace(/^guest-/, ''))
   await setDoc(
-    doc(db, CHAT_THREADS_COLLECTION, threadId),
+    threadRef,
     {
       guestLabel: guestLabel || profile?.displayName || guestLabelFromUid(threadId),
       guestKey: guestKey || profile?.key || '',
       updatedAt: serverTimestamp(),
       updatedAtIso: nowIso,
+      lastText: '',
+      unreadByHana: false,
+      unreadByGuest: false,
+      unreadCountHana: 0,
+      unreadCountGuest: 0,
     },
     { merge: true },
   )

@@ -140,6 +140,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const inputRef = useRef(null)
   const composerRef = useRef(null)
   const syncPanelViewportRef = useRef(() => {})
+  const migrationCheckedRef = useRef(new Set())
+  const threadsRef = useRef(threads)
+  threadsRef.current = threads
 
   const guestProfile = useMemo(() => getGuestProfile(guestKey), [guestKey])
   const guestDisplayName = guestProfile?.displayName || 'ゲスト'
@@ -577,39 +580,58 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     setEditingId(null)
   }
 
-  const openOwnerThread = async (threadId, label, guestKey = '', canonicalId = '') => {
+  const openOwnerThread = (threadId, label, guestKey = '', canonicalId = '') => {
     clearComposerExtras()
-    setHanaMessages([])
     const key = guestKey || (canonicalId || threadId).replace(/^guest-/, '')
     const canon = canonicalId || (key && GUEST_PROFILES[key] ? `guest-${key}` : '')
-    let openId = threadId
+    // Open immediately — do not wait on Firestore writes/migration.
+    const openId = threadId || canon
+    if (!openId) return
 
-    if (canon && threadId && canon !== threadId) {
-      try {
-        openId = await migrateLegacyGuestThread({
-          canonicalId: canon,
-          legacyThreadId: threadId,
-          guestLabel: label,
-          guestKey: key,
-        })
-      } catch {
-        openId = threadId
-      }
+    if (openId !== activeThreadId) {
+      setHanaMessages([])
+      setActiveThreadId(openId)
     }
 
-    setActiveThreadId(openId)
+    const ensureId = (canon && canon.startsWith('guest-')) ? canon : (openId.startsWith('guest-') ? openId : '')
+    const alreadyExists = Boolean(
+      ensureId && threadsRef.current.some((thread) => thread.id === ensureId),
+    )
 
-    if (openId.startsWith('guest-')) {
-      try {
-        await ensureChatThread({
-          threadId: openId,
-          guestLabel: label,
-          guestKey: key || openId.replace(/^guest-/, ''),
-        })
-      } catch {
-        /* ignore */
+    void (async () => {
+      // Migrate legacy UUID → guest-* only once per pair, and never block opening.
+      if (canon && threadId && canon !== threadId) {
+        const checkKey = `${canon}←${threadId}`
+        if (!migrationCheckedRef.current.has(checkKey)) {
+          migrationCheckedRef.current.add(checkKey)
+          try {
+            const resolved = await migrateLegacyGuestThread({
+              canonicalId: canon,
+              legacyThreadId: threadId,
+              guestLabel: label,
+              guestKey: key,
+            })
+            if (resolved && resolved !== openId) {
+              setActiveThreadId(resolved)
+            }
+          } catch {
+            /* ignore — keep showing the opened thread */
+          }
+        }
       }
-    }
+
+      if (ensureId && !alreadyExists) {
+        try {
+          await ensureChatThread({
+            threadId: ensureId,
+            guestLabel: label,
+            guestKey: key || ensureId.replace(/^guest-/, ''),
+          })
+        } catch {
+          /* ignore */
+        }
+      }
+    })()
   }
 
   const startReply = (message) => {
@@ -803,7 +825,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   }
 
   const modeTitle = actingAsOwner
-    ? 'はな（返信）'
+    ? 'はな'
     : channel === 'human'
       ? 'はな'
       : 'はなちゃん'
