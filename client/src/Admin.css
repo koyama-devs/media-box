@@ -489,9 +489,10 @@
   gap: 10px;
 }
 
-.admin-chat-messages .chat-swipe {
-  width: 100%;
-  flex: 0 0 auto;
+.admin-chat-messages .hana-chat-msg-row .chat-swipe {
+  width: max-content;
+  max-width: calc(100% - 40px);
+  flex: 0 1 auto;
 }
 
 .admin-chat-messages .chat-swipe.is-hana .chat-swipe-sheet,
@@ -507,7 +508,9 @@
 }
 
 .admin-chat-bubble {
-  max-width: 100%;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: min(320px, 70%);
   padding: 10px 12px;
   border-radius: 12px;
   background: rgba(148, 163, 184, 0.12);
@@ -543,7 +546,8 @@
   font-size: 0.9rem;
   line-height: 1.5;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .admin-chat-bubble-meta {

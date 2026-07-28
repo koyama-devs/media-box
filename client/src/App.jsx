@@ -2630,7 +2630,7 @@ const playPrevious = useCallback(() => {
               <span className="stat-badge" title="全メディアの合計サイズ">
                 {mediaCounts.totalSize ? formatSize(mediaCounts.totalSize) : '0 MB'}
               </span>
-              <div className="session-user-chip" title={`${sessionProfile.displayName}（${sessionProfile.roleLabel}）`}>
+              <div className="session-user-chip" title={sessionProfile.displayName}>
                 <button
                   type="button"
                   className="session-user-avatar-btn"
@@ -2642,7 +2642,6 @@ const playPrevious = useCallback(() => {
                 </button>
                 <div className="session-user-meta">
                   <strong>{sessionProfile.displayName}</strong>
-                  <span>{sessionProfile.roleLabel}</span>
                 </div>
                 <button
                   type="button"

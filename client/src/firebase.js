@@ -174,9 +174,14 @@ export function getDefaultAvatarDataUrl(profileId, displayName = '') {
   const label = String(displayName || profileId || '?').trim()
   const initial = Array.from(label)[0] || '?'
   const color = AVATAR_PALETTE[hashString(profileId || label) % AVATAR_PALETTE.length]
+  const safe = initial
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <rect width="128" height="128" rx="64" fill="${color}"/>
-  <text x="64" y="72" text-anchor="middle" font-size="56" font-family="system-ui,sans-serif" font-weight="600" fill="#fff8f0">${initial}</text>
+  <circle cx="64" cy="64" r="64" fill="${color}"/>
+  <text x="64" y="64" text-anchor="middle" dominant-baseline="central" font-size="58" font-family="system-ui,-apple-system,'Segoe UI','Hiragino Sans','Noto Sans JP',sans-serif" font-weight="600" fill="#fff8f0">${safe}</text>
 </svg>`
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
 }
