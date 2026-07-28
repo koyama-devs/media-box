@@ -157,8 +157,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [editingId, setEditingId] = useState(null)
   const [presenceTick, setPresenceTick] = useState(() => Date.now())
   const [chatProfiles, setChatProfiles] = useState({})
-  const [ownerSuggestions, setOwnerSuggestions] = useState({ replies: [], topics: [] })
+  const [ownerSuggestions, setOwnerSuggestions] = useState({ replies: [], topics: [], expressions: [] })
   const [suggestBusy, setSuggestBusy] = useState(false)
+  const [suggestPickerOpen, setSuggestPickerOpen] = useState(false)
   const listRef = useRef(null)
   const panelRef = useRef(null)
   const inputRef = useRef(null)
@@ -632,8 +633,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     return () => window.cancelAnimationFrame(id)
   }, [open, editingId, replyTo])
 
-  if (hidden) return null
-
   const switchToHuman = (noticeText) => {
     setChannel('human')
     setShowHumanSuggest(false)
@@ -683,13 +682,13 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   useEffect(() => {
     if (!actingAsOwner || !activeThreadId || !open) {
-      setOwnerSuggestions({ replies: [], topics: [] })
+      setOwnerSuggestions({ replies: [], topics: [], expressions: [] })
       setSuggestBusy(false)
       return undefined
     }
     const usable = hanaMessages.filter((m) => !m.deleted && String(m.text || '').trim())
     if (usable.length === 0) {
-      setOwnerSuggestions({ replies: [], topics: [] })
+      setOwnerSuggestions({ replies: [], topics: [], expressions: [] })
       return undefined
     }
 
@@ -711,6 +710,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           setOwnerSuggestions({
             replies: data.replies?.length ? data.replies : OWNER_FALLBACK_REPLIES.slice(0, 3),
             topics: Array.isArray(data.topics) ? data.topics : [],
+            expressions: Array.isArray(data.expressions) ? data.expressions : [],
           })
         })
         .catch(() => {
@@ -718,6 +718,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           setOwnerSuggestions({
             replies: OWNER_FALLBACK_REPLIES.slice(0, 3),
             topics: [],
+            expressions: [],
           })
         })
         .finally(() => {
@@ -744,6 +745,12 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     ...ownerSuggestions.topics,
     ...OWNER_TOPIC_CHIPS.filter((topic) => !ownerSuggestions.topics.includes(topic)),
   ].slice(0, 5)
+  const ownerExpressionChips = ownerSuggestions.expressions.length
+    ? ownerSuggestions.expressions
+    : OWNER_EXPRESSION_CHIPS
+  const ownerReplyInline = ownerReplyChips.slice(0, 2)
+  const ownerTopicInline = ownerTopicChips.slice(0, 2)
+  const ownerExpressionInline = ownerExpressionChips.slice(0, 2)
 
   const applyOwnerSuggest = (text) => {
     const next = String(text || '').trim()
@@ -757,6 +764,12 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     if (!token) return
     setDraft((prev) => `${prev}${token}`)
     window.requestAnimationFrame(() => inputRef.current?.focus())
+  }
+
+  const chooseOwnerSuggest = (chip, kind) => {
+    if (kind === 'expr') appendOwnerExpression(chip)
+    else applyOwnerSuggest(chip)
+    setSuggestPickerOpen(false)
   }
 
   const resolveDelivery = (message) => {
@@ -1074,6 +1087,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       : 'はなちゃんとお話し中'
   const presenceLabel = partnerOnline ? 'オンライン' : 'オフライン'
 
+  if (hidden) return null
+
   return (
     <div className={`hana-chat${open ? ' is-open' : ''}`}>
       <button
@@ -1273,7 +1288,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               <div className="hana-chat-suggest-group">
                 <span className="hana-chat-suggest-label">返信</span>
                 <div className="hana-chat-suggest-chips">
-                  {ownerReplyChips.map((chip) => (
+                  {ownerReplyInline.map((chip) => (
                     <button
                       key={`reply-${chip}`}
                       type="button"
@@ -1284,12 +1299,20 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                       {chip}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    className="hana-chat-suggest-chip is-more"
+                    disabled={busy}
+                    onClick={() => setSuggestPickerOpen(true)}
+                  >
+                    …
+                  </button>
                 </div>
               </div>
               <div className="hana-chat-suggest-group">
                 <span className="hana-chat-suggest-label">話題</span>
                 <div className="hana-chat-suggest-chips">
-                  {ownerTopicChips.map((chip) => (
+                  {ownerTopicInline.map((chip) => (
                     <button
                       key={`topic-${chip}`}
                       type="button"
@@ -1305,7 +1328,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               <div className="hana-chat-suggest-group">
                 <span className="hana-chat-suggest-label">表情</span>
                 <div className="hana-chat-suggest-chips">
-                  {OWNER_EXPRESSION_CHIPS.map((chip) => (
+                  {ownerExpressionInline.map((chip) => (
                     <button
                       key={`expr-${chip}`}
                       type="button"
@@ -1317,6 +1340,46 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     </button>
                   ))}
                 </div>
+              </div>
+            </div>
+          ) : null}
+          {actingAsOwner && activeThreadId && suggestPickerOpen ? (
+            <div className="hana-chat-suggest-picker" role="dialog" aria-modal="true" aria-label="返信ヒント一覧">
+              <div className="hana-chat-suggest-picker-head">
+                <strong>返信ヒント</strong>
+                <button type="button" onClick={() => setSuggestPickerOpen(false)} aria-label="閉じる">×</button>
+              </div>
+              <div className="hana-chat-suggest-picker-body">
+                <section className="hana-chat-suggest-picker-group">
+                  <h4>返信</h4>
+                  <div className="hana-chat-suggest-picker-chips">
+                    {ownerReplyChips.map((chip) => (
+                      <button key={`picker-reply-${chip}`} type="button" className="hana-chat-suggest-chip is-reply" onClick={() => chooseOwnerSuggest(chip, 'reply')}>
+                        {chip}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+                <section className="hana-chat-suggest-picker-group">
+                  <h4>話題</h4>
+                  <div className="hana-chat-suggest-picker-chips">
+                    {ownerTopicChips.map((chip) => (
+                      <button key={`picker-topic-${chip}`} type="button" className="hana-chat-suggest-chip is-topic" onClick={() => chooseOwnerSuggest(chip, 'topic')}>
+                        {chip}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+                <section className="hana-chat-suggest-picker-group">
+                  <h4>表情</h4>
+                  <div className="hana-chat-suggest-picker-chips">
+                    {ownerExpressionChips.map((chip) => (
+                      <button key={`picker-expr-${chip}`} type="button" className="hana-chat-suggest-chip is-expr" onClick={() => chooseOwnerSuggest(chip, 'expr')}>
+                        {chip}
+                      </button>
+                    ))}
+                  </div>
+                </section>
               </div>
             </div>
           ) : null}

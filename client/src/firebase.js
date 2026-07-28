@@ -1007,6 +1007,7 @@ export async function suggestHanaChat(payload) {
   return {
     replies: Array.isArray(data.replies) ? data.replies.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 3) : [],
     topics: Array.isArray(data.topics) ? data.topics.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 2) : [],
+    expressions: Array.isArray(data.expressions) ? data.expressions.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 3) : [],
     reason: data.reason || null,
   }
 }

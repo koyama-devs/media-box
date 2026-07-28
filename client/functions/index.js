@@ -103,15 +103,15 @@ const SUGGEST_SYSTEM_PROMPT = `あなたは「はな」（Hana Mediaboxのオー
 はなの口調は、やさしく自然な日本語で短め。友達に近い親しみやすさ。マスコット口調や過度な敬語は避ける。
 
 必ずJSONだけを返す（説明・コードフェンス禁止）:
-{"replies":["...","...","..."],"topics":["...","..."]}
+{"replies":["...","...","..."],"topics":["...","..."],"expressions":["...","...","..."]}
 
 - replies: ゲストの直近の発言への返信候補。各40文字以内、2〜3個。
 - topics: 会話を続ける話題の投げかけ。各30文字以内、2個。
-絵文字はrepliesに控えめに1つまで入れてよい。`
+- expressions: 今の会話ムードに合う短い表情/相づち。8文字以内、3個。`
 
 function parseSuggestJson(raw) {
   const text = String(raw || '').trim()
-  if (!text) return { replies: [], topics: [] }
+  if (!text) return { replies: [], topics: [], expressions: [] }
   const fenced = text.match(/\{[\s\S]*\}/)
   const jsonText = fenced ? fenced[0] : text
   try {
@@ -122,9 +122,12 @@ function parseSuggestJson(raw) {
     const topics = Array.isArray(parsed?.topics)
       ? parsed.topics.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 2)
       : []
-    return { replies, topics }
+    const expressions = Array.isArray(parsed?.expressions)
+      ? parsed.expressions.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 3)
+      : []
+    return { replies, topics, expressions }
   } catch {
-    return { replies: [], topics: [] }
+    return { replies: [], topics: [], expressions: [] }
   }
 }
 
@@ -182,22 +185,22 @@ exports.suggestHanaChat = onCall({ cors: true }, async (request) => {
   const key = process.env.GEMINI_API_KEY || ''
 
   if (!key) {
-    return { replies: [], topics: [], reason: 'quota' }
+    return { replies: [], topics: [], expressions: [], reason: 'quota' }
   }
 
   try {
-    const { replies, topics } = await callGeminiSuggest({
+    const { replies, topics, expressions } = await callGeminiSuggest({
       apiKey: key,
       history,
       lastReply,
       guestName,
     })
-    return { replies, topics, reason: null }
+    return { replies, topics, expressions, reason: null }
   } catch (error) {
     console.error('suggestHanaChat', error)
     if (error?.status === 429 || /credits? are depleted|quota|RESOURCE_EXHAUSTED/i.test(String(error?.message || ''))) {
-      return { replies: [], topics: [], reason: 'quota' }
+      return { replies: [], topics: [], expressions: [], reason: 'quota' }
     }
-    return { replies: [], topics: [], reason: 'error' }
+    return { replies: [], topics: [], expressions: [], reason: 'error' }
   }
 })
