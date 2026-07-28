@@ -137,6 +137,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [presenceTick, setPresenceTick] = useState(() => Date.now())
   const listRef = useRef(null)
   const panelRef = useRef(null)
+  const inputRef = useRef(null)
+  const composerRef = useRef(null)
   const syncPanelViewportRef = useRef(() => {})
 
   const guestProfile = useMemo(() => getGuestProfile(guestKey), [guestKey])
@@ -412,20 +414,43 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       panel.classList.remove('is-keyboard')
     }
 
-    const syncMobileViewport = () => {
+    const ensureComposerVisible = () => {
+      const composer = composerRef.current
+      const input = inputRef.current
+      if (!composer) return
+      // Keep the input row inside the panel / visual viewport after keyboard resize.
+      try {
+        composer.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'instant' })
+      } catch {
+        composer.scrollIntoView(false)
+      }
+      if (input && typeof input.scrollIntoView === 'function') {
+        try {
+          input.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    const syncMobileViewport = (options = {}) => {
       if (!window.matchMedia('(max-width: 640px)').matches) {
         clearInline()
         return
       }
       const vv = window.visualViewport
-      const margin = 10
+      const margin = 8
       if (!vv) {
         clearInline()
         return
       }
 
-      // Keep panel inside the visual viewport (keyboard / iOS focus zoom).
-      const keyboardOpen = vv.height < window.innerHeight - 80
+      const inputFocused = document.activeElement === inputRef.current
+      // Treat focus as keyboard-open immediately — vv.height often lags behind the keyboard.
+      const keyboardOpen = Boolean(options.forceKeyboard)
+        || inputFocused
+        || vv.height < window.innerHeight - 80
+
       const left = Math.max(0, vv.offsetLeft) + margin
       const width = Math.max(240, vv.width - margin * 2)
 
@@ -435,12 +460,13 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
       if (keyboardOpen) {
         const top = Math.max(0, vv.offsetTop) + margin
-        const height = Math.max(180, vv.height - margin * 2)
+        const height = Math.max(160, vv.height - margin * 2)
         panel.style.top = `${top}px`
         panel.style.bottom = 'auto'
         panel.style.height = `${height}px`
         panel.style.maxHeight = `${height}px`
         panel.classList.add('is-keyboard')
+        window.requestAnimationFrame(ensureComposerVisible)
       } else {
         panel.style.top = ''
         panel.style.bottom = ''
@@ -466,6 +492,19 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       clearInline()
     }
   }, [hidden, open])
+
+  useEffect(() => {
+    if (!open || (!editingId && !replyTo)) return undefined
+    const id = window.requestAnimationFrame(() => {
+      const input = inputRef.current
+      if (!input) return
+      input.focus({ preventScroll: true })
+      syncPanelViewportRef.current({ forceKeyboard: true })
+      window.setTimeout(() => syncPanelViewportRef.current({ forceKeyboard: true }), 80)
+      window.setTimeout(() => syncPanelViewportRef.current({ forceKeyboard: true }), 280)
+    })
+    return () => window.cancelAnimationFrame(id)
+  }, [open, editingId, replyTo])
 
   if (hidden) return null
 
@@ -969,18 +1008,21 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             </div>
           ) : null}
 
-          <form className="hana-chat-composer" onSubmit={handleSend}>
+          <form className="hana-chat-composer" ref={composerRef} onSubmit={handleSend}>
             <label className="sr-only" htmlFor="hana-chat-input">
               メッセージ
             </label>
             <input
+              ref={inputRef}
               id="hana-chat-input"
               type="text"
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               onFocus={() => {
-                window.setTimeout(() => syncPanelViewportRef.current(), 50)
-                window.setTimeout(() => syncPanelViewportRef.current(), 300)
+                syncPanelViewportRef.current({ forceKeyboard: true })
+                window.setTimeout(() => syncPanelViewportRef.current({ forceKeyboard: true }), 50)
+                window.setTimeout(() => syncPanelViewportRef.current({ forceKeyboard: true }), 150)
+                window.setTimeout(() => syncPanelViewportRef.current({ forceKeyboard: true }), 350)
               }}
               onBlur={() => {
                 window.setTimeout(() => syncPanelViewportRef.current(), 50)

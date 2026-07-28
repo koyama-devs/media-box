@@ -688,6 +688,37 @@
     overflow: hidden;
   }
 
+  .hana-chat-panel.is-keyboard .hana-chat-threads {
+    display: none;
+  }
+
+  .hana-chat-panel.is-keyboard .hana-chat-header {
+    padding: 8px 10px;
+  }
+
+  .hana-chat-panel.is-keyboard .hana-chat-avatar {
+    width: 36px;
+    height: 36px;
+  }
+
+  .hana-chat-panel.is-keyboard .hana-chat-messages {
+    min-height: 48px;
+    padding-block: 8px;
+  }
+
+  .hana-chat-panel.is-keyboard .hana-chat-suggest,
+  .hana-chat-panel.is-keyboard .hana-chat-channel-banner {
+    display: none;
+  }
+
+  .hana-chat-panel.is-keyboard .hana-chat-composer,
+  .hana-chat-panel.is-keyboard .hana-chat-composer-context {
+    position: relative;
+    z-index: 2;
+    background:
+      linear-gradient(165deg, rgba(36, 22, 20, 0.98), rgba(14, 10, 12, 0.98));
+  }
+
   .hana-chat-composer {
     padding: 10px 12px 12px;
     grid-template-columns: minmax(0, 1fr) 52px;
