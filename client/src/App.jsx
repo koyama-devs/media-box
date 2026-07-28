@@ -2636,7 +2636,7 @@ const playPrevious = useCallback(() => {
               <span className="stat-badge" title="全メディアの合計サイズ">
                 {mediaCounts.totalSize ? formatSize(mediaCounts.totalSize) : '0 MB'}
               </span>
-              <div className="session-user-chip" title={sessionProfile.displayName}>
+              <div className="session-user-chip" title={`${sessionProfile.displayName}（アバターをタップで変更）`}>
                 <button
                   type="button"
                   className="session-user-avatar-btn"
@@ -2649,14 +2649,6 @@ const playPrevious = useCallback(() => {
                 <div className="session-user-meta">
                   <strong>{sessionProfile.displayName}</strong>
                 </div>
-                <button
-                  type="button"
-                  className="session-user-edit"
-                  onClick={() => avatarInputRef.current?.click()}
-                  disabled={avatarUploading}
-                >
-                  {avatarUploading ? '…' : '変更'}
-                </button>
                 <input
                   ref={avatarInputRef}
                   type="file"

@@ -619,63 +619,77 @@
 
 .chat-desktop-actions {
   position: absolute;
-  top: -28px;
+  top: 50%;
   z-index: 3;
   display: flex;
-  gap: 4px;
+  gap: 2px;
+  align-items: center;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.15s ease;
+  transform: translateY(-50%);
+  transition: opacity 0.12s ease;
   white-space: nowrap;
 }
 
+/* Keep a continuous hover hit-area between bubble and icons. */
 .chat-swipe.is-own .chat-desktop-actions,
 .chat-swipe.is-guest:not(.is-other) .chat-desktop-actions,
 .chat-swipe.is-hana.is-own .chat-desktop-actions {
-  right: 0;
+  right: calc(100% - 2px);
   left: auto;
+  padding-right: 10px;
 }
 
 .chat-swipe.is-other .chat-desktop-actions,
 .chat-swipe.is-hanachan .chat-desktop-actions,
 .chat-swipe.is-hana:not(.is-own) .chat-desktop-actions {
-  left: 0;
+  left: calc(100% - 2px);
   right: auto;
+  padding-left: 10px;
 }
 
-.chat-swipe.is-desktop:hover .chat-desktop-actions,
+.chat-swipe.is-desktop.is-desktop-open .chat-desktop-actions,
 .chat-swipe.is-desktop:focus-within .chat-desktop-actions {
   opacity: 1;
   pointer-events: auto;
 }
 
 .chat-desktop-action {
+  box-sizing: border-box;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   border: 1px solid rgba(255, 248, 240, 0.18);
-  border-radius: 999px;
-  padding: 4px 9px;
-  font: inherit;
-  font-size: 0.68rem;
-  line-height: 1.2;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
   cursor: pointer;
   color: #fff8f0;
-  background: rgba(36, 22, 20, 0.92);
+  background: rgba(36, 22, 20, 0.94);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
 }
 
 .chat-desktop-action.is-reply {
-  border-color: rgba(232, 154, 170, 0.35);
+  border-color: rgba(232, 154, 170, 0.4);
 }
 
 .chat-desktop-action.is-edit {
-  background: rgba(196, 92, 74, 0.92);
+  background: rgba(196, 92, 74, 0.94);
 }
 
 .chat-desktop-action.is-delete {
-  background: rgba(140, 48, 48, 0.95);
+  background: rgba(140, 48, 48, 0.96);
 }
 
 .chat-desktop-action:hover {
-  filter: brightness(1.08);
+  filter: brightness(1.1);
+}
+
+.chat-desktop-action:focus-visible {
+  outline: 2px solid rgba(232, 154, 170, 0.7);
+  outline-offset: 2px;
 }
 
 .chat-swipe-actions {
