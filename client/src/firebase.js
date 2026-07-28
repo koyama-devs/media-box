@@ -526,33 +526,56 @@ export const CHAT_REACTION_EMOJIS = ['🌸', '❤️', '👍', '😂', '😮', '
 
 /**
  * Normalize reactions to { emoji: { reactorId: count } }.
- * Legacy array form (unique or duplicate ids) is supported.
+ * Supports:
+ * - array form [{ emoji, reactorId, count }]
+ * - legacy map { emoji: { rid: count } }
+ * - legacy map { emoji: [rid, rid] }
  */
 function normalizeChatReactions(raw) {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
   const out = {}
-  for (const [emoji, value] of Object.entries(raw)) {
+
+  const add = (emoji, rid, count = 1) => {
     const key = String(emoji || '').trim()
-    if (!key || key.length > 8) continue
-    const counts = {}
+    const id = String(rid || '').trim().toLowerCase()
+    const n = Math.min(99, Math.max(0, Number(count) || 0))
+    if (!key || key.length > 8 || !id || n <= 0) return
+    if (!out[key]) out[key] = {}
+    out[key][id] = Math.min(99, (out[key][id] || 0) + n)
+  }
+
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (typeof item === 'string') continue
+      add(item?.emoji, item?.reactorId, item?.count ?? 1)
+    }
+    return out
+  }
+
+  if (!raw || typeof raw !== 'object') return out
+
+  for (const [emoji, value] of Object.entries(raw)) {
     if (Array.isArray(value)) {
-      for (const id of value) {
-        const rid = String(id || '').trim().toLowerCase()
-        if (!rid) continue
-        counts[rid] = Math.min(99, (counts[rid] || 0) + 1)
-      }
+      for (const id of value) add(emoji, id, 1)
     } else if (value && typeof value === 'object') {
       for (const [id, n] of Object.entries(value)) {
-        const rid = String(id || '').trim().toLowerCase()
-        if (!rid) continue
-        const count = typeof n === 'number' ? n : (n ? 1 : 0)
-        if (count <= 0) continue
-        counts[rid] = Math.min(99, Math.floor(count))
+        add(emoji, id, typeof n === 'number' ? n : (n ? 1 : 0))
       }
     }
-    if (Object.keys(counts).length) out[key] = counts
   }
   return out
+}
+
+/** Firestore-safe array payload (avoid emoji map keys). */
+function reactionsToFirestore(normalized) {
+  const list = []
+  for (const [emoji, counts] of Object.entries(normalized || {})) {
+    for (const [reactorId, count] of Object.entries(counts || {})) {
+      const n = Math.min(99, Math.max(0, Number(count) || 0))
+      if (!emoji || !reactorId || n <= 0) continue
+      list.push({ emoji: String(emoji), reactorId: String(reactorId), count: n })
+    }
+  }
+  return list
 }
 
 export function reactionTotal(counts) {
@@ -952,7 +975,7 @@ export async function reactToChatMessage({
   if (Object.keys(counts).length) reactions[em] = counts
   else delete reactions[em]
 
-  await updateDoc(messageRef, { reactions })
+  await updateDoc(messageRef, { reactions: reactionsToFirestore(reactions) })
 }
 
 /** @deprecated Prefer reactToChatMessage — kept for call-site compatibility. */

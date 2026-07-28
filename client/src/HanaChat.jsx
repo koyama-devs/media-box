@@ -1,5 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import hanachanArt from './assets/hanachan.svg'
+import {
+  addChatReminder,
+  dueChatReminders,
+  loadChatDocuments,
+  loadChatPins,
+  markChatReminderDone,
+  remindAtFromChoice,
+  saveChatDocument,
+  toggleChatPin,
+  unpinChatMessage,
+} from './chatExtras'
 import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
 import {
   chatWithHanachan,
@@ -33,17 +44,6 @@ import {
   translateChatMessage,
   updateChatMessage,
 } from './firebase'
-import {
-  addChatReminder,
-  dueChatReminders,
-  loadChatDocuments,
-  loadChatPins,
-  markChatReminderDone,
-  remindAtFromChoice,
-  saveChatDocument,
-  toggleChatPin,
-  unpinChatMessage,
-} from './chatExtras'
 import './hana-chat.css'
 
 const AI_HISTORY_PREFIX = 'hana-chat-ai-history-'
@@ -1126,15 +1126,41 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   }
 
   const handleReact = async (message, emoji, options = {}) => {
-    if (!canUseReactions || message?.deleted || !emoji) return
+    if (message?.deleted || !emoji) return
+    const em = String(emoji || '').trim()
+    const rid = String(reactorId || '').trim().toLowerCase() || 'guest'
+    if (!em || !rid) return
+
+    // Local AI channel: keep reactions in memory only.
+    if (!canUseReactions) {
+      setAiMessages((prev) => prev.map((m) => {
+        if (m.id !== message.id) return m
+        const reactions = { ...(m.reactions || {}) }
+        const counts = { ...(reactions[em] || {}) }
+        const mine = Number(counts[rid]) || 0
+        const mode = options.mode || 'toggle'
+        if (mode === 'increment') counts[rid] = Math.min(99, mine + 1)
+        else if (mode === 'set') counts[rid] = 1
+        else if (mine > 0) delete counts[rid]
+        else counts[rid] = 1
+        if (Object.keys(counts).length) reactions[em] = counts
+        else delete reactions[em]
+        return { ...m, reactions }
+      }))
+      return
+    }
+
     const threadId = actingAsOwner ? activeThreadId : guestChatId
-    if (!threadId || !message?.id) return
+    if (!threadId || !message?.id) {
+      setError('リアクションできません（スレッド未接続）。')
+      return
+    }
     try {
       await toggleChatReaction({
         threadId,
         messageId: message.id,
-        emoji,
-        reactorId,
+        emoji: em,
+        reactorId: rid,
         mode: options.mode || 'toggle',
       })
     } catch (err) {
@@ -1660,7 +1686,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     canReply={!message.deleted}
                     canEdit={mutable}
                     canDelete={mutable}
-                    canReact={canUseReactions && !message.deleted}
+                    canReact={!message.deleted}
                     reactions={message.reactions || {}}
                     reactorId={reactorId}
                     copyText={message.deleted ? '' : (message.rawText || message.text || '')}

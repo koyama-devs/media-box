@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
-    CHAT_DEFAULT_REACTION,
-    CHAT_REACTION_EMOJIS,
-    reactionMine,
-    reactionTotal,
+  CHAT_DEFAULT_REACTION,
+  CHAT_REACTION_EMOJIS,
+  reactionMine,
+  reactionTotal,
 } from './firebase'
 
 const REPLY_THRESHOLD = 52
@@ -16,11 +17,11 @@ const LONG_PRESS_MOVE_PX = 10
 const AXIS_LOCK_PX = 8
 
 const MENU_EXTRA_ACTIONS = [
-  { id: 'pin', label: 'ピン留め' },
-  { id: 'forward', label: '転送' },
-  { id: 'saveDoc', label: 'マイドキュメントに保存' },
-  { id: 'remind', label: 'リマインダー' },
-  { id: 'translate', label: '翻訳' },
+  { id: 'pin', label: 'ピン', icon: '📌' },
+  { id: 'forward', label: '転送', icon: '↪️' },
+  { id: 'saveDoc', label: '保存', icon: '📄' },
+  { id: 'remind', label: 'リマインド', icon: '⏰' },
+  { id: 'translate', label: '翻訳', icon: '🌐' },
 ]
 
 function IconReply() {
@@ -302,51 +303,65 @@ export default function ChatSwipeBubble({
 
   const closeActionMenu = () => {
     setMenuOpen(false)
+    setSoonNote('')
   }
 
   const pickReaction = (emoji, mode = 'toggle') => {
-    onReact?.(emoji, { mode })
     setMenuOpen(false)
     setActions(false)
     reset()
+    // Defer so the portal unmounts before parent async work / state updates.
+    window.setTimeout(() => {
+      try {
+        onReact?.(emoji, { mode })
+      } catch {
+        /* parent handles async errors */
+      }
+    }, 0)
   }
 
   const handleFlowerTap = () => {
-    onReact?.(CHAT_DEFAULT_REACTION, { mode: 'increment' })
+    window.setTimeout(() => {
+      try {
+        onReact?.(CHAT_DEFAULT_REACTION, { mode: 'increment' })
+      } catch {
+        /* ignore */
+      }
+    }, 0)
   }
 
   const runMenuAction = (actionId) => {
-    if (actionId === 'copy') {
-      setMenuOpen(false)
-      void handleCopy()
-      return
-    }
-    if (actionId === 'reply') {
-      setMenuOpen(false)
-      reset()
-      onReply?.()
-      return
-    }
-    if (actionId === 'edit') {
-      setMenuOpen(false)
-      reset()
-      onEdit?.()
-      return
-    }
-    if (actionId === 'delete') {
-      setMenuOpen(false)
-      reset()
-      onDelete?.()
-      return
-    }
-    const handled = onMenuAction?.(actionId)
-    if (handled) {
-      setMenuOpen(false)
-      reset()
-      return
-    }
-    setSoonNote('準備中です')
-    window.setTimeout(() => setSoonNote(''), 1400)
+    setMenuOpen(false)
+    setSoonNote('')
+    reset()
+    window.setTimeout(() => {
+      try {
+        if (actionId === 'copy') {
+          void handleCopy()
+          return
+        }
+        if (actionId === 'reply') {
+          onReply?.()
+          return
+        }
+        if (actionId === 'edit') {
+          onEdit?.()
+          return
+        }
+        if (actionId === 'delete') {
+          onDelete?.()
+          return
+        }
+        const handled = onMenuAction?.(actionId)
+        if (!handled) {
+          setSoonNote('準備中です')
+          window.setTimeout(() => setSoonNote(''), 1400)
+        }
+      } catch {
+        setSoonNote('操作に失敗しました')
+        window.setTimeout(() => setSoonNote(''), 1600)
+      }
+    }, 0)
   }
 
   const handleCopy = async () => {
@@ -357,6 +372,20 @@ export default function ChatSwipeBubble({
     clearLeaveTimer()
     clearLongPressTimer()
   }, [])
+
+  useEffect(() => {
+    if (!menuOpen) return undefined
+    const onKey = (event) => {
+      if (event.key === 'Escape') closeActionMenu()
+    }
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prevOverflow
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [menuOpen])
 
   useEffect(() => {
     if (!swipeMode) {
@@ -544,34 +573,40 @@ export default function ChatSwipeBubble({
           className="chat-swipe-sheet"
           style={swipeMode ? { transform: `translateX(${offset}px)` } : undefined}
         >
-          {children}
+          <div className="chat-swipe-bubble-wrap">
+            {children}
+            {canReact ? (
+              <FlowerReactionButton
+                total={reactionTotal(reactions?.[CHAT_DEFAULT_REACTION])}
+                mine={reactionMine(reactions?.[CHAT_DEFAULT_REACTION], reactorId)}
+                onTap={handleFlowerTap}
+                onLongPress={openActionMenu}
+              />
+            ) : null}
+          </div>
           {canReact || (reactions && Object.keys(reactions).length > 0) ? (
             <ChatReactionChips
               reactions={reactions}
               reactorId={reactorId}
               disabled={!canReact}
               onToggle={canReact ? (emoji) => onReact?.(emoji, { mode: 'toggle' }) : undefined}
-              onFlowerTap={canReact ? handleFlowerTap : undefined}
-              onFlowerLongPress={canReact ? openActionMenu : undefined}
             />
           ) : null}
           {!swipeMode && hasDesktopActions ? (
             <div className="chat-desktop-actions" role="toolbar" aria-label="メッセージ操作">
-              {canReact ? (
-                <button
-                  type="button"
-                  className={`chat-desktop-action is-react${menuOpen ? ' is-active' : ''}`}
-                  title="メニュー"
-                  aria-label="メニュー"
-                  aria-expanded={menuOpen}
-                  onClick={() => {
-                    clearLeaveTimer()
-                    setMenuOpen((open) => !open)
-                  }}
-                >
-                  <IconReact />
-                </button>
-              ) : null}
+              <button
+                type="button"
+                className={`chat-desktop-action is-react${menuOpen ? ' is-active' : ''}`}
+                title="メニュー"
+                aria-label="メニュー"
+                aria-expanded={menuOpen}
+                onClick={() => {
+                  clearLeaveTimer()
+                  setMenuOpen((open) => !open)
+                }}
+              >
+                <IconReact />
+              </button>
               {canCopy ? (
                 <button
                   type="button"
@@ -621,64 +656,80 @@ export default function ChatSwipeBubble({
         </div>
       </div>
 
-      {menuOpen ? (
-        <div
-          className="chat-msg-menu"
-          role="dialog"
-          aria-label="メッセージメニュー"
-          onPointerDown={(event) => event.stopPropagation()}
-          onTouchStart={(event) => event.stopPropagation()}
-        >
-          <div className="chat-msg-menu-reacts" role="listbox" aria-label="リアクション">
-            {emojiList.map((emoji) => (
-              <button
-                key={emoji}
-                type="button"
-                className={`chat-msg-menu-react${emoji === CHAT_DEFAULT_REACTION ? ' is-default' : ''}`}
-                onClick={() => pickReaction(emoji, emoji === CHAT_DEFAULT_REACTION ? 'increment' : 'toggle')}
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-          <div className="chat-msg-menu-actions">
-            {canCopy ? (
-              <button type="button" className="chat-msg-menu-action" onClick={() => runMenuAction('copy')}>
-                コピー
-              </button>
-            ) : null}
-            {canReply ? (
-              <button type="button" className="chat-msg-menu-action" onClick={() => runMenuAction('reply')}>
-                返信
-              </button>
-            ) : null}
-            {MENU_EXTRA_ACTIONS.map((action) => (
-              <button
-                key={action.id}
-                type="button"
-                className="chat-msg-menu-action"
-                onClick={() => runMenuAction(action.id)}
-              >
-                {action.label}
-              </button>
-            ))}
-            {canEdit ? (
-              <button type="button" className="chat-msg-menu-action" onClick={() => runMenuAction('edit')}>
-                編集
-              </button>
-            ) : null}
-            {canDelete ? (
-              <button type="button" className="chat-msg-menu-action is-danger" onClick={() => runMenuAction('delete')}>
-                削除
-              </button>
-            ) : null}
-          </div>
-          {soonNote ? <p className="chat-msg-menu-note" role="status">{soonNote}</p> : null}
-          <button type="button" className="chat-msg-menu-close" onClick={closeActionMenu}>
-            閉じる
-          </button>
-        </div>
-      ) : null}
+      {menuOpen
+        ? createPortal(
+          <div
+            className="chat-msg-menu-overlay"
+            role="presentation"
+            onClick={closeActionMenu}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') closeActionMenu()
+            }}
+          >
+            <div
+              className="chat-msg-menu is-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-label="メッセージメニュー"
+              onClick={(event) => event.stopPropagation()}
+              onPointerDown={(event) => event.stopPropagation()}
+              onTouchStart={(event) => event.stopPropagation()}
+            >
+              <div className="chat-msg-menu-reacts" role="listbox" aria-label="リアクション">
+                {emojiList.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    className={`chat-msg-menu-react${emoji === CHAT_DEFAULT_REACTION ? ' is-default' : ''}`}
+                    onClick={() => pickReaction(emoji, emoji === CHAT_DEFAULT_REACTION ? 'increment' : 'set')}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+              <div className="chat-msg-menu-actions">
+                {canCopy ? (
+                  <button type="button" className="chat-msg-menu-action" onClick={() => runMenuAction('copy')}>
+                    <span className="chat-msg-menu-icon" aria-hidden="true">📋</span>
+                    <span>コピー</span>
+                  </button>
+                ) : null}
+                {canReply ? (
+                  <button type="button" className="chat-msg-menu-action" onClick={() => runMenuAction('reply')}>
+                    <span className="chat-msg-menu-icon" aria-hidden="true">↩️</span>
+                    <span>返信</span>
+                  </button>
+                ) : null}
+                {MENU_EXTRA_ACTIONS.map((action) => (
+                  <button
+                    key={action.id}
+                    type="button"
+                    className="chat-msg-menu-action"
+                    onClick={() => runMenuAction(action.id)}
+                  >
+                    <span className="chat-msg-menu-icon" aria-hidden="true">{action.icon}</span>
+                    <span>{action.label}</span>
+                  </button>
+                ))}
+                {canEdit ? (
+                  <button type="button" className="chat-msg-menu-action" onClick={() => runMenuAction('edit')}>
+                    <span className="chat-msg-menu-icon" aria-hidden="true">✏️</span>
+                    <span>編集</span>
+                  </button>
+                ) : null}
+                {canDelete ? (
+                  <button type="button" className="chat-msg-menu-action is-danger" onClick={() => runMenuAction('delete')}>
+                    <span className="chat-msg-menu-icon" aria-hidden="true">🗑️</span>
+                    <span>削除</span>
+                  </button>
+                ) : null}
+              </div>
+              {soonNote ? <p className="chat-msg-menu-note" role="status">{soonNote}</p> : null}
+            </div>
+          </div>,
+          document.body,
+        )
+        : null}
     </div>
   )
 }
@@ -692,25 +743,19 @@ export function canMutateOwnMessage(message, now = Date.now()) {
   return now - created <= MESSAGE_EDIT_WINDOW_MS
 }
 
-/** Render reaction chips under a bubble. Flower is the default quick-tap control. */
+/** Other reactions under a bubble (flower FAB is separate on the bubble corner). */
 export function ChatReactionChips({
   reactions = {},
   reactorId = '',
   onToggle,
-  onFlowerTap,
-  onFlowerLongPress,
   disabled = false,
 }) {
   const rid = String(reactorId || '').trim().toLowerCase()
-  const flowerCounts = reactions?.[CHAT_DEFAULT_REACTION] || null
-  const flowerTotal = reactionTotal(flowerCounts)
-  const flowerMine = reactionMine(flowerCounts, rid)
   const otherEntries = Object.entries(reactions || {}).filter(([emoji, counts]) => (
     emoji !== CHAT_DEFAULT_REACTION && reactionTotal(counts) > 0
   ))
-  const showFlower = typeof onFlowerTap === 'function' || flowerTotal > 0
 
-  if (!showFlower && !otherEntries.length) return null
+  if (!otherEntries.length) return null
 
   const stopBubble = (event) => {
     event.stopPropagation()
@@ -726,15 +771,6 @@ export function ChatReactionChips({
       onPointerUp={stopBubble}
       onTouchStart={stopBubble}
     >
-      {showFlower ? (
-        <FlowerReactionButton
-          total={flowerTotal}
-          mine={flowerMine}
-          disabled={disabled || !onFlowerTap}
-          onTap={onFlowerTap}
-          onLongPress={onFlowerLongPress}
-        />
-      ) : null}
       {otherEntries.map(([emoji, counts]) => {
         const total = reactionTotal(counts)
         const mine = reactionMine(counts, rid)
@@ -757,9 +793,10 @@ export function ChatReactionChips({
   )
 }
 
-function FlowerReactionButton({ total, mine, disabled, onTap, onLongPress }) {
+function FlowerReactionButton({ total = 0, mine = 0, disabled = false, onTap, onLongPress }) {
   const timerRef = useRef(null)
   const longRef = useRef(false)
+  const filled = mine > 0 || total > 0
 
   const clear = () => {
     if (timerRef.current != null) {
@@ -773,11 +810,12 @@ function FlowerReactionButton({ total, mine, disabled, onTap, onLongPress }) {
   return (
     <button
       type="button"
-      className={`hana-chat-reaction is-flower${mine ? ' is-mine' : ''}${total > 0 ? ' has-count' : ''}`}
+      className={`hana-chat-flower-fab${filled ? ' is-filled' : ' is-outline'}${mine ? ' is-mine' : ''}`}
       disabled={disabled}
       aria-label="花のリアクション"
       title="タップで🌸 / 長押しでメニュー"
       onPointerDown={(event) => {
+        event.stopPropagation()
         if (disabled || event.button === 2) return
         longRef.current = false
         clear()
@@ -792,13 +830,15 @@ function FlowerReactionButton({ total, mine, disabled, onTap, onLongPress }) {
           }
         }, LONG_PRESS_MS)
       }}
-      onPointerUp={() => {
+      onPointerUp={(event) => {
+        event.stopPropagation()
         const wasLong = longRef.current
         clear()
         if (!wasLong) onTap?.()
         longRef.current = false
       }}
-      onPointerCancel={() => {
+      onPointerCancel={(event) => {
+        event.stopPropagation()
         clear()
         longRef.current = false
       }}
@@ -808,10 +848,11 @@ function FlowerReactionButton({ total, mine, disabled, onTap, onLongPress }) {
       }}
       onContextMenu={(event) => {
         event.preventDefault()
+        event.stopPropagation()
         onLongPress?.()
       }}
     >
-      <span aria-hidden="true">{CHAT_DEFAULT_REACTION}</span>
+      <span className="hana-chat-flower-fab-icon" aria-hidden="true">{CHAT_DEFAULT_REACTION}</span>
       {total > 1 ? <span className="hana-chat-reaction-badge">{total}</span> : null}
     </button>
   )
