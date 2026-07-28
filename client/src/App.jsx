@@ -87,7 +87,17 @@ const AUTH_ROLE_KEY = 'media-share-lite-role'
 const AUTH_GUEST_KEY = 'media-share-lite-guest'
 const OWNER_PASSWORDS = new Set(['hana'])
 const PASSWORDS = new Set(['hiro', 'zen', 'gabusan', 'hana'])
+const GUEST_PASSWORD_ALIASES = {
+  gabu: 'gabusan',
+  gabriel: 'gabusan',
+  ガブリエル: 'gabusan',
+}
 const TRACK_QUERY_KEY = 'track'
+
+function normalizeLoginPassword(raw) {
+  const trimmed = String(raw || '').trim().toLowerCase()
+  return GUEST_PASSWORD_ALIASES[trimmed] || trimmed
+}
 
 function readStoredAuthRole() {
   try {
@@ -99,8 +109,9 @@ function readStoredAuthRole() {
 
 function readStoredGuestKey() {
   try {
-    const key = String(window.localStorage.getItem(AUTH_GUEST_KEY) || '').trim().toLowerCase()
-    return key && !OWNER_PASSWORDS.has(key) ? key : ''
+    const key = normalizeLoginPassword(window.localStorage.getItem(AUTH_GUEST_KEY) || '')
+    if (!key || OWNER_PASSWORDS.has(key)) return ''
+    return PASSWORDS.has(key) ? key : ''
   } catch {
     return ''
   }
@@ -328,7 +339,16 @@ function SpinnerIcon() {
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(() => {
     try {
-      return window.localStorage.getItem(AUTH_KEY) === 'true'
+      if (window.localStorage.getItem(AUTH_KEY) !== 'true') return false
+      const role = readStoredAuthRole()
+      // Legacy sessions may be "logged in" as guest without a known guest key.
+      if (role === 'guest' && !readStoredGuestKey()) {
+        window.localStorage.removeItem(AUTH_KEY)
+        window.localStorage.removeItem(AUTH_ROLE_KEY)
+        window.localStorage.removeItem(AUTH_GUEST_KEY)
+        return false
+      }
+      return true
     } catch {
       return false
     }
@@ -2012,10 +2032,11 @@ const playPrevious = useCallback(() => {
 
   const handleLogin = (event) => {
     event.preventDefault()
+    const normalized = normalizeLoginPassword(password)
 
-    if (PASSWORDS.has(password)) {
-      const role = OWNER_PASSWORDS.has(password) ? 'owner' : 'guest'
-      const nextGuestKey = role === 'guest' ? password : ''
+    if (PASSWORDS.has(normalized)) {
+      const role = OWNER_PASSWORDS.has(normalized) ? 'owner' : 'guest'
+      const nextGuestKey = role === 'guest' ? normalized : ''
       try {
         window.localStorage.setItem(AUTH_KEY, 'true')
         window.localStorage.setItem(AUTH_ROLE_KEY, role)
@@ -2598,6 +2619,10 @@ const playPrevious = useCallback(() => {
               type="password"
               value={password}
               placeholder="パスワードを入力"
+              autoCapitalize="off"
+              autoCorrect="off"
+              autoComplete="current-password"
+              spellCheck={false}
               onChange={(event) => setPassword(event.target.value)}
             />
             <button type="submit">ログイン</button>
