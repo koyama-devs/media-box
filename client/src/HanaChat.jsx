@@ -29,6 +29,7 @@ import {
   subscribeToAuthUser,
   suggestHanaChat,
   threadUnreadCount,
+  toggleChatReaction,
   updateChatMessage,
 } from './firebase'
 import './hana-chat.css'
@@ -160,11 +161,18 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [ownerSuggestions, setOwnerSuggestions] = useState({ replies: [], topics: [], expressions: [] })
   const [suggestBusy, setSuggestBusy] = useState(false)
   const [suggestPickerGroup, setSuggestPickerGroup] = useState(null) // 'reply' | 'topic' | 'expr' | null
+  const [mobileFullscreen, setMobileFullscreen] = useState(true)
+  const [guestMenuOpen, setGuestMenuOpen] = useState(false)
+  const [copyNote, setCopyNote] = useState('')
   const listRef = useRef(null)
   const panelRef = useRef(null)
   const inputRef = useRef(null)
   const composerRef = useRef(null)
+  const guestMenuRef = useRef(null)
   const syncPanelViewportRef = useRef(() => {})
+  const viewportApplyRef = useRef({ top: 0, height: 0, width: 0, keyboard: false })
+  const viewportDebounceRef = useRef(null)
+  const keyboardPinnedRef = useRef(false)
   const migrationCheckedRef = useRef(new Set())
   const suggestReqRef = useRef(0)
   const threadsRef = useRef(threads)
@@ -545,86 +553,141 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       panel.style.height = ''
       panel.style.maxHeight = ''
       panel.classList.remove('is-keyboard')
+      keyboardPinnedRef.current = false
+      viewportApplyRef.current = { top: 0, height: 0, width: 0, keyboard: false }
+    }
+
+    const lockPageScroll = (locked) => {
+      const root = document.documentElement
+      if (locked) {
+        root.classList.add('hana-chat-scroll-lock')
+        document.body.classList.add('hana-chat-scroll-lock')
+      } else {
+        root.classList.remove('hana-chat-scroll-lock')
+        document.body.classList.remove('hana-chat-scroll-lock')
+      }
     }
 
     const ensureComposerVisible = () => {
       const composer = composerRef.current
-      const input = inputRef.current
       if (!composer) return
-      // Keep the input row inside the panel / visual viewport after keyboard resize.
       try {
-        composer.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'instant' })
+        composer.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
       } catch {
-        composer.scrollIntoView(false)
-      }
-      if (input && typeof input.scrollIntoView === 'function') {
-        try {
-          input.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
-        } catch {
-          /* ignore */
-        }
+        /* ignore */
       }
     }
 
-    const syncMobileViewport = (options = {}) => {
+    const applyMobileViewport = (options = {}) => {
       if (!window.matchMedia('(max-width: 640px)').matches) {
         clearInline()
+        lockPageScroll(false)
         return
       }
+
+      // Always lock background page while chat is open on mobile.
+      lockPageScroll(true)
+
       const vv = window.visualViewport
-      const margin = 8
+      const margin = mobileFullscreen ? 0 : 8
+      const inputFocused = document.activeElement === inputRef.current
+      const keyboardOpen = Boolean(options.forceKeyboard)
+        || keyboardPinnedRef.current
+        || inputFocused
+        || Boolean(vv && vv.height < window.innerHeight - 120)
+
+      if (inputFocused || options.forceKeyboard) keyboardPinnedRef.current = true
+      if (!inputFocused && !options.forceKeyboard && vv && vv.height >= window.innerHeight - 80) {
+        keyboardPinnedRef.current = false
+      }
+
       if (!vv) {
         clearInline()
         return
       }
 
-      const inputFocused = document.activeElement === inputRef.current
-      // Treat focus as keyboard-open immediately — vv.height often lags behind the keyboard.
-      const keyboardOpen = Boolean(options.forceKeyboard)
-        || inputFocused
-        || vv.height < window.innerHeight - 80
+      if (!keyboardOpen) {
+        clearInline()
+        return
+      }
 
-      const left = Math.max(0, vv.offsetLeft) + margin
-      const width = Math.max(240, vv.width - margin * 2)
+      const left = Math.max(0, Math.round(vv.offsetLeft)) + margin
+      const width = Math.max(240, Math.round(vv.width) - margin * 2)
+      const top = Math.max(0, Math.round(vv.offsetTop)) + margin
+      const height = Math.max(180, Math.round(vv.height) - margin * 2)
+      const prev = viewportApplyRef.current
+      const same = prev.keyboard
+        && Math.abs(prev.top - top) < 10
+        && Math.abs(prev.height - height) < 10
+        && Math.abs(prev.width - width) < 10
 
+      if (same && !options.force) return
+
+      viewportApplyRef.current = { top, height, width, keyboard: true }
       panel.style.left = `${left}px`
       panel.style.right = 'auto'
       panel.style.width = `${width}px`
+      panel.style.top = `${top}px`
+      panel.style.bottom = 'auto'
+      panel.style.height = `${height}px`
+      panel.style.maxHeight = `${height}px`
+      panel.classList.add('is-keyboard')
 
-      if (keyboardOpen) {
-        const top = Math.max(0, vv.offsetTop) + margin
-        const height = Math.max(160, vv.height - margin * 2)
-        panel.style.top = `${top}px`
-        panel.style.bottom = 'auto'
-        panel.style.height = `${height}px`
-        panel.style.maxHeight = `${height}px`
-        panel.classList.add('is-keyboard')
+      if (options.forceKeyboard || options.revealComposer) {
         window.requestAnimationFrame(ensureComposerVisible)
-      } else {
-        panel.style.top = ''
-        panel.style.bottom = ''
-        panel.style.height = ''
-        panel.style.maxHeight = ''
-        panel.classList.remove('is-keyboard')
       }
     }
 
-    syncMobileViewport()
+    const syncMobileViewport = (options = {}) => {
+      if (options.forceKeyboard || options.immediate || options.force) {
+        if (viewportDebounceRef.current) {
+          window.clearTimeout(viewportDebounceRef.current)
+          viewportDebounceRef.current = null
+        }
+        applyMobileViewport(options)
+        return
+      }
+      if (viewportDebounceRef.current) window.clearTimeout(viewportDebounceRef.current)
+      viewportDebounceRef.current = window.setTimeout(() => {
+        viewportDebounceRef.current = null
+        applyMobileViewport(options)
+      }, 140)
+    }
+
+    const blockBackgroundScroll = (event) => {
+      const target = event.target
+      if (!(target instanceof Element)) {
+        event.preventDefault()
+        return
+      }
+      // Allow vertical scroll only in chat scroll regions.
+      if (target.closest('.hana-chat-messages, .hana-chat-guest-menu, .hana-chat-suggest-popover, textarea')) {
+        return
+      }
+      // Chat is open: don't let the page behind move.
+      event.preventDefault()
+    }
+
+    syncMobileViewport({ immediate: true })
     syncPanelViewportRef.current = syncMobileViewport
     const vv = window.visualViewport
+    const touchMoveOpts = { passive: false }
+    // resize only — scroll events on iOS cause constant jitter
     vv?.addEventListener('resize', syncMobileViewport)
-    vv?.addEventListener('scroll', syncMobileViewport)
     window.addEventListener('resize', syncMobileViewport)
     window.addEventListener('orientationchange', syncMobileViewport)
+    document.addEventListener('touchmove', blockBackgroundScroll, touchMoveOpts)
     return () => {
       syncPanelViewportRef.current = () => {}
+      if (viewportDebounceRef.current) window.clearTimeout(viewportDebounceRef.current)
       vv?.removeEventListener('resize', syncMobileViewport)
-      vv?.removeEventListener('scroll', syncMobileViewport)
       window.removeEventListener('resize', syncMobileViewport)
       window.removeEventListener('orientationchange', syncMobileViewport)
+      document.removeEventListener('touchmove', blockBackgroundScroll, touchMoveOpts)
       clearInline()
+      lockPageScroll(false)
     }
-  }, [hidden, open])
+  }, [hidden, open, mobileFullscreen])
 
   useEffect(() => {
     if (!open || (!editingId && !replyTo)) return undefined
@@ -632,12 +695,27 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       const input = inputRef.current
       if (!input) return
       input.focus({ preventScroll: true })
-      syncPanelViewportRef.current({ forceKeyboard: true })
-      window.setTimeout(() => syncPanelViewportRef.current({ forceKeyboard: true }), 80)
-      window.setTimeout(() => syncPanelViewportRef.current({ forceKeyboard: true }), 280)
+      syncPanelViewportRef.current({ forceKeyboard: true, revealComposer: true })
     })
     return () => window.cancelAnimationFrame(id)
   }, [open, editingId, replyTo])
+
+  const openChat = () => {
+    const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches
+    if (isMobile) setMobileFullscreen(true)
+    setOpen(true)
+  }
+
+  const closeChat = () => {
+    setOpen(false)
+    setSuggestPickerGroup(null)
+    setGuestMenuOpen(false)
+  }
+
+  const toggleChatOpen = () => {
+    if (open) closeChat()
+    else openChat()
+  }
 
   const switchToHuman = (noticeText) => {
     setChannel('human')
@@ -673,10 +751,15 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         deleted: m.deleted,
         replyTo: m.replyTo,
         sender: m.sender,
+        reactions: m.reactions || {},
       }))
     : aiMessages
 
   const ownSender = actingAsOwner ? 'hana' : 'guest'
+  const reactorId = actingAsOwner
+    ? OWNER_PROFILE.key
+    : (guestProfile?.key || String(guestKey || '').trim().toLowerCase() || 'guest')
+  const canUseReactions = actingAsOwner || guestOnHuman
 
   const suggestContextKey = useMemo(() => {
     if (!actingAsOwner || !activeThreadId) return ''
@@ -746,7 +829,19 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   useEffect(() => {
     setSuggestPickerGroup(null)
+    setGuestMenuOpen(false)
   }, [activeThreadId, open])
+
+  useEffect(() => {
+    if (!guestMenuOpen) return undefined
+    const onPointerDown = (event) => {
+      if (!guestMenuRef.current?.contains(event.target)) {
+        setGuestMenuOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [guestMenuOpen])
 
   const ownerReplyChips = ownerSuggestions.replies.length
     ? ownerSuggestions.replies
@@ -799,6 +894,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     if (kind === 'expr') appendOwnerExpression(chip)
     else applyOwnerSuggest(chip)
     setSuggestPickerGroup(null)
+  }
+
+  const notifyCopied = (ok) => {
+    setCopyNote(ok ? 'コピーしました' : 'コピーに失敗しました')
+    window.setTimeout(() => setCopyNote(''), 1400)
   }
 
   const resolveDelivery = (message) => {
@@ -953,6 +1053,22 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       }
     } catch (err) {
       setError(getFirebaseErrorMessage(err) || '削除に失敗しました。')
+    }
+  }
+
+  const handleReact = async (message, emoji) => {
+    if (!canUseReactions || message?.deleted || !emoji) return
+    const threadId = actingAsOwner ? activeThreadId : guestChatId
+    if (!threadId || !message?.id) return
+    try {
+      await toggleChatReaction({
+        threadId,
+        messageId: message.id,
+        emoji,
+        reactorId,
+      })
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || 'リアクションに失敗しました。')
     }
   }
 
@@ -1119,11 +1235,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   if (hidden) return null
 
   return (
-    <div className={`hana-chat${open ? ' is-open' : ''}`}>
+    <div className={`hana-chat${open ? ' is-open' : ''}${mobileFullscreen ? ' is-fullscreen' : ''}`}>
       <button
         type="button"
         className={`hana-chat-launcher${unreadLauncher ? ' has-unread' : ''}${speaking ? ' is-speaking' : ''}`}
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggleChatOpen}
         aria-expanded={open}
         aria-controls="hana-chat-panel"
         title={open ? 'チャットを閉じる' : 'はなちゃんと話す'}
@@ -1140,7 +1256,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         <section
           ref={panelRef}
           id="hana-chat-panel"
-          className="hana-chat-panel"
+          className={`hana-chat-panel${mobileFullscreen ? ' is-fullscreen' : ''}`}
           aria-label="はなちゃんチャット"
         >
           <header className="hana-chat-header">
@@ -1153,72 +1269,132 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               />
             </div>
             <div className="hana-chat-titles">
-              <p className="hana-chat-kicker">{modeSub}</p>
-              <div className="hana-chat-heading-row">
-                <h2 className="hana-chat-heading">{modeTitle}</h2>
-                <p className={`hana-chat-presence-label${partnerOnline ? ' is-online' : ''}`}>
-                  {presenceLabel}
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              className="hana-chat-close"
-              onClick={() => setOpen(false)}
-              aria-label="閉じる"
-            >
-              ×
-            </button>
-          </header>
-
-          {actingAsOwner ? (
-            <div className="hana-chat-threads" aria-label="会話一覧">
-              {ownerGuestRoster.length === 0 ? (
-                <p className="hana-chat-empty">まだメッセージはありません。</p>
-              ) : (
-                ownerGuestRoster.map((entry) => {
-                  const unreadN = threadUnreadCount(entry.thread, 'hana')
-                  return (
+              {actingAsOwner ? (
+                <div className="hana-chat-guest-select" ref={guestMenuRef}>
+                  <p className="hana-chat-kicker">{modeSub}</p>
                   <button
-                    key={`${entry.canonicalId}:${entry.threadId}`}
                     type="button"
-                    className={`hana-chat-thread${activeThreadId === entry.threadId || activeThreadId === entry.canonicalId ? ' is-active' : ''}${unreadN ? ' is-unread' : ''}`}
-                    onClick={() => openOwnerThread(
-                      entry.threadId,
-                      entry.label,
-                      entry.guestKey || entry.thread?.guestKey || '',
-                      entry.canonicalId,
-                    )}
+                    className={`hana-chat-guest-select-trigger${guestMenuOpen ? ' is-open' : ''}`}
+                    aria-expanded={guestMenuOpen}
+                    aria-haspopup="listbox"
+                    onClick={() => setGuestMenuOpen((value) => !value)}
                   >
-                    <span className="hana-chat-thread-name">
-                      <img
-                        className="hana-chat-thread-avatar"
-                        src={avatarSrcForProfile(
-                          entry.guestKey || entry.canonicalId.replace(/^guest-/, '') || 'guest',
-                          entry.label,
-                        )}
-                        alt=""
-                      />
-                      <span
-                        className={`hana-chat-thread-dot ${isPresenceOnline(entry.thread?.guestOnlineAt, presenceTick) ? 'is-online' : 'is-offline'}`}
-                        aria-hidden="true"
-                      />
-                      {entry.label}
-                      {unreadN ? (
-                        <span className="hana-chat-thread-unread" aria-label={`未読 ${unreadN}件`}>
-                          {unreadN > 99 ? '99+' : unreadN}
-                        </span>
-                      ) : null}
+                    <span className="hana-chat-guest-select-name">
+                      {activeThreadId ? ownerActiveGuestLabel : 'ゲストを選択'}
                     </span>
-                    <span className="hana-chat-thread-preview">
-                      {entry.thread?.lastText || (entry.known ? '（未開始）' : '—')}
-                    </span>
+                    {unreadLauncher ? (
+                      <span className="hana-chat-guest-select-unread" aria-label={`未読 ${unreadLauncher}件`}>
+                        {unreadLauncher > 99 ? '99+' : unreadLauncher}
+                      </span>
+                    ) : null}
+                    <span className={`hana-chat-guest-select-caret${guestMenuOpen ? ' is-open' : ''}`} aria-hidden="true">▾</span>
                   </button>
-                  )
-                })
+                  {activeThreadId ? (
+                    <p className={`hana-chat-presence-label${partnerOnline ? ' is-online' : ''}`}>
+                      {presenceLabel}
+                    </p>
+                  ) : null}
+                  {guestMenuOpen ? (
+                    <div className="hana-chat-guest-menu" role="listbox" aria-label="ゲスト一覧">
+                      {ownerGuestRoster.length === 0 ? (
+                        <p className="hana-chat-guest-menu-empty">まだメッセージはありません。</p>
+                      ) : (
+                        ownerGuestRoster.map((entry) => {
+                          const unreadN = threadUnreadCount(entry.thread, 'hana')
+                          const selected = activeThreadId === entry.threadId || activeThreadId === entry.canonicalId
+                          return (
+                            <button
+                              key={`${entry.canonicalId}:${entry.threadId}`}
+                              type="button"
+                              role="option"
+                              aria-selected={selected}
+                              className={`hana-chat-guest-option${selected ? ' is-active' : ''}${unreadN ? ' is-unread' : ''}`}
+                              onClick={() => {
+                                openOwnerThread(
+                                  entry.threadId,
+                                  entry.label,
+                                  entry.guestKey || entry.thread?.guestKey || '',
+                                  entry.canonicalId,
+                                )
+                                setGuestMenuOpen(false)
+                              }}
+                            >
+                              <span className="hana-chat-guest-option-main">
+                                <img
+                                  className="hana-chat-thread-avatar"
+                                  src={avatarSrcForProfile(
+                                    entry.guestKey || entry.canonicalId.replace(/^guest-/, '') || 'guest',
+                                    entry.label,
+                                  )}
+                                  alt=""
+                                />
+                                <span
+                                  className={`hana-chat-thread-dot ${isPresenceOnline(entry.thread?.guestOnlineAt, presenceTick) ? 'is-online' : 'is-offline'}`}
+                                  aria-hidden="true"
+                                />
+                                <span className="hana-chat-guest-option-name">{entry.label}</span>
+                                {unreadN ? (
+                                  <span className="hana-chat-thread-unread" aria-label={`未読 ${unreadN}件`}>
+                                    {unreadN > 99 ? '99+' : unreadN}
+                                  </span>
+                                ) : null}
+                              </span>
+                              <span className="hana-chat-guest-option-preview">
+                                {entry.thread?.lastText || (entry.known ? '（未開始）' : '—')}
+                              </span>
+                            </button>
+                          )
+                        })
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <>
+                  <p className="hana-chat-kicker">{modeSub}</p>
+                  <div className="hana-chat-heading-row">
+                    <h2 className="hana-chat-heading">{modeTitle}</h2>
+                    <p className={`hana-chat-presence-label${partnerOnline ? ' is-online' : ''}`}>
+                      {presenceLabel}
+                    </p>
+                  </div>
+                </>
               )}
             </div>
-          ) : null}
+            <div className="hana-chat-header-actions">
+              <button
+                type="button"
+                className="hana-chat-expand"
+                onClick={() => setMobileFullscreen((value) => !value)}
+                aria-label={mobileFullscreen ? 'チャットを縮小' : 'チャットを全画面'}
+                title={mobileFullscreen ? '縮小' : '全画面'}
+              >
+                {mobileFullscreen ? (
+                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
+                    <path
+                      fill="currentColor"
+                      d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"
+                    />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
+                    <path
+                      fill="currentColor"
+                      d="M7 14H5v5h5v-2H7v-3zm12 5h-5v-2h3v-3h2v5zM7 5h2v3h3v2H5V5h2zm12 5h-5V5h2v3h3v2z"
+                    />
+                  </svg>
+                )}
+              </button>
+              <button
+                type="button"
+                className="hana-chat-close"
+                onClick={closeChat}
+                aria-label="閉じる"
+              >
+                ×
+              </button>
+            </div>
+          </header>
 
           {!actingAsOwner && channel === 'human' ? (
             <div className="hana-chat-channel-banner" role="status">
@@ -1237,7 +1413,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
           <div className="hana-chat-messages" ref={listRef} role="log" aria-live="polite">
             {actingAsOwner && !activeThreadId ? (
-              <p className="hana-chat-empty">上のリストから返信する相手を選んでね。</p>
+              <p className="hana-chat-empty">上のメニューから返信する相手を選んでね。</p>
             ) : null}
             {!actingAsOwner && guestOnHuman && visibleMessages.length === 0 ? (
               <p className="hana-chat-empty">はなにメッセージを送ると、ここに返信が届きます。</p>
@@ -1260,9 +1436,15 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     canReply={!message.deleted}
                     canEdit={mutable}
                     canDelete={mutable}
+                    canReact={canUseReactions && !message.deleted}
+                    reactions={message.reactions || {}}
+                    reactorId={reactorId}
+                    copyText={message.deleted ? '' : (message.rawText || message.text || '')}
+                    onCopy={notifyCopied}
                     onReply={() => startReply(message)}
                     onEdit={() => startEdit(message)}
                     onDelete={() => handleDelete(message)}
+                    onReact={(emoji) => { void handleReact(message, emoji) }}
                   >
                     <div
                       className={`hana-chat-bubble ${sideClass} is-${message.role}${message.kind === 'human-switch' || message.kind === 'intro' ? ' is-notice' : ''}${message.deleted ? ' is-deleted' : ''}`}
@@ -1455,6 +1637,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             </div>
           ) : null}
 
+          {copyNote ? <p className="hana-chat-copy-note" role="status">{copyNote}</p> : null}
           {error ? <p className="hana-chat-error">{error}</p> : null}
 
           {replyTo || editingId ? (
@@ -1475,21 +1658,32 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             <label className="sr-only" htmlFor="hana-chat-input">
               メッセージ
             </label>
-            <input
+            <textarea
               ref={inputRef}
               id="hana-chat-input"
-              type="text"
+              rows={1}
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return
+                // Enter = newline. Ctrl/Cmd+Enter = send.
+                if (event.ctrlKey || event.metaKey) {
+                  event.preventDefault()
+                  if (!busy && draft.trim()) {
+                    event.currentTarget.form?.requestSubmit?.()
+                  }
+                }
+              }}
               onFocus={() => {
-                syncPanelViewportRef.current({ forceKeyboard: true })
-                window.setTimeout(() => syncPanelViewportRef.current({ forceKeyboard: true }), 50)
-                window.setTimeout(() => syncPanelViewportRef.current({ forceKeyboard: true }), 150)
-                window.setTimeout(() => syncPanelViewportRef.current({ forceKeyboard: true }), 350)
+                keyboardPinnedRef.current = true
+                syncPanelViewportRef.current({ forceKeyboard: true, revealComposer: true })
+                window.setTimeout(() => {
+                  syncPanelViewportRef.current({ forceKeyboard: true, force: true })
+                }, 280)
               }}
               onBlur={() => {
-                window.setTimeout(() => syncPanelViewportRef.current(), 50)
-                window.setTimeout(() => syncPanelViewportRef.current(), 300)
+                keyboardPinnedRef.current = false
+                window.setTimeout(() => syncPanelViewportRef.current({ immediate: true }), 180)
               }}
               placeholder={
                 editingId
@@ -1505,7 +1699,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               maxLength={2000}
               disabled={busy || (actingAsOwner && !activeThreadId)}
               autoComplete="off"
-              enterKeyHint="send"
+              enterKeyHint="enter"
             />
             <button type="submit" disabled={busy || !draft.trim()}>
               {busy ? '…' : editingId ? '更新' : '送る'}

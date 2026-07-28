@@ -709,16 +709,23 @@
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
+  align-items: end;
   padding: 12px;
   border-top: 1px solid rgba(148, 163, 184, 0.14);
 }
 
+.admin-chat-composer textarea,
 .admin-chat-composer input {
   border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 10px;
   padding: 10px 12px;
   background: rgba(15, 23, 42, 0.7);
   color: #e5eefb;
+  font: inherit;
+  resize: vertical;
+  min-height: 44px;
+  max-height: 160px;
+  line-height: 1.45;
 }
 
 .admin-chat-empty {

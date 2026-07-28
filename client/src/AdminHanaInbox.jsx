@@ -20,6 +20,7 @@ import {
     subscribeChatMessages,
     subscribeChatProfiles,
     subscribeChatThreads,
+    toggleChatReaction,
     updateChatMessage,
 } from './firebase'
 import './hana-chat.css'
@@ -204,6 +205,20 @@ export default function AdminHanaInbox() {
       }
     } catch (err) {
       setError(getFirebaseErrorMessage(err) || '削除に失敗しました。')
+    }
+  }
+
+  const handleReact = async (message, emoji) => {
+    if (!activeId || message?.deleted || !emoji || !message?.id) return
+    try {
+      await toggleChatReaction({
+        threadId: activeId,
+        messageId: message.id,
+        emoji,
+        reactorId: OWNER_PROFILE.key,
+      })
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || 'リアクションに失敗しました。')
     }
   }
 
@@ -482,13 +497,18 @@ export default function AdminHanaInbox() {
                           <img className="hana-chat-msg-avatar" src={avatarSrc} alt="" />
                         ) : null}
                         <ChatSwipeBubble
-                          className={`is-${message.sender}`}
+                          className={`${isOwn ? 'is-own' : 'is-other'} is-${message.sender}`}
                           canReply={!message.deleted}
                           canEdit={mutable}
                           canDelete={mutable}
+                          canReact={!message.deleted}
+                          reactions={message.reactions || {}}
+                          reactorId={OWNER_PROFILE.key}
+                          copyText={message.deleted ? '' : (message.rawText || message.text || '')}
                           onReply={() => startReply(message)}
                           onEdit={() => startEdit(message)}
                           onDelete={() => handleDelete(message)}
+                          onReact={(emoji) => { void handleReact(message, emoji) }}
                         >
                           <div className={`admin-chat-bubble is-${message.sender}${message.deleted ? ' is-deleted' : ''}`}>
                             <span>{labelForSender(message.sender)}</span>
@@ -533,10 +553,19 @@ export default function AdminHanaInbox() {
                   </div>
                 ) : null}
                 <form className="admin-chat-composer" onSubmit={handleSend}>
-                  <input
-                    type="text"
+                  <textarea
+                    rows={2}
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter') return
+                      if (event.ctrlKey || event.metaKey) {
+                        event.preventDefault()
+                        if (!busy && draft.trim()) {
+                          event.currentTarget.form?.requestSubmit?.()
+                        }
+                      }
+                    }}
                     placeholder={
                       editingId
                         ? '編集して更新…'

@@ -518,6 +518,29 @@ export function guestLabelFromUid(uid) {
   return `ゲスト${petal}${num}`
 }
 
+/** Fixed emoji set for per-message reactions (Hana ↔ guest). */
+export const CHAT_REACTION_EMOJIS = ['❤️', '👍', '🌸', '😂', '😮', '😢', '✨', '🎉']
+
+function normalizeChatReactions(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out = {}
+  for (const [emoji, value] of Object.entries(raw)) {
+    const key = String(emoji || '').trim()
+    if (!key || key.length > 8) continue
+    let ids = []
+    if (Array.isArray(value)) {
+      ids = value.map((id) => String(id || '').trim().toLowerCase()).filter(Boolean)
+    } else if (value && typeof value === 'object') {
+      ids = Object.keys(value)
+        .filter((id) => value[id])
+        .map((id) => String(id).trim().toLowerCase())
+        .filter(Boolean)
+    }
+    if (ids.length) out[key] = [...new Set(ids)]
+  }
+  return out
+}
+
 function serializeChatMessage(id, data) {
   const deleted = Boolean(data?.deleted)
   return {
@@ -528,6 +551,7 @@ function serializeChatMessage(id, data) {
     createdAt: data?.createdAt?.toDate?.()?.toISOString?.() || data?.createdAtIso || null,
     editedAt: data?.editedAt?.toDate?.()?.toISOString?.() || data?.editedAtIso || null,
     deleted,
+    reactions: normalizeChatReactions(data?.reactions),
     replyTo: data?.replyToId
       ? {
           id: String(data.replyToId),
@@ -861,6 +885,32 @@ export async function softDeleteChatMessage({ threadId, messageId }) {
     },
     { merge: true },
   )
+}
+
+/**
+ * Toggle an emoji reaction on a chat message.
+ * reactorId should be a stable profile key (`hana`, `hiro`, `zen`, `gabusan`, …).
+ */
+export async function toggleChatReaction({ threadId, messageId, emoji, reactorId }) {
+  const em = String(emoji || '').trim()
+  const rid = String(reactorId || '').trim().toLowerCase()
+  if (!threadId || !messageId || !em || !rid) return
+  if (em.length > 8) return
+
+  const messageRef = doc(db, CHAT_THREADS_COLLECTION, threadId, 'messages', messageId)
+  const snap = await getDoc(messageRef)
+  if (!snap.exists()) return
+
+  const reactions = normalizeChatReactions(snap.data()?.reactions)
+  const list = reactions[em] ? [...reactions[em]] : []
+  const idx = list.indexOf(rid)
+  if (idx >= 0) list.splice(idx, 1)
+  else list.push(rid)
+
+  if (list.length) reactions[em] = list
+  else delete reactions[em]
+
+  await updateDoc(messageRef, { reactions })
 }
 
 export async function markThreadRead(threadId, reader) {
