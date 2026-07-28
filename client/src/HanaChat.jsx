@@ -185,7 +185,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [suggestBusy, setSuggestBusy] = useState(false)
   const [suggestPickerGroup, setSuggestPickerGroup] = useState(null) // 'reply' | 'topic' | 'expr' | null
   const [ownerSuggestEnabled, setOwnerSuggestEnabled] = useState(() => readOwnerSuggestEnabled())
-  const [mobileFullscreen, setMobileFullscreen] = useState(true)
   const [guestMenuOpen, setGuestMenuOpen] = useState(false)
   const [copyNote, setCopyNote] = useState('')
   const [actionNote, setActionNote] = useState('')
@@ -594,7 +593,13 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     const panel = panelRef.current
     if (!panel) return undefined
 
-    const clearInline = () => {
+    const scrollMessagesToEnd = () => {
+      const node = listRef.current
+      if (!node) return
+      node.scrollTop = node.scrollHeight
+    }
+
+    const clearInline = ({ keepPinned = false } = {}) => {
       panel.style.left = ''
       panel.style.right = ''
       panel.style.top = ''
@@ -603,7 +608,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       panel.style.height = ''
       panel.style.maxHeight = ''
       panel.classList.remove('is-keyboard')
-      keyboardPinnedRef.current = false
+      if (!keepPinned) keyboardPinnedRef.current = false
       viewportApplyRef.current = { top: 0, height: 0, width: 0, keyboard: false }
     }
 
@@ -618,16 +623,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       }
     }
 
-    const ensureComposerVisible = () => {
-      const composer = composerRef.current
-      if (!composer) return
-      try {
-        composer.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
-      } catch {
-        /* ignore */
-      }
-    }
-
     const applyMobileViewport = (options = {}) => {
       if (!window.matchMedia('(max-width: 640px)').matches) {
         clearInline()
@@ -639,39 +634,64 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       lockPageScroll(true)
 
       const vv = window.visualViewport
-      const margin = mobileFullscreen ? 0 : 8
       const inputFocused = document.activeElement === inputRef.current
-      const keyboardOpen = Boolean(options.forceKeyboard)
-        || keyboardPinnedRef.current
-        || inputFocused
-        || Boolean(vv && vv.height < window.innerHeight - 120)
+      const layoutHeight = window.innerHeight || document.documentElement.clientHeight || 0
+      const vvHeight = vv ? vv.height : layoutHeight
+      const keyboardInset = Math.max(0, layoutHeight - vvHeight - (vv?.offsetTop || 0))
+      const vvShrunk = keyboardInset > 80 || (vv && vv.height < layoutHeight - 100)
 
       if (inputFocused || options.forceKeyboard) keyboardPinnedRef.current = true
-      if (!inputFocused && !options.forceKeyboard && vv && vv.height >= window.innerHeight - 80) {
+      if (!inputFocused && !options.forceKeyboard && !vvShrunk) {
         keyboardPinnedRef.current = false
       }
 
+      const wantKeyboard = Boolean(options.forceKeyboard)
+        || keyboardPinnedRef.current
+        || inputFocused
+
       if (!vv) {
+        if (wantKeyboard) panel.classList.add('is-keyboard')
+        else clearInline()
+        return
+      }
+
+      // Focused but keyboard not open yet: keep fullscreen CSS (no shrink flash).
+      if (wantKeyboard && !vvShrunk) {
+        panel.classList.add('is-keyboard')
+        // Clear any half-applied shrink from a previous frame.
+        if (viewportApplyRef.current.keyboard) {
+          panel.style.left = ''
+          panel.style.right = ''
+          panel.style.top = ''
+          panel.style.bottom = ''
+          panel.style.width = ''
+          panel.style.height = ''
+          panel.style.maxHeight = ''
+          viewportApplyRef.current = { top: 0, height: 0, width: 0, keyboard: false }
+        }
+        if (options.revealComposer || options.force) {
+          window.requestAnimationFrame(scrollMessagesToEnd)
+        }
+        return
+      }
+
+      if (!wantKeyboard && !vvShrunk) {
         clearInline()
         return
       }
 
-      if (!keyboardOpen) {
-        clearInline()
-        return
-      }
-
-      const left = Math.max(0, Math.round(vv.offsetLeft)) + margin
-      const width = Math.max(240, Math.round(vv.width) - margin * 2)
-      const top = Math.max(0, Math.round(vv.offsetTop)) + margin
-      const height = Math.max(180, Math.round(vv.height) - margin * 2)
+      // Keyboard visible: pin panel to the visual viewport above the keyboard.
+      const left = Math.max(0, Math.round(vv.offsetLeft))
+      const width = Math.max(240, Math.round(vv.width))
+      const top = Math.max(0, Math.round(vv.offsetTop))
+      const height = Math.max(180, Math.round(vv.height))
       const prev = viewportApplyRef.current
       const same = prev.keyboard
-        && Math.abs(prev.top - top) < 10
-        && Math.abs(prev.height - height) < 10
-        && Math.abs(prev.width - width) < 10
+        && Math.abs(prev.top - top) < 8
+        && Math.abs(prev.height - height) < 8
+        && Math.abs(prev.width - width) < 8
 
-      if (same && !options.force) return
+      if (same && !options.force && !options.revealComposer) return
 
       viewportApplyRef.current = { top, height, width, keyboard: true }
       panel.style.left = `${left}px`
@@ -683,9 +703,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       panel.style.maxHeight = `${height}px`
       panel.classList.add('is-keyboard')
 
-      if (options.forceKeyboard || options.revealComposer) {
-        window.requestAnimationFrame(ensureComposerVisible)
-      }
+      // After height settles, keep newest messages in view (not mid-list).
+      window.requestAnimationFrame(() => {
+        scrollMessagesToEnd()
+        window.requestAnimationFrame(scrollMessagesToEnd)
+      })
     }
 
     const syncMobileViewport = (options = {}) => {
@@ -701,7 +723,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       viewportDebounceRef.current = window.setTimeout(() => {
         viewportDebounceRef.current = null
         applyMobileViewport(options)
-      }, 140)
+      }, 60)
     }
 
     const blockBackgroundScroll = (event) => {
@@ -737,7 +759,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       clearInline()
       lockPageScroll(false)
     }
-  }, [hidden, open, mobileFullscreen])
+  }, [hidden, open])
 
   useEffect(() => {
     if (!open || (!editingId && !replyTo)) return undefined
@@ -751,8 +773,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   }, [open, editingId, replyTo])
 
   const openChat = () => {
-    const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches
-    if (isMobile) setMobileFullscreen(true)
     setOpen(true)
   }
 
@@ -1443,7 +1463,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   if (hidden) return null
 
   return (
-    <div className={`hana-chat${open ? ' is-open' : ''}${mobileFullscreen ? ' is-fullscreen' : ''}`}>
+    <div className={`hana-chat${open ? ' is-open is-fullscreen' : ''}`}>
       <button
         type="button"
         className={`hana-chat-launcher${unreadLauncher ? ' has-unread' : ''}${speaking ? ' is-speaking' : ''}`}
@@ -1464,7 +1484,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         <section
           ref={panelRef}
           id="hana-chat-panel"
-          className={`hana-chat-panel${mobileFullscreen ? ' is-fullscreen' : ''}`}
+          className="hana-chat-panel is-fullscreen"
           aria-label="はなちゃんチャット"
         >
           <header className="hana-chat-header">
@@ -1570,29 +1590,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               )}
             </div>
             <div className="hana-chat-header-actions">
-              <button
-                type="button"
-                className="hana-chat-expand"
-                onClick={() => setMobileFullscreen((value) => !value)}
-                aria-label={mobileFullscreen ? 'チャットを縮小' : 'チャットを全画面'}
-                title={mobileFullscreen ? '縮小' : '全画面'}
-              >
-                {mobileFullscreen ? (
-                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
-                    <path
-                      fill="currentColor"
-                      d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"
-                    />
-                  </svg>
-                ) : (
-                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
-                    <path
-                      fill="currentColor"
-                      d="M7 14H5v5h5v-2H7v-3zm12 5h-5v-2h3v-3h2v5zM7 5h2v3h3v2H5V5h2zm12 5h-5V5h2v3h3v2z"
-                    />
-                  </svg>
-                )}
-              </button>
               <button
                 type="button"
                 className="hana-chat-close"
@@ -1994,14 +1991,20 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               }}
               onFocus={() => {
                 keyboardPinnedRef.current = true
-                syncPanelViewportRef.current({ forceKeyboard: true, revealComposer: true })
+                syncPanelViewportRef.current({ forceKeyboard: true, revealComposer: true, immediate: true })
                 window.setTimeout(() => {
-                  syncPanelViewportRef.current({ forceKeyboard: true, force: true })
-                }, 280)
+                  syncPanelViewportRef.current({ forceKeyboard: true, force: true, revealComposer: true })
+                }, 120)
+                window.setTimeout(() => {
+                  syncPanelViewportRef.current({ forceKeyboard: true, force: true, revealComposer: true })
+                }, 360)
               }}
               onBlur={() => {
                 keyboardPinnedRef.current = false
-                window.setTimeout(() => syncPanelViewportRef.current({ immediate: true }), 180)
+                window.setTimeout(() => {
+                  if (document.activeElement === inputRef.current) return
+                  syncPanelViewportRef.current({ immediate: true })
+                }, 220)
               }}
               placeholder={
                 editingId

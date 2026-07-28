@@ -210,26 +210,6 @@
   flex-shrink: 0;
 }
 
-.hana-chat-expand {
-  display: none;
-  box-sizing: border-box;
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: rgba(255, 248, 240, 0.08);
-  color: var(--hana-cream);
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
-.hana-chat-expand svg {
-  display: block;
-}
-
-.hana-chat-expand:hover,
 .hana-chat-close:hover {
   background: rgba(255, 248, 240, 0.14);
 }
@@ -1832,27 +1812,18 @@ body.hana-chat-scroll-lock #root {
     display: block;
   }
 
-  .hana-chat-expand {
-    display: inline-flex;
+  /* Opaque veil so keyboard animation never flashes the page behind. */
+  .hana-chat.is-open::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 89;
+    background: #0e0a0c;
+    pointer-events: none;
   }
 
   .hana-chat.is-open .hana-chat-panel {
     position: fixed;
-    left: max(10px, env(safe-area-inset-left));
-    right: max(10px, env(safe-area-inset-right));
-    bottom: calc(76px + env(safe-area-inset-bottom, 0px));
-    width: auto;
-    max-width: min(100vw, 100%);
-    height: min(68svh, calc(100svh - 100px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)));
-    margin: 0;
-    box-sizing: border-box;
-    overflow: hidden;
-    /* Avoid transform containing-block quirks while typing */
-    animation: none;
-    transition: none;
-  }
-
-  .hana-chat.is-open .hana-chat-panel.is-fullscreen {
     top: 0;
     left: 0;
     right: 0;
@@ -1861,21 +1832,30 @@ body.hana-chat-scroll-lock #root {
     max-width: none;
     height: 100dvh;
     height: 100svh;
+    margin: 0;
+    box-sizing: border-box;
+    overflow: hidden;
     border-radius: 0;
     border-left: 0;
     border-right: 0;
     padding-top: env(safe-area-inset-top, 0px);
     padding-bottom: env(safe-area-inset-bottom, 0px);
     z-index: 90;
+    background:
+      radial-gradient(ellipse at 12% 0%, rgba(232, 154, 170, 0.16), transparent 42%),
+      linear-gradient(165deg, rgba(36, 22, 20, 0.99), rgba(14, 10, 12, 0.99));
+    /* Avoid transform containing-block quirks while typing */
+    animation: none;
+    transition: none;
   }
 
-  .hana-chat.is-open.is-fullscreen .hana-chat-launcher {
+  .hana-chat.is-open .hana-chat-launcher {
     opacity: 0;
     pointer-events: none;
   }
 
   .hana-chat.is-open .hana-chat-panel.is-keyboard {
-    /* Inline visualViewport styles take over; keep overflow clipped */
+    /* Inline visualViewport styles take over once keyboard inset is real */
     overflow: hidden;
     transition: none;
   }
@@ -1907,7 +1887,7 @@ body.hana-chat-scroll-lock #root {
       linear-gradient(165deg, rgba(36, 22, 20, 0.98), rgba(14, 10, 12, 0.98));
   }
 
-  .hana-chat-panel.is-fullscreen .hana-chat-messages {
+  .hana-chat.is-open .hana-chat-panel .hana-chat-messages {
     min-height: 0;
   }
 
