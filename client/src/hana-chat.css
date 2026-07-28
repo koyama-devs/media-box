@@ -768,6 +768,13 @@ body.hana-chat-scroll-lock #root {
   flex-shrink: 0;
 }
 
+.chat-swipe.is-touch .hana-chat-bubble,
+.chat-swipe.is-touch .admin-chat-bubble {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 .hana-chat-bubble {
   box-sizing: border-box;
   width: max-content;
@@ -1258,14 +1265,14 @@ body.hana-chat-scroll-lock #root {
   display: block;
   width: fit-content;
   max-width: 100%;
-  /* Room for the corner flower FAB so it isn't clipped. */
-  margin-right: 4px;
-  margin-bottom: 4px;
+  /* Room for the corner flower outside the bubble (below 既読). */
+  margin-right: 2px;
+  margin-bottom: 12px;
 }
 
 .chat-swipe.is-own .chat-swipe-bubble-wrap,
 .chat-swipe.is-guest:not(.is-other) .chat-swipe-bubble-wrap {
-  margin-right: 4px;
+  margin-right: 2px;
   margin-left: 0;
 }
 
@@ -1273,48 +1280,46 @@ body.hana-chat-scroll-lock #root {
 .chat-swipe.is-hanachan .chat-swipe-bubble-wrap,
 .chat-swipe.is-hana:not(.is-own) .chat-swipe-bubble-wrap {
   margin-left: 0;
-  margin-right: 4px;
+  margin-right: 2px;
 }
 
 .hana-chat-flower-fab {
   position: absolute;
-  right: -7px;
-  bottom: -7px;
+  right: 2px;
+  bottom: -11px;
   z-index: 4;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   padding: 0;
-  border-radius: 999px;
-  border: 1.5px solid rgba(232, 154, 170, 0.55);
-  background: rgba(18, 10, 12, 0.55);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   cursor: pointer;
   line-height: 1;
   -webkit-tap-highlight-color: transparent;
 }
 
 .hana-chat-flower-fab-icon {
-  font-size: 0.92rem;
+  font-size: 0.95rem;
   line-height: 1;
   pointer-events: none;
 }
 
 .hana-chat-flower-fab.is-outline {
-  background: rgba(18, 10, 12, 0.35);
-  border-color: rgba(232, 154, 170, 0.65);
+  background: transparent;
 }
 
 .hana-chat-flower-fab.is-outline .hana-chat-flower-fab-icon {
-  opacity: 0.38;
-  filter: grayscale(1) contrast(0.9);
+  opacity: 0.4;
+  filter: grayscale(1) contrast(0.95);
 }
 
 .hana-chat-flower-fab.is-filled {
-  border-color: rgba(232, 154, 170, 0.75);
-  background: rgba(196, 92, 74, 0.42);
+  background: transparent;
 }
 
 .hana-chat-flower-fab.is-filled .hana-chat-flower-fab-icon {
@@ -1323,9 +1328,7 @@ body.hana-chat-scroll-lock #root {
 }
 
 .hana-chat-flower-fab.is-mine {
-  box-shadow:
-    0 0 0 1px rgba(232, 154, 170, 0.35),
-    0 2px 8px rgba(0, 0, 0, 0.28);
+  box-shadow: none;
 }
 
 .hana-chat-flower-fab:disabled {
@@ -1334,8 +1337,8 @@ body.hana-chat-scroll-lock #root {
 }
 
 .hana-chat-flower-fab .hana-chat-reaction-badge {
-  top: -5px;
-  right: -5px;
+  top: -6px;
+  right: -8px;
 }
 
 .hana-chat-reaction {

@@ -2,6 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
 import hanachanArt from './assets/hanachan.svg'
 import {
+    addChatReminder,
+    remindAtFromChoice,
+    saveChatDocument,
+    toggleChatPin,
+} from './chatExtras'
+import {
     clearAllChatHistories,
     clearChatThreadHistory,
     deliveryStatusLabel,
@@ -24,12 +30,6 @@ import {
     translateChatMessage,
     updateChatMessage,
 } from './firebase'
-import {
-    addChatReminder,
-    remindAtFromChoice,
-    saveChatDocument,
-    toggleChatPin,
-} from './chatExtras'
 import './hana-chat.css'
 
 const KNOWN_GUESTS = Object.values(GUEST_PROFILES)
@@ -113,11 +113,23 @@ export default function AdminHanaInbox() {
     }
   }, [activeId])
 
+  const messagesScrollKey = useMemo(() => {
+    const last = messages[messages.length - 1]
+    return [
+      activeId || '',
+      String(messages.length),
+      last?.id || '',
+      last?.text || '',
+      last?.editedAt || '',
+      last?.deleted ? '1' : '0',
+    ].join('\0')
+  }, [messages, activeId])
+
   useEffect(() => {
     const node = listRef.current
     if (!node) return
     node.scrollTop = node.scrollHeight
-  }, [messages, activeId])
+  }, [messagesScrollKey])
 
   const guestRoster = useMemo(() => {
     return KNOWN_GUESTS.map((profile) => {

@@ -526,11 +526,28 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     hanaMessages,
   ])
 
+  const messagesScrollKey = useMemo(() => {
+    const list = actingAsOwner || guestOnHuman ? hanaMessages : aiMessages
+    const last = list[list.length - 1]
+    // Ignore reaction-only updates — those should not yank the scroll position.
+    return [
+      channel,
+      activeThreadId || '',
+      actingAsOwner ? '1' : '0',
+      String(list.length),
+      last?.id || '',
+      last?.text || '',
+      last?.editedAt || '',
+      last?.deleted ? '1' : '0',
+    ].join('\0')
+  }, [actingAsOwner, guestOnHuman, hanaMessages, aiMessages, channel, activeThreadId])
+
   useEffect(() => {
+    if (!open) return
     const node = listRef.current
     if (!node) return
     node.scrollTop = node.scrollHeight
-  }, [aiMessages, hanaMessages, open, channel, activeThreadId, actingAsOwner])
+  }, [messagesScrollKey, open])
 
   useEffect(() => {
     if (actingAsOwner || channel !== 'ai') {
