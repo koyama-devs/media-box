@@ -230,6 +230,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     return threadUnreadCount(ownThread, 'guest')
   }, [actingAsOwner, threads, ownThread])
 
+  const threadUnreadSnapshotRef = useRef({})
+  const ownerThreadsReadyRef = useRef(false)
+
   useEffect(() => {
     if (hidden) return undefined
     return subscribeToAuthUser(setAuthUser)
@@ -264,6 +267,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   useEffect(() => {
     if (hidden || !actingAsOwner) {
       if (!actingAsOwner) setThreads([])
+      ownerThreadsReadyRef.current = false
+      threadUnreadSnapshotRef.current = {}
       return undefined
     }
     return subscribeChatThreads(
@@ -271,6 +276,67 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       (err) => setError(getFirebaseErrorMessage(err) || 'スレッドの読み込みに失敗しました。'),
     )
   }, [hidden, actingAsOwner])
+
+  // While inbox is open, jump to the guest thread that just got the newest message.
+  useEffect(() => {
+    if (hidden || !actingAsOwner) return
+
+    const snapshot = {}
+    threads.forEach((thread) => {
+      snapshot[thread.id] = {
+        count: threadUnreadCount(thread, 'hana'),
+        updatedAt: String(thread.updatedAt || ''),
+        unread: Boolean(thread.unreadByHana),
+      }
+    })
+
+    if (!open) {
+      threadUnreadSnapshotRef.current = snapshot
+      ownerThreadsReadyRef.current = Boolean(threads.length)
+      return
+    }
+
+    if (!ownerThreadsReadyRef.current) {
+      threadUnreadSnapshotRef.current = snapshot
+      ownerThreadsReadyRef.current = true
+      return
+    }
+
+    const prev = threadUnreadSnapshotRef.current
+    let newestId = null
+    let newestUpdated = ''
+
+    threads.forEach((thread) => {
+      const before = prev[thread.id]
+      const count = threadUnreadCount(thread, 'hana')
+      const updatedAt = String(thread.updatedAt || '')
+      const grew = Boolean(thread.unreadByHana) && (
+        !before
+        || count > (before.count || 0)
+        || (updatedAt && updatedAt > (before.updatedAt || ''))
+      )
+      if (!grew) return
+      if (!newestUpdated || updatedAt >= newestUpdated) {
+        newestUpdated = updatedAt
+        newestId = thread.id
+      }
+    })
+
+    threadUnreadSnapshotRef.current = snapshot
+    if (!newestId || newestId === activeThreadId) return
+
+    const entry = ownerGuestRoster.find((item) => (
+      item.threadId === newestId || item.canonicalId === newestId || item.thread?.id === newestId
+    ))
+    setReplyTo(null)
+    setEditingId(null)
+    setHanaMessages([])
+    if (entry) {
+      setActiveThreadId(entry.threadId)
+    } else {
+      setActiveThreadId(newestId)
+    }
+  }, [hidden, actingAsOwner, open, threads, activeThreadId, ownerGuestRoster])
 
   useEffect(() => {
     if (hidden || actingAsOwner || !guestChatId) {
@@ -430,11 +496,13 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   const partnerOnline = useMemo(() => {
     void presenceTick
-    // Owner header is Hana's identity — do not mirror the selected guest's presence.
-    if (actingAsOwner) return true
+    if (actingAsOwner) {
+      if (!activeThreadId) return false
+      return isPresenceOnline(activeThreadMeta?.guestOnlineAt)
+    }
     if (channel === 'ai') return true
     return isPresenceOnline(activeThreadMeta?.hanaOnlineAt)
-  }, [actingAsOwner, channel, activeThreadMeta, presenceTick])
+  }, [actingAsOwner, channel, activeThreadMeta, presenceTick, activeThreadId])
 
   useEffect(() => {
     if (hidden || !open) return undefined
@@ -627,10 +695,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     return avatarSrcForProfile(guestId, name)
   }
 
-  // Header always shows the chat partner for guests, and Hana herself for the owner inbox.
+  // Header shows the selected guest for owner inbox; guests see Hana / Hanachan.
   const partnerAvatarSrc = (() => {
     if (actingAsOwner) {
-      return avatarSrcForProfile(OWNER_PROFILE.key, OWNER_PROFILE.displayName)
+      if (!activeThreadId) return hanachanArt
+      return avatarSrcForProfile(ownerActiveGuestKey || 'guest', ownerActiveGuestLabel)
     }
     if (channel === 'human') {
       return avatarSrcForProfile(OWNER_PROFILE.key, OWNER_PROFILE.displayName)
@@ -888,12 +957,12 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   }
 
   const modeTitle = actingAsOwner
-    ? 'はな'
+    ? (activeThreadId ? ownerActiveGuestLabel : 'はな')
     : channel === 'human'
       ? 'はな'
       : 'はなちゃん'
   const modeSub = actingAsOwner
-    ? 'ゲストへの返信'
+    ? (activeThreadId ? 'ゲストとチャット中' : 'ゲストへの返信')
     : channel === 'human'
       ? 'はな本人'
       : 'はなちゃんとお話し中'

@@ -1,10 +1,25 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 const REPLY_THRESHOLD = 56
 const ACTION_THRESHOLD = 72
 
+function useTouchSwipeMode() {
+  const [enabled, setEnabled] = useState(false)
+
+  useEffect(() => {
+    const media = window.matchMedia('(hover: hover) and (pointer: fine)')
+    const sync = () => setEnabled(!media.matches)
+    sync()
+    media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
+  }, [])
+
+  return enabled
+}
+
 /**
- * Swipe-right → reply. Swipe-left (own recent msgs) → edit / delete actions.
+ * Touch: swipe-right → reply, swipe-left → edit/delete.
+ * Desktop: hover action buttons (返信 / 編集 / 削除).
  */
 export default function ChatSwipeBubble({
   className = '',
@@ -16,18 +31,30 @@ export default function ChatSwipeBubble({
   onDelete,
   children,
 }) {
+  const swipeMode = useTouchSwipeMode()
   const startX = useRef(0)
   const startY = useRef(0)
   const locking = useRef(null) // 'h' | 'v' | null
   const [offset, setOffset] = useState(0)
   const [actionsOpen, setActionsOpen] = useState(false)
 
+  const hasDesktopActions = canReply || canEdit || canDelete
+
   const reset = () => {
     setOffset(0)
     locking.current = null
   }
 
+  useEffect(() => {
+    if (!swipeMode) {
+      setOffset(0)
+      setActionsOpen(false)
+      locking.current = null
+    }
+  }, [swipeMode])
+
   const onPointerDown = (event) => {
+    if (!swipeMode) return
     if (event.pointerType === 'mouse' && event.button !== 0) return
     startX.current = event.clientX
     startY.current = event.clientY
@@ -37,6 +64,7 @@ export default function ChatSwipeBubble({
   }
 
   const onPointerMove = (event) => {
+    if (!swipeMode) return
     if (startX.current == null) return
     const dx = event.clientX - startX.current
     const dy = event.clientY - startY.current
@@ -54,6 +82,7 @@ export default function ChatSwipeBubble({
   }
 
   const onPointerUp = () => {
+    if (!swipeMode) return
     if (locking.current === 'h') {
       if (offset >= REPLY_THRESHOLD && canReply) {
         onReply?.()
@@ -72,22 +101,44 @@ export default function ChatSwipeBubble({
   }
 
   const onPointerCancel = () => {
+    if (!swipeMode) return
     if (!actionsOpen) reset()
   }
 
+  const modeClass = swipeMode ? 'is-touch' : 'is-desktop'
+
   return (
-    <div className={`chat-swipe${actionsOpen ? ' is-actions' : ''}${className ? ` ${className}` : ''}`}>
+    <div className={`chat-swipe ${modeClass}${actionsOpen ? ' is-actions' : ''}${className ? ` ${className}` : ''}`}>
       <div
         className="chat-swipe-sheet"
-        style={{ transform: `translateX(${offset}px)` }}
+        style={swipeMode ? { transform: `translateX(${offset}px)` } : undefined}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
       >
         {children}
+        {!swipeMode && hasDesktopActions ? (
+          <div className="chat-desktop-actions" role="toolbar" aria-label="メッセージ操作">
+            {canReply ? (
+              <button type="button" className="chat-desktop-action is-reply" onClick={() => onReply?.()}>
+                返信
+              </button>
+            ) : null}
+            {canEdit ? (
+              <button type="button" className="chat-desktop-action is-edit" onClick={() => onEdit?.()}>
+                編集
+              </button>
+            ) : null}
+            {canDelete ? (
+              <button type="button" className="chat-desktop-action is-delete" onClick={() => onDelete?.()}>
+                削除
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
-      {actionsOpen ? (
+      {swipeMode && actionsOpen ? (
         <div className="chat-swipe-actions">
           {canEdit ? (
             <button type="button" className="chat-swipe-action is-edit" onClick={() => { setActionsOpen(false); reset(); onEdit?.() }}>
