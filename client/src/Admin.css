@@ -182,6 +182,38 @@
   font-size: 0.9rem;
 }
 
+.admin-status-note {
+  margin: 0 0 14px;
+  color: #86efac;
+  font-size: 0.88rem;
+}
+
+.admin-danger {
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, #b91c1c, #ef4444);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.86rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.admin-danger:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.admin-danger--ghost {
+  background: rgba(127, 29, 29, 0.35);
+  border-color: rgba(248, 113, 113, 0.35);
+  color: #fecaca;
+  padding: 8px 12px;
+  font-weight: 500;
+}
+
 .admin-topbar {
   display: flex;
   align-items: flex-start;
@@ -534,11 +566,21 @@
 
 .admin-chat-active-title {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 0 2px 8px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px 8px;
   color: #cbd5e1;
   font-size: 0.85rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.admin-chat-active-title > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .admin-chat-active-title strong {
@@ -628,7 +670,21 @@
 }
 
 .admin-guest-card .admin-primary {
-  align-self: flex-start;
+  align-self: stretch;
+  margin-top: 0;
+  width: auto;
+}
+
+.admin-guest-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-guest-card-actions .admin-primary,
+.admin-guest-card-actions .admin-danger {
+  flex: 1 1 auto;
+  min-width: 96px;
 }
 
 .admin-chat-composer {

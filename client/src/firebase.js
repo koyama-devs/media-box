@@ -14,6 +14,7 @@ import {
 import {
     addDoc,
     collection,
+    deleteDoc,
     doc,
     getDoc,
     getDocs,
@@ -664,6 +665,61 @@ export function threadUnreadCount(thread, viewer) {
   const n = Number(thread.unreadCountGuest) || 0
   if (n > 0) return n
   return thread.unreadByGuest ? 1 : 0
+}
+
+async function deleteAllDocsInCollection(collectionRef) {
+  for (;;) {
+    const snap = await getDocs(query(collectionRef, limit(400)))
+    if (snap.empty) return
+    const batch = writeBatch(db)
+    snap.docs.forEach((document) => {
+      batch.delete(document.ref)
+    })
+    await batch.commit()
+  }
+}
+
+/**
+ * Clear one chat thread's message history.
+ * @param {string} threadId
+ * @param {{ deleteThread?: boolean }} [options] If true, remove the thread doc too (admin).
+ */
+export async function clearChatThreadHistory(threadId, { deleteThread = false } = {}) {
+  if (!threadId) return
+  const threadRef = doc(db, CHAT_THREADS_COLLECTION, threadId)
+  await deleteAllDocsInCollection(collection(threadRef, 'messages'))
+
+  if (deleteThread) {
+    await deleteDoc(threadRef)
+    return
+  }
+
+  const nowIso = new Date().toISOString()
+  await setDoc(
+    threadRef,
+    {
+      lastText: '',
+      updatedAt: serverTimestamp(),
+      updatedAtIso: nowIso,
+      unreadByHana: false,
+      unreadByGuest: false,
+      unreadCountHana: 0,
+      unreadCountGuest: 0,
+    },
+    { merge: true },
+  )
+}
+
+/**
+ * Wipe every guest chat thread (messages + thread docs). Requires admin for thread deletes.
+ * @returns {Promise<number>} number of threads cleared
+ */
+export async function clearAllChatHistories() {
+  const snap = await getDocs(collection(db, CHAT_THREADS_COLLECTION))
+  for (const threadDoc of snap.docs) {
+    await clearChatThreadHistory(threadDoc.id, { deleteThread: true })
+  }
+  return snap.size
 }
 
 /** Ensure a known guest thread doc exists (admin roster / open chat). */

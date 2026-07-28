@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
 import {
+    clearAllChatHistories,
+    clearChatThreadHistory,
     deliveryStatusLabel,
     ensureChatThread,
     formatChatTimestamp,
@@ -33,6 +35,8 @@ export default function AdminHanaInbox() {
   const [replyTo, setReplyTo] = useState(null)
   const [editingId, setEditingId] = useState(null)
   const [presenceTick, setPresenceTick] = useState(() => Date.now())
+  const [clearBusy, setClearBusy] = useState(false)
+  const [statusNote, setStatusNote] = useState('')
   const listRef = useRef(null)
 
   useEffect(() => {
@@ -171,6 +175,51 @@ export default function AdminHanaInbox() {
     }
   }
 
+  const handleClearActiveThread = async () => {
+    if (!activeId || clearBusy) return
+    const ok = window.confirm(
+      `「${activeGuestName}」とのチャット履歴をすべて削除しますか？\nこの操作は取り消せません。`,
+    )
+    if (!ok) return
+    setClearBusy(true)
+    setError('')
+    setStatusNote('')
+    try {
+      await clearChatThreadHistory(activeId, { deleteThread: false })
+      setMessages([])
+      clearComposerExtras()
+      setStatusNote(`${activeGuestName}の履歴を削除しました。`)
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || '履歴の削除に失敗しました。')
+    } finally {
+      setClearBusy(false)
+    }
+  }
+
+  const handleClearAllHistories = async () => {
+    if (clearBusy) return
+    const ok = window.confirm(
+      'すべてのゲストのチャット履歴を削除しますか？\nこの操作は取り消せません。',
+    )
+    if (!ok) return
+    const ok2 = window.confirm('本当に全履歴を削除してよろしいですか？')
+    if (!ok2) return
+    setClearBusy(true)
+    setError('')
+    setStatusNote('')
+    try {
+      const count = await clearAllChatHistories()
+      setActiveId(null)
+      setMessages([])
+      clearComposerExtras()
+      setStatusNote(`チャット履歴を削除しました（${count}スレッド）。`)
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || '全履歴の削除に失敗しました。')
+    } finally {
+      setClearBusy(false)
+    }
+  }
+
   const handleSend = async (event) => {
     event.preventDefault()
     const text = draft.trim()
@@ -210,7 +259,17 @@ export default function AdminHanaInbox() {
             <h2>ゲスト管理</h2>
             <p>パスワードごとのゲストアカウントと会話スレッド</p>
           </div>
+          <button
+            type="button"
+            className="admin-danger"
+            disabled={busy || clearBusy}
+            onClick={handleClearAllHistories}
+          >
+            {clearBusy ? '削除中…' : '全チャット履歴を削除'}
+          </button>
         </div>
+
+        {statusNote ? <p className="admin-status-note">{statusNote}</p> : null}
 
         <div className="admin-guest-roster" aria-label="ゲスト一覧">
           {guestRoster.map(({ profile, thread, threadId }) => {
@@ -240,14 +299,45 @@ export default function AdminHanaInbox() {
                     <span className="admin-guest-preview">{thread.lastText}</span>
                   ) : null}
                 </div>
-                <button
-                  type="button"
-                  className="admin-primary"
-                  disabled={busy}
-                  onClick={() => handleOpenGuest(profile)}
-                >
-                  チャットを開く
-                </button>
+                <div className="admin-guest-card-actions">
+                  <button
+                    type="button"
+                    className="admin-primary"
+                    disabled={busy || clearBusy}
+                    onClick={() => handleOpenGuest(profile)}
+                  >
+                    チャットを開く
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-danger admin-danger--ghost"
+                    disabled={busy || clearBusy || !thread}
+                    onClick={async () => {
+                      const ok = window.confirm(
+                        `「${profile.displayName}」のチャット履歴を削除しますか？`,
+                      )
+                      if (!ok) return
+                      setClearBusy(true)
+                      setError('')
+                      try {
+                        await clearChatThreadHistory(thread.id || threadId, {
+                          deleteThread: false,
+                        })
+                        if (activeId === threadId || activeId === thread?.id) {
+                          setMessages([])
+                          clearComposerExtras()
+                        }
+                        setStatusNote(`${profile.displayName}の履歴を削除しました。`)
+                      } catch (err) {
+                        setError(getFirebaseErrorMessage(err) || '履歴の削除に失敗しました。')
+                      } finally {
+                        setClearBusy(false)
+                      }
+                    }}
+                  >
+                    履歴削除
+                  </button>
+                </div>
               </article>
             )
           })}
@@ -308,14 +398,24 @@ export default function AdminHanaInbox() {
             ) : (
               <>
                 <div className="admin-chat-active-title">
-                  <strong className="admin-guest-name">
-                    <span
-                      className={`admin-guest-dot ${activeGuestOnline ? 'is-online' : 'is-offline'}`}
-                      aria-hidden="true"
-                    />
-                    {activeGuestName}
-                  </strong>
-                  <span>{activeGuestOnline ? 'オンライン' : 'オフライン'} · とチャット中</span>
+                  <div>
+                    <strong className="admin-guest-name">
+                      <span
+                        className={`admin-guest-dot ${activeGuestOnline ? 'is-online' : 'is-offline'}`}
+                        aria-hidden="true"
+                      />
+                      {activeGuestName}
+                    </strong>
+                    <span>{activeGuestOnline ? 'オンライン' : 'オフライン'} · とチャット中</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="admin-danger admin-danger--ghost"
+                    disabled={clearBusy}
+                    onClick={handleClearActiveThread}
+                  >
+                    この履歴を削除
+                  </button>
                 </div>
                 <div className="admin-chat-messages" ref={listRef}>
                   {messages.length === 0 ? (
