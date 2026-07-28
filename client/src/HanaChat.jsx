@@ -203,6 +203,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const viewportApplyRef = useRef({ top: 0, height: 0, width: 0, keyboard: false })
   const viewportDebounceRef = useRef(null)
   const keyboardPinnedRef = useRef(false)
+  const retainComposerFocusRef = useRef(false)
   const migrationCheckedRef = useRef(new Set())
   const suggestReqRef = useRef(0)
   const threadsRef = useRef(threads)
@@ -1334,6 +1335,21 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     setError('')
     setBusy(true)
     setSpeaking(true)
+    keyboardPinnedRef.current = true
+    retainComposerFocusRef.current = true
+    // Keep the soft keyboard open after send (don't let submit steal focus).
+    const keepComposerFocused = () => {
+      const input = inputRef.current
+      if (!input || input.disabled) return
+      try {
+        input.focus({ preventScroll: true })
+      } catch {
+        input.focus()
+      }
+      syncPanelViewportRef.current({ forceKeyboard: true, force: true, revealComposer: true })
+    }
+    keepComposerFocused()
+    window.requestAnimationFrame(keepComposerFocused)
     const nowIso = new Date().toISOString()
     const pendingReply = replyTo
     const pendingEditId = editingId
@@ -1471,6 +1487,21 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     } finally {
       setBusy(false)
       window.setTimeout(() => setSpeaking(false), 600)
+      keyboardPinnedRef.current = true
+      retainComposerFocusRef.current = true
+      window.requestAnimationFrame(() => {
+        const input = inputRef.current
+        if (!input) return
+        try {
+          input.focus({ preventScroll: true })
+        } catch {
+          input.focus()
+        }
+        syncPanelViewportRef.current({ forceKeyboard: true, force: true, revealComposer: true })
+        window.setTimeout(() => {
+          retainComposerFocusRef.current = false
+        }, 400)
+      })
     }
   }
 
@@ -2028,11 +2059,21 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 }, 360)
               }}
               onBlur={() => {
-                keyboardPinnedRef.current = false
                 window.setTimeout(() => {
+                  if (!open) return
                   if (document.activeElement === inputRef.current) return
+                  // After send, reclaim focus so the soft keyboard stays open.
+                  if (retainComposerFocusRef.current) {
+                    try {
+                      inputRef.current?.focus({ preventScroll: true })
+                    } catch {
+                      inputRef.current?.focus()
+                    }
+                    return
+                  }
+                  keyboardPinnedRef.current = false
                   syncPanelViewportRef.current({ immediate: true })
-                }, 220)
+                }, 0)
               }}
               placeholder={
                 editingId
@@ -2046,11 +2087,16 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                         : 'はなちゃんに話しかける…'
               }
               maxLength={2000}
-              disabled={busy || (actingAsOwner && !activeThreadId)}
+              disabled={actingAsOwner && !activeThreadId}
               autoComplete="off"
               enterKeyHint="enter"
             />
-            <button type="submit" disabled={busy || !draft.trim()}>
+            <button
+              type="submit"
+              disabled={busy || !draft.trim()}
+              onMouseDown={(event) => event.preventDefault()}
+              onPointerDown={(event) => event.preventDefault()}
+            >
               {busy ? '…' : editingId ? '更新' : '送る'}
             </button>
           </form>

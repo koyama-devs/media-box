@@ -734,7 +734,7 @@ body.hana-chat-scroll-lock #root {
 .hana-chat-msg-main {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 3px;
   min-width: 0;
   max-width: calc(100% - 40px);
 }
@@ -744,9 +744,9 @@ body.hana-chat-scroll-lock #root {
   flex-direction: column;
   align-items: flex-end;
   justify-content: center;
-  gap: 2px;
+  gap: 1px;
   flex: 0 0 auto;
-  min-width: 2.4em;
+  min-width: 0;
   font-family: system-ui, sans-serif;
   font-size: 0.62rem;
   line-height: 1.25;
@@ -1281,8 +1281,19 @@ body.hana-chat-scroll-lock #root {
   width: fit-content;
   max-width: 100%;
   overflow: visible;
-  /* Room for the side menu button */
-  margin-inline: 34px;
+  /* Room for ⋯ only on the menu side — keep 既読/time tight to the bubble */
+  margin-inline: 0;
+}
+
+.chat-swipe.is-own .chat-swipe-bubble-wrap,
+.chat-swipe.is-guest:not(.is-other) .chat-swipe-bubble-wrap {
+  margin-right: 34px;
+}
+
+.chat-swipe.is-other .chat-swipe-bubble-wrap,
+.chat-swipe.is-hanachan .chat-swipe-bubble-wrap,
+.chat-swipe.is-hana:not(.is-own) .chat-swipe-bubble-wrap {
+  margin-left: 34px;
 }
 
 .chat-swipe-bubble-wrap.has-flower {
