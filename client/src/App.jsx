@@ -6,6 +6,8 @@ import { clearBookBookmark, getAllBookBookmarks, getBookBookmark } from './bookP
 import DailyKotoba from './DailyKotoba'
 import {
   deleteMediaItem,
+  ensureDefaultChatAccounts,
+  findChatAccountByPassKey,
   getFirebaseErrorMessage,
   getMaxUploadBytes,
   loadMediaBlobUrl,
@@ -18,6 +20,7 @@ import {
   saveSharedPlaylists,
   saveSharedSpaces,
   sortMediaItems,
+  subscribeChatAccounts,
   subscribeChatProfile,
   subscribeToMediaItems,
   subscribeToSharedPlaylists,
@@ -85,8 +88,6 @@ const BookReader = lazy(() => import('./BookReader'))
 const AUTH_KEY = 'media-share-lite-auth'
 const AUTH_ROLE_KEY = 'media-share-lite-role'
 const AUTH_GUEST_KEY = 'media-share-lite-guest'
-const OWNER_PASSWORDS = new Set(['hana'])
-const PASSWORDS = new Set(['hiro', 'zen', 'gabusan', 'hana'])
 const GUEST_PASSWORD_ALIASES = {
   gabu: 'gabusan',
   gabriel: 'gabusan',
@@ -110,8 +111,11 @@ function readStoredAuthRole() {
 function readStoredGuestKey() {
   try {
     const key = normalizeLoginPassword(window.localStorage.getItem(AUTH_GUEST_KEY) || '')
-    if (!key || OWNER_PASSWORDS.has(key)) return ''
-    return PASSWORDS.has(key) ? key : ''
+    if (!key) return ''
+    const account = findChatAccountByPassKey(key)
+    if (!account) return key
+    // Keep pass key for both guest and owner sessions.
+    return account.passKey || account.key
   } catch {
     return ''
   }
@@ -357,11 +361,27 @@ function App() {
   const [guestKey, setGuestKey] = useState(() => readStoredGuestKey())
   const [sessionAvatarUrl, setSessionAvatarUrl] = useState('')
   const [avatarUploading, setAvatarUploading] = useState(false)
+  const [chatAccounts, setChatAccounts] = useState(() => [])
   const avatarInputRef = useRef(null)
+
+  useEffect(() => {
+    let cancelled = false
+    ensureDefaultChatAccounts().catch(() => {})
+    const unsub = subscribeChatAccounts(
+      (next) => {
+        if (!cancelled) setChatAccounts(next || [])
+      },
+      () => {},
+    )
+    return () => {
+      cancelled = true
+      unsub?.()
+    }
+  }, [])
 
   const sessionProfile = useMemo(
     () => resolveSessionProfile(authRole, guestKey),
-    [authRole, guestKey],
+    [authRole, guestKey, chatAccounts],
   )
 
   const sessionAvatarSrc = useMemo(
@@ -2033,18 +2053,15 @@ const playPrevious = useCallback(() => {
   const handleLogin = (event) => {
     event.preventDefault()
     const normalized = normalizeLoginPassword(password)
+    const account = findChatAccountByPassKey(normalized)
 
-    if (PASSWORDS.has(normalized)) {
-      const role = OWNER_PASSWORDS.has(normalized) ? 'owner' : 'guest'
-      const nextGuestKey = role === 'guest' ? normalized : ''
+    if (account) {
+      const role = account.role === 'owner' ? 'owner' : 'guest'
+      const nextGuestKey = account.passKey || account.key
       try {
         window.localStorage.setItem(AUTH_KEY, 'true')
         window.localStorage.setItem(AUTH_ROLE_KEY, role)
-        if (nextGuestKey) {
-          window.localStorage.setItem(AUTH_GUEST_KEY, nextGuestKey)
-        } else {
-          window.localStorage.removeItem(AUTH_GUEST_KEY)
-        }
+        window.localStorage.setItem(AUTH_GUEST_KEY, nextGuestKey)
       } catch {
         // Ignore storage errors and keep the app working.
       }

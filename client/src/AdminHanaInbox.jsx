@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
+import FlowerRainLayer from './FlowerRain'
+import EmotionMomentLayer from './EmotionMoment'
+import { readDefaultReaction } from './chatSettings'
 import hanachanArt from './assets/hanachan.svg'
 import {
     addChatReminder,
@@ -9,35 +12,48 @@ import {
 import {
     clearAllChatHistories,
     clearChatThreadHistory,
+    deleteChatAccount,
     deliveryStatusLabel,
     ensureChatThread,
+    ensureDefaultChatAccounts,
     formatChatTimestamp,
     getFirebaseErrorMessage,
     getMessageDeliveryStatus,
-    GUEST_PROFILES,
-    isPresenceOnline,
+    listGuestProfiles,
+    listOwnerProfiles,
     markThreadRead,
     OWNER_PROFILE,
     pulseChatPresence,
     resolveAvatarSrc,
+    resolveChatPresence,
     sendChatMessage,
     softDeleteChatMessage,
+    subscribeChatAccounts,
     subscribeChatMessages,
     subscribeChatProfiles,
     subscribeChatThreads,
     toggleChatReaction,
     translateChatMessage,
     updateChatMessage,
+    upsertChatAccount,
 } from './firebase'
 import './hana-chat.css'
+import './Admin.css'
 
-const KNOWN_GUESTS = Object.values(GUEST_PROFILES)
+const EMPTY_ACCOUNT_FORM = {
+  key: '',
+  passKey: '',
+  displayName: '',
+  addressAs: '',
+  role: 'guest',
+}
 
 /**
  * Admin inbox for Hana realtime chat + guest roster (used on /admin).
  */
 export default function AdminHanaInbox() {
   const [threads, setThreads] = useState([])
+  const [chatAccounts, setChatAccounts] = useState([])
   const [activeId, setActiveId] = useState(null)
   const [messages, setMessages] = useState([])
   const [draft, setDraft] = useState('')
@@ -51,6 +67,11 @@ export default function AdminHanaInbox() {
   const [chatProfiles, setChatProfiles] = useState({})
   const [translations, setTranslations] = useState({})
   const [remindMessage, setRemindMessage] = useState(null)
+  const [defaultReaction] = useState(() => readDefaultReaction())
+  const [accountForm, setAccountForm] = useState(EMPTY_ACCOUNT_FORM)
+  const [editingAccountKey, setEditingAccountKey] = useState(null)
+  const [accountFormOpen, setAccountFormOpen] = useState(false)
+  const [accountBusy, setAccountBusy] = useState(false)
   const listRef = useRef(null)
 
   useEffect(() => {
@@ -64,13 +85,22 @@ export default function AdminHanaInbox() {
   }, [])
 
   useEffect(() => {
-    const ids = [OWNER_PROFILE.key, ...KNOWN_GUESTS.map((g) => g.key)]
+    ensureDefaultChatAccounts().catch(() => {})
+    return subscribeChatAccounts(
+      (next) => setChatAccounts(next || []),
+      (err) => setError(getFirebaseErrorMessage(err) || 'ユーザー一覧の読み込みに失敗しました。'),
+    )
+  }, [])
+
+  useEffect(() => {
+    const ids = chatAccounts.map((account) => account.key)
+    if (!ids.includes(OWNER_PROFILE.key)) ids.push(OWNER_PROFILE.key)
     return subscribeChatProfiles(
       ids,
       (next) => setChatProfiles(next || {}),
       () => {},
     )
-  }, [])
+  }, [chatAccounts])
 
   useEffect(() => {
     const timer = window.setInterval(() => setPresenceTick(Date.now()), 15_000)
@@ -123,15 +153,6 @@ export default function AdminHanaInbox() {
     ].join('\0')
   }, [messages, activeId])
 
-  const latestOtherMessageId = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i -= 1) {
-      const message = messages[i]
-      if (!message || message.deleted) continue
-      if (message.sender !== 'hana') return message.id
-    }
-    return null
-  }, [messages])
-
   useEffect(() => {
     const node = listRef.current
     if (!node) return
@@ -139,17 +160,103 @@ export default function AdminHanaInbox() {
   }, [messagesScrollKey])
 
   const guestRoster = useMemo(() => {
-    return KNOWN_GUESTS.map((profile) => {
+    return listGuestProfiles(chatAccounts).map((profile) => {
       const threadId = `guest-${profile.key}`
       const thread = threads.find((t) => t.id === threadId || t.guestKey === profile.key) || null
-      return { profile, threadId, thread }
+      return { profile, threadId, thread, kind: 'guest' }
     })
-  }, [threads])
+  }, [threads, chatAccounts])
+
+  const ownerRoster = useMemo(() => {
+    return listOwnerProfiles(chatAccounts).map((profile) => ({
+      profile,
+      threadId: null,
+      thread: null,
+      kind: 'owner',
+    }))
+  }, [chatAccounts])
+
+  const resetAccountForm = () => {
+    setAccountForm(EMPTY_ACCOUNT_FORM)
+    setEditingAccountKey(null)
+    setAccountFormOpen(false)
+  }
+
+  const startCreateAccount = (role = 'guest') => {
+    setEditingAccountKey(null)
+    setAccountForm({ ...EMPTY_ACCOUNT_FORM, role })
+    setAccountFormOpen(true)
+  }
+
+  const startEditAccount = (profile) => {
+    setEditingAccountKey(profile.key)
+    setAccountForm({
+      key: profile.key,
+      passKey: profile.passKey || profile.key,
+      displayName: profile.displayName || '',
+      addressAs: profile.addressAs || profile.displayName || '',
+      role: profile.role === 'owner' ? 'owner' : 'guest',
+    })
+    setAccountFormOpen(true)
+  }
+
+  const handleSaveAccount = async (event) => {
+    event.preventDefault()
+    setAccountBusy(true)
+    setError('')
+    setStatusNote('')
+    try {
+      const saved = await upsertChatAccount({
+        key: editingAccountKey || accountForm.key,
+        passKey: accountForm.passKey || accountForm.key,
+        displayName: accountForm.displayName,
+        addressAs: accountForm.addressAs,
+        role: accountForm.role,
+      }, { isNew: !editingAccountKey })
+      setStatusNote(`${saved.displayName}を保存しました。`)
+      resetAccountForm()
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || err?.message || 'ユーザーの保存に失敗しました。')
+    } finally {
+      setAccountBusy(false)
+    }
+  }
+
+  const handleDeleteAccount = async (profile) => {
+    const label = profile.displayName || profile.key
+    const ok = window.confirm(
+      profile.role === 'owner'
+        ? `オーナー「${label}」を削除しますか？`
+        : `ゲスト「${label}」を削除しますか？チャット履歴も消えます。`,
+    )
+    if (!ok) return
+    setAccountBusy(true)
+    setError('')
+    setStatusNote('')
+    try {
+      await deleteChatAccount(profile.key, { clearHistory: profile.role === 'guest' })
+      if (editingAccountKey === profile.key) resetAccountForm()
+      if (profile.role === 'guest') {
+        const threadId = `guest-${profile.key}`
+        if (activeId === threadId) {
+          setActiveId(null)
+          setMessages([])
+          clearComposerExtras()
+        }
+      }
+      setStatusNote(`${label}を削除しました。`)
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || err?.message || 'ユーザーの削除に失敗しました。')
+    } finally {
+      setAccountBusy(false)
+    }
+  }
 
   const otherThreads = useMemo(() => {
-    const knownIds = new Set(KNOWN_GUESTS.map((g) => `guest-${g.key}`))
-    return threads.filter((t) => !knownIds.has(t.id) && !KNOWN_GUESTS.some((g) => g.key === t.guestKey))
-  }, [threads])
+    const knownIds = new Set(guestRoster.map((entry) => entry.threadId))
+    const knownKeys = new Set(guestRoster.map((entry) => entry.profile.key))
+    return threads.filter((t) => !knownIds.has(t.id) && !knownKeys.has(t.guestKey))
+  }, [threads, guestRoster])
 
   const activeThread = useMemo(
     () => threads.find((t) => t.id === activeId) || null,
@@ -158,9 +265,9 @@ export default function AdminHanaInbox() {
 
   const activeGuestName = useMemo(() => {
     if (!activeId) return ''
-    const known = KNOWN_GUESTS.find((g) => `guest-${g.key}` === activeId)
+    const known = guestRoster.find((entry) => entry.threadId === activeId)?.profile
     return known?.displayName || activeThread?.guestLabel || 'ゲスト'
-  }, [activeId, activeThread])
+  }, [activeId, activeThread, guestRoster])
 
   const clearComposerExtras = () => {
     setReplyTo(null)
@@ -177,10 +284,10 @@ export default function AdminHanaInbox() {
 
   const activeGuestKey = useMemo(() => {
     if (!activeId) return ''
-    const known = KNOWN_GUESTS.find((g) => `guest-${g.key}` === activeId)
+    const known = guestRoster.find((entry) => entry.threadId === activeId)?.profile
     if (known) return known.key
     return String(activeThread?.guestKey || '').trim().toLowerCase()
-  }, [activeId, activeThread])
+  }, [activeId, activeThread, guestRoster])
 
   const avatarSrcForMessage = (message) => {
     if (message.sender === 'hana') {
@@ -372,31 +479,165 @@ export default function AdminHanaInbox() {
   }
 
   const unread = threads.filter((t) => t.unreadByHana).length
-  const activeGuestOnline = isPresenceOnline(activeThread?.guestOnlineAt, presenceTick)
+  const activeGuestPresence = resolveChatPresence({
+    onlineAt: activeThread?.guestOnlineAt,
+    status: activeThread?.guestStatus,
+  }, presenceTick)
 
   return (
     <>
+      <FlowerRainLayer />
+      <EmotionMomentLayer />
       <section className="admin-card admin-chat-card">
         <div className="admin-logs-header">
           <div>
-            <h2>ゲスト管理</h2>
-            <p>パスワードごとのゲストアカウントと会話スレッド</p>
+            <h2>ユーザー管理</h2>
+            <p>ゲスト / オーナーの追加・編集・削除と会話スレッド</p>
           </div>
-          <button
-            type="button"
-            className="admin-danger"
-            disabled={busy || clearBusy}
-            onClick={handleClearAllHistories}
-          >
-            {clearBusy ? '削除中…' : '全チャット履歴を削除'}
-          </button>
+          <div className="admin-user-header-actions">
+            <button
+              type="button"
+              className="admin-primary"
+              disabled={accountBusy}
+              onClick={() => startCreateAccount('guest')}
+            >
+              ゲスト追加
+            </button>
+            <button
+              type="button"
+              className="admin-primary"
+              disabled={accountBusy}
+              onClick={() => startCreateAccount('owner')}
+            >
+              オーナー追加
+            </button>
+            <button
+              type="button"
+              className="admin-danger"
+              disabled={busy || clearBusy}
+              onClick={handleClearAllHistories}
+            >
+              {clearBusy ? '削除中…' : '全チャット履歴を削除'}
+            </button>
+          </div>
         </div>
 
         {statusNote ? <p className="admin-status-note">{statusNote}</p> : null}
 
+        {accountFormOpen ? (
+          <form className="admin-account-form" onSubmit={handleSaveAccount}>
+            <strong>{editingAccountKey ? 'ユーザー編集' : 'ユーザー追加'}</strong>
+            <div className="admin-account-form-grid">
+              <label>
+                役割
+                <select
+                  value={accountForm.role}
+                  disabled={Boolean(editingAccountKey)}
+                  onChange={(event) => setAccountForm((prev) => ({ ...prev, role: event.target.value }))}
+                >
+                  <option value="guest">ゲスト</option>
+                  <option value="owner">オーナー</option>
+                </select>
+              </label>
+              <label>
+                ID（ログイン用・変更不可）
+                <input
+                  value={accountForm.key}
+                  disabled={Boolean(editingAccountKey)}
+                  placeholder="hiro"
+                  autoComplete="off"
+                  onChange={(event) => setAccountForm((prev) => ({
+                    ...prev,
+                    key: event.target.value,
+                    passKey: prev.passKey || event.target.value,
+                  }))}
+                  required={!editingAccountKey}
+                />
+              </label>
+              <label>
+                パスワード
+                <input
+                  value={accountForm.passKey}
+                  placeholder="ログインパスワード"
+                  autoComplete="off"
+                  onChange={(event) => setAccountForm((prev) => ({ ...prev, passKey: event.target.value }))}
+                  required
+                />
+              </label>
+              <label>
+                表示名
+                <input
+                  value={accountForm.displayName}
+                  placeholder="ヒロ"
+                  onChange={(event) => setAccountForm((prev) => ({ ...prev, displayName: event.target.value }))}
+                  required
+                />
+              </label>
+              <label>
+                呼び方
+                <input
+                  value={accountForm.addressAs}
+                  placeholder="表示名と同じでもOK"
+                  onChange={(event) => setAccountForm((prev) => ({ ...prev, addressAs: event.target.value }))}
+                />
+              </label>
+            </div>
+            <div className="admin-account-form-actions">
+              <button type="submit" className="admin-primary" disabled={accountBusy}>
+                {accountBusy ? '保存中…' : '保存'}
+              </button>
+              <button type="button" className="admin-danger admin-danger--ghost" disabled={accountBusy} onClick={resetAccountForm}>
+                キャンセル
+              </button>
+            </div>
+          </form>
+        ) : null}
+
+        <div className="admin-guest-roster" aria-label="オーナー一覧">
+          {ownerRoster.map(({ profile }) => (
+            <article key={`owner-${profile.key}`} className="admin-guest-card is-owner">
+              <div className="admin-guest-card-main">
+                <strong className="admin-guest-name">
+                  <span className="admin-guest-avatar-wrap">
+                    <img
+                      className="admin-guest-avatar"
+                      src={avatarSrcForProfile(profile.key, profile.displayName)}
+                      alt=""
+                    />
+                  </span>
+                  {profile.displayName}
+                  <span className="admin-guest-online-label is-online">オーナー</span>
+                </strong>
+                <span className="admin-guest-meta">
+                  id: {profile.key}
+                  {' · '}
+                  pass: {profile.passKey || profile.key}
+                  {profile.addressAs !== profile.displayName ? ` · 呼び: ${profile.addressAs}` : ''}
+                </span>
+              </div>
+              <div className="admin-guest-card-actions">
+                <button type="button" className="admin-primary" disabled={accountBusy} onClick={() => startEditAccount(profile)}>
+                  編集
+                </button>
+                <button
+                  type="button"
+                  className="admin-danger admin-danger--ghost"
+                  disabled={accountBusy || ownerRoster.length <= 1}
+                  onClick={() => { void handleDeleteAccount(profile) }}
+                >
+                  削除
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+
         <div className="admin-guest-roster" aria-label="ゲスト一覧">
           {guestRoster.map(({ profile, thread, threadId }) => {
-            const online = isPresenceOnline(thread?.guestOnlineAt, presenceTick)
+            const presence = resolveChatPresence({
+              onlineAt: thread?.guestOnlineAt,
+              status: thread?.guestStatus,
+            }, presenceTick)
             return (
               <article
                 key={profile.key}
@@ -404,17 +645,21 @@ export default function AdminHanaInbox() {
               >
                 <div className="admin-guest-card-main">
                   <strong className="admin-guest-name">
-                    <img
-                      className="admin-guest-avatar"
-                      src={avatarSrcForProfile(profile.key, profile.displayName)}
-                      alt=""
-                    />
-                    <span className={`admin-guest-dot ${online ? 'is-online' : 'is-offline'}`} aria-hidden="true" />
+                    <span className="admin-guest-avatar-wrap">
+                      <img
+                        className="admin-guest-avatar"
+                        src={avatarSrcForProfile(profile.key, profile.displayName)}
+                        alt=""
+                      />
+                      <span className={`admin-guest-dot ${presence.className}`} aria-hidden="true" />
+                    </span>
                     {profile.displayName}
-                    <span className={`admin-guest-online-label${online ? ' is-online' : ''}`}>{online ? 'オンライン' : 'オフライン'}</span>
+                    <span className={`admin-guest-online-label ${presence.className}`}>{presence.label}</span>
                   </strong>
                   <span className="admin-guest-meta">
-                    pass: {profile.key}
+                    id: {profile.key}
+                    {' · '}
+                    pass: {profile.passKey || profile.key}
                     {profile.addressAs !== profile.displayName ? ` · 呼び: ${profile.addressAs}` : ''}
                   </span>
                   <span className="admin-guest-meta">
@@ -435,6 +680,9 @@ export default function AdminHanaInbox() {
                     onClick={() => handleOpenGuest(profile)}
                   >
                     チャットを開く
+                  </button>
+                  <button type="button" className="admin-primary" disabled={accountBusy} onClick={() => startEditAccount(profile)}>
+                    編集
                   </button>
                   <button
                     type="button"
@@ -465,6 +713,14 @@ export default function AdminHanaInbox() {
                   >
                     履歴削除
                   </button>
+                  <button
+                    type="button"
+                    className="admin-danger admin-danger--ghost"
+                    disabled={accountBusy}
+                    onClick={() => { void handleDeleteAccount(profile) }}
+                  >
+                    削除
+                  </button>
                 </div>
               </article>
             )
@@ -487,7 +743,12 @@ export default function AdminHanaInbox() {
 
         <div className="admin-chat-layout">
           <aside className="admin-chat-thread-list" aria-label="スレッド">
-            {guestRoster.map(({ profile, thread, threadId }) => (
+            {guestRoster.map(({ profile, thread, threadId }) => {
+              const presence = resolveChatPresence({
+                onlineAt: thread?.guestOnlineAt,
+                status: thread?.guestStatus,
+              }, presenceTick)
+              return (
               <button
                 key={threadId}
                 type="button"
@@ -495,20 +756,24 @@ export default function AdminHanaInbox() {
                 onClick={() => handleOpenGuest(profile)}
               >
                 <strong className="admin-guest-name">
-                  <img
-                    className="admin-guest-avatar admin-guest-avatar--sm"
-                    src={avatarSrcForProfile(profile.key, profile.displayName)}
-                    alt=""
-                  />
-                  <span
-                    className={`admin-guest-dot ${isPresenceOnline(thread?.guestOnlineAt, presenceTick) ? 'is-online' : 'is-offline'}`}
-                    aria-hidden="true"
-                  />
+                  <span className="admin-guest-avatar-wrap is-sm">
+                    <img
+                      className="admin-guest-avatar admin-guest-avatar--sm"
+                      src={avatarSrcForProfile(profile.key, profile.displayName)}
+                      alt=""
+                    />
+                    <span
+                      className={`admin-guest-dot ${presence.className}`}
+                      title={presence.label}
+                      aria-hidden="true"
+                    />
+                  </span>
                   {profile.displayName}
                 </strong>
                 <span>{thread?.lastText || '（未開始）'}</span>
               </button>
-            ))}
+              )
+            })}
             {otherThreads.map((thread) => (
               <button
                 key={thread.id}
@@ -533,18 +798,21 @@ export default function AdminHanaInbox() {
                 <div className="admin-chat-active-title">
                   <div>
                     <strong className="admin-guest-name">
-                      <img
-                        className="admin-guest-avatar admin-guest-avatar--sm"
-                        src={avatarSrcForProfile(activeGuestKey || 'guest', activeGuestName)}
-                        alt=""
-                      />
-                      <span
-                        className={`admin-guest-dot ${activeGuestOnline ? 'is-online' : 'is-offline'}`}
-                        aria-hidden="true"
-                      />
+                      <span className="admin-guest-avatar-wrap is-sm">
+                        <img
+                          className="admin-guest-avatar admin-guest-avatar--sm"
+                          src={avatarSrcForProfile(activeGuestKey || 'guest', activeGuestName)}
+                          alt=""
+                        />
+                        <span
+                          className={`admin-guest-dot ${activeGuestPresence.className}`}
+                          title={activeGuestPresence.label}
+                          aria-hidden="true"
+                        />
+                      </span>
                       {activeGuestName}
                     </strong>
-                    <span>{activeGuestOnline ? 'オンライン' : 'オフライン'} · とチャット中</span>
+                    <span>{activeGuestPresence.label} · とチャット中</span>
                   </div>
                   <button
                     type="button"
@@ -592,7 +860,8 @@ export default function AdminHanaInbox() {
                             canEdit={mutable}
                             canDelete={mutable}
                             canReact={!message.deleted}
-                            showFlowerReact={!message.deleted && !isOwn && message.id === latestOtherMessageId}
+                            showFlowerReact={!message.deleted && !isOwn}
+                            defaultReaction={defaultReaction}
                             reactions={message.reactions || {}}
                             reactorId={OWNER_PROFILE.key}
                             copyText={message.deleted ? '' : (message.rawText || message.text || '')}

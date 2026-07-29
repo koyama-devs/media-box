@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { triggerFlowerRain, triggerPartyBurst, CHAT_PARTY_REACTION } from './FlowerRain'
+import { EMOTION_MOMENTS, triggerEmotionMoment } from './EmotionMoment'
 import {
     CHAT_DEFAULT_REACTION,
     CHAT_REACTION_EMOJIS,
@@ -7,10 +9,16 @@ import {
     reactionTotal,
 } from './firebase'
 
+const REPLY_THRESHOLD = 52
+const ACTION_THRESHOLD = 56
+const MAX_RIGHT = 72
+const MAX_LEFT = -108
 const HOVER_LEAVE_MS = 180
 const LONG_PRESS_MS = 450
 const LONG_PRESS_MOVE_PX = 28
 const MENU_ARM_MS = 280
+const MENU_DISMISS_GUARD_MS = 700
+const AXIS_LOCK_PX = 8
 
 const MENU_EXTRA_ACTIONS = [
   { id: 'pin', label: 'ピン', icon: '📌' },
@@ -68,6 +76,17 @@ function IconReact() {
       <path
         fill="currentColor"
         d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm-3.5-7.5a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zm7 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zM12 17.2c-1.9 0-3.5-1-4.2-2.4-.2-.4.1-.8.5-.8h7.4c.4 0 .7.4.5.8-.7 1.4-2.3 2.4-4.2 2.4z"
+      />
+    </svg>
+  )
+}
+
+function IconMore() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
+      <path
+        fill="currentColor"
+        d="M6 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"
       />
     </svg>
   )
@@ -146,11 +165,12 @@ function useIsCoarsePointer() {
         'ontouchstart' in window
         || (navigator.maxTouchPoints || 0) > 0
         || window.matchMedia('(pointer: coarse)').matches
-        || window.matchMedia('(hover: none)').matches,
+        || window.matchMedia('(hover: none)').matches
+        || !window.matchMedia('(hover: hover) and (pointer: fine)').matches,
       )
     }
     sync()
-    const media = window.matchMedia('(pointer: coarse)')
+    const media = window.matchMedia('(hover: hover) and (pointer: fine)')
     media.addEventListener('change', sync)
     return () => media.removeEventListener('change', sync)
   }, [])
@@ -167,9 +187,32 @@ function isIgnoredPressTarget(target) {
   )
 }
 
+/** Soft device vibration when supported (Android Chrome, etc.). */
+function haptic(kind = 'tap') {
+  try {
+    if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return
+    if (kind === 'longpress') {
+      // Double pulse — easy to feel under the fingertip when the menu opens.
+      navigator.vibrate([12, 40, 32])
+      return
+    }
+    if (kind === 'menu') {
+      navigator.vibrate(16)
+      return
+    }
+    if (kind === 'reply') {
+      navigator.vibrate(10)
+      return
+    }
+    navigator.vibrate(8)
+  } catch {
+    /* unsupported / denied */
+  }
+}
+
 /**
- * Long-press / right-click → inline action list (no modal overlay).
- * Desktop: hover toolbar.
+ * Touch: swipe right → reply, swipe left → menu; long-press → menu.
+ * Desktop: hover toolbar + right-click / long-press → fixed center menu.
  */
 export default function ChatSwipeBubble({
   className = '',
@@ -178,6 +221,7 @@ export default function ChatSwipeBubble({
   canDelete = false,
   canReact = false,
   showFlowerReact = false,
+  defaultReaction = CHAT_DEFAULT_REACTION,
   reactions = null,
   reactorId = '',
   reactionEmojis = CHAT_REACTION_EMOJIS,
@@ -190,15 +234,26 @@ export default function ChatSwipeBubble({
   onMenuAction,
   children,
 }) {
-  const coarsePointer = useIsCoarsePointer()
+  const swipeMode = useIsCoarsePointer()
   const rootRef = useRef(null)
+  const startX = useRef(0)
+  const startY = useRef(0)
+  const locking = useRef(null) // 'h' | 'v' | 'hold' | null
+  const offsetRef = useRef(0)
+  const actionsOpenRef = useRef(false)
   const leaveTimer = useRef(null)
-  const pressTimer = useRef(null)
-  const pressOrigin = useRef({ x: 0, y: 0 })
-  const pressOpened = useRef(false)
+  const longPressFired = useRef(false)
+  const suppressMenuDismissUntil = useRef(0)
+  const activeTouchId = useRef(null)
+  const canReplyRef = useRef(canReply)
+  const canSwipeLeftRef = useRef(false)
+  const onReplyRef = useRef(onReply)
   const copyTextRef = useRef(copyText)
   const onCopyRef = useRef(onCopy)
 
+  const [offset, setOffset] = useState(0)
+  const [dragging, setDragging] = useState(false)
+  const [actionsOpen, setActionsOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [menuArmed, setMenuArmed] = useState(false)
   const [desktopOpen, setDesktopOpen] = useState(false)
@@ -206,25 +261,39 @@ export default function ChatSwipeBubble({
   const [soonNote, setSoonNote] = useState('')
 
   const canCopy = Boolean(String(copyText || '').trim())
+  // Left swipe opens the action menu (extras always available).
+  const canSwipeLeft = true
   const hasDesktopActions = canReply || canEdit || canDelete || canCopy || canReact
   const emojiList = Array.isArray(reactionEmojis) && reactionEmojis.length
     ? reactionEmojis
     : CHAT_REACTION_EMOJIS
 
+  canReplyRef.current = canReply
+  canSwipeLeftRef.current = canSwipeLeft
+  onReplyRef.current = onReply
   copyTextRef.current = copyText
   onCopyRef.current = onCopy
+
+  const applyOffset = (next) => {
+    offsetRef.current = next
+    setOffset(next)
+  }
+
+  const setActions = (open) => {
+    actionsOpenRef.current = open
+    setActionsOpen(open)
+  }
+
+  const reset = () => {
+    applyOffset(0)
+    locking.current = null
+    setDragging(false)
+  }
 
   const clearLeaveTimer = () => {
     if (leaveTimer.current != null) {
       window.clearTimeout(leaveTimer.current)
       leaveTimer.current = null
-    }
-  }
-
-  const clearPressTimer = () => {
-    if (pressTimer.current != null) {
-      window.clearTimeout(pressTimer.current)
-      pressTimer.current = null
     }
   }
 
@@ -246,13 +315,13 @@ export default function ChatSwipeBubble({
   }
 
   const openDesktopActions = () => {
-    if (coarsePointer || !hasDesktopActions) return
+    if (swipeMode || !hasDesktopActions) return
     clearLeaveTimer()
     setDesktopOpen(true)
   }
 
   const scheduleCloseDesktopActions = () => {
-    if (coarsePointer) return
+    if (swipeMode) return
     clearLeaveTimer()
     leaveTimer.current = window.setTimeout(() => {
       setDesktopOpen(false)
@@ -260,26 +329,46 @@ export default function ChatSwipeBubble({
     }, HOVER_LEAVE_MS)
   }
 
-  const openActionMenu = () => {
-    pressOpened.current = true
-    clearPressTimer()
-    setMenuArmed(false)
-    setMenuOpen(true)
-    try {
-      navigator.vibrate?.(16)
-    } catch {
-      /* ignore */
+  const openActionMenu = (options = {}) => {
+    const immediate = Boolean(options.immediate)
+    if (immediate) {
+      suppressMenuDismissUntil.current = 0
+      setMenuArmed(true)
+      haptic('menu')
+    } else {
+      suppressMenuDismissUntil.current = Date.now() + MENU_DISMISS_GUARD_MS
+      setMenuArmed(false)
+      haptic('longpress')
     }
+    setMenuOpen(true)
+    setActions(false)
+    applyOffset(0)
+    setDragging(false)
+    if (!swipeMode) setDesktopOpen(true)
   }
 
   const closeActionMenu = () => {
+    if (!menuArmed) return
     setMenuOpen(false)
     setMenuArmed(false)
     setSoonNote('')
   }
 
+  const openActionMenuRef = useRef(() => {})
+  openActionMenuRef.current = openActionMenu
+
+  const quickReaction = String(defaultReaction || CHAT_DEFAULT_REACTION).trim() || CHAT_DEFAULT_REACTION
+
   const pickReaction = (emoji, mode = 'toggle') => {
-    closeActionMenu()
+    setMenuOpen(false)
+    setMenuArmed(false)
+    setActions(false)
+    reset()
+    if (emoji === quickReaction && (mode === 'increment' || mode === 'set')) {
+      triggerFlowerRain({ count: 26, emoji: quickReaction })
+    } else if (emoji === CHAT_PARTY_REACTION && (mode === 'increment' || mode === 'set')) {
+      triggerPartyBurst({ count: 24 })
+    }
     window.setTimeout(() => {
       try {
         onReact?.(emoji, { mode })
@@ -289,10 +378,35 @@ export default function ChatSwipeBubble({
     }, 0)
   }
 
-  const handleFlowerTap = () => {
+  const playEmotionMoment = (moment) => {
+    setMenuOpen(false)
+    setMenuArmed(false)
+    setActions(false)
+    reset()
+    haptic('longpress')
+    // Let the action menu unmount first so the moment sits above the chat.
+    window.setTimeout(() => {
+      triggerEmotionMoment(moment.id)
+      if (moment.reaction && canReact) {
+        try {
+          onReact?.(moment.reaction, { mode: 'set' })
+        } catch {
+          /* parent handles */
+        }
+      }
+    }, 40)
+  }
+
+  const handleFlowerTap = (origin) => {
+    triggerFlowerRain({
+      x: origin?.x,
+      y: origin?.y,
+      count: 30,
+      emoji: quickReaction,
+    })
     window.setTimeout(() => {
       try {
-        onReact?.(CHAT_DEFAULT_REACTION, { mode: 'increment' })
+        onReact?.(quickReaction, { mode: 'increment' })
       } catch {
         /* ignore */
       }
@@ -300,7 +414,10 @@ export default function ChatSwipeBubble({
   }
 
   const runMenuAction = (actionId) => {
-    closeActionMenu()
+    setMenuOpen(false)
+    setMenuArmed(false)
+    setSoonNote('')
+    reset()
     window.setTimeout(() => {
       try {
         if (actionId === 'copy') {
@@ -331,32 +448,8 @@ export default function ChatSwipeBubble({
     }, 0)
   }
 
-  const onPressStart = (clientX, clientY) => {
-    pressOpened.current = false
-    pressOrigin.current = { x: clientX, y: clientY }
-    clearPressTimer()
-    pressTimer.current = window.setTimeout(() => {
-      pressTimer.current = null
-      openActionMenu()
-    }, LONG_PRESS_MS)
-  }
-
-  const onPressMove = (clientX, clientY) => {
-    if (!pressTimer.current) return
-    const dx = clientX - pressOrigin.current.x
-    const dy = clientY - pressOrigin.current.y
-    if (Math.abs(dx) > LONG_PRESS_MOVE_PX || Math.abs(dy) > LONG_PRESS_MOVE_PX) {
-      clearPressTimer()
-    }
-  }
-
-  const onPressEnd = () => {
-    clearPressTimer()
-  }
-
   useEffect(() => () => {
     clearLeaveTimer()
-    clearPressTimer()
   }, [])
 
   // Fixed center menu via portal — always fully visible regardless of bubble position.
@@ -365,9 +458,16 @@ export default function ChatSwipeBubble({
       setMenuArmed(false)
       return undefined
     }
-    const armTimer = window.setTimeout(() => setMenuArmed(true), MENU_ARM_MS)
+    const armTimer = window.setTimeout(() => {
+      setMenuArmed(true)
+      suppressMenuDismissUntil.current = 0
+    }, MENU_ARM_MS)
     const onKey = (event) => {
-      if (event.key === 'Escape') closeActionMenu()
+      if (event.key === 'Escape') {
+        setMenuOpen(false)
+        setMenuArmed(false)
+        setSoonNote('')
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => {
@@ -376,12 +476,259 @@ export default function ChatSwipeBubble({
     }
   }, [menuOpen])
 
-  const flowerCount = reactionTotal(reactions?.[CHAT_DEFAULT_REACTION])
+  useEffect(() => {
+    if (!swipeMode) {
+      applyOffset(0)
+      setActions(false)
+      locking.current = null
+      setDragging(false)
+    } else {
+      setDesktopOpen(false)
+      clearLeaveTimer()
+    }
+  }, [swipeMode])
+
+  // Unified touch: long-press opens menu; horizontal swipe for reply / menu.
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return undefined
+
+    let pressTimer = null
+    let originX = 0
+    let originY = 0
+    let tracking = false
+    let openedByPress = false
+
+    const clearPress = () => {
+      if (pressTimer != null) {
+        window.clearTimeout(pressTimer)
+        pressTimer = null
+      }
+      root.classList.remove('is-long-pressing')
+    }
+
+    const clampOffset = (dx) => {
+      let next = dx
+      if (next > 0 && !canReplyRef.current) next = 0
+      if (next < 0 && !canSwipeLeftRef.current) next = 0
+      return Math.max(MAX_LEFT, Math.min(MAX_RIGHT, next))
+    }
+
+    const fireMenu = (options = {}) => {
+      openedByPress = true
+      longPressFired.current = true
+      locking.current = 'hold'
+      setActions(false)
+      applyOffset(0)
+      setDragging(false)
+      clearPress()
+      root.classList.add('is-press-ack')
+      window.setTimeout(() => root.classList.remove('is-press-ack'), 280)
+      openActionMenuRef.current(options)
+    }
+
+    const onTouchStart = (event) => {
+      if (event.touches.length !== 1) return
+      if (isIgnoredPressTarget(event.target)) return
+      const touch = event.touches[0]
+      tracking = true
+      openedByPress = false
+      originX = touch.clientX
+      originY = touch.clientY
+      startX.current = touch.clientX
+      startY.current = touch.clientY
+      locking.current = null
+      longPressFired.current = false
+      activeTouchId.current = touch.identifier
+      if (actionsOpenRef.current) {
+        setActions(false)
+        applyOffset(0)
+      }
+      clearPress()
+      root.classList.add('is-long-pressing')
+      pressTimer = window.setTimeout(() => {
+        pressTimer = null
+        fireMenu()
+      }, LONG_PRESS_MS)
+    }
+
+    const onTouchMove = (event) => {
+      if (!tracking) return
+      if (event.touches.length !== 1) return
+      const touch = event.touches[0]
+      if (activeTouchId.current != null && touch.identifier !== activeTouchId.current) return
+
+      const dx = touch.clientX - originX
+      const dy = touch.clientY - originY
+      const moved = Math.abs(dx) > LONG_PRESS_MOVE_PX || Math.abs(dy) > LONG_PRESS_MOVE_PX
+
+      if (longPressFired.current || locking.current === 'hold') {
+        event.preventDefault()
+        return
+      }
+
+      if (pressTimer && !moved) {
+        event.preventDefault()
+        return
+      }
+
+      if (pressTimer && moved) {
+        clearPress()
+      }
+
+      if (!swipeMode) return
+
+      const swipeDx = touch.clientX - startX.current
+      const swipeDy = touch.clientY - startY.current
+
+      if (!locking.current) {
+        if (Math.abs(swipeDx) < AXIS_LOCK_PX && Math.abs(swipeDy) < AXIS_LOCK_PX) return
+        locking.current = Math.abs(swipeDx) > Math.abs(swipeDy) ? 'h' : 'v'
+        if (locking.current === 'h') setDragging(true)
+      }
+
+      if (locking.current !== 'h') return
+      event.preventDefault()
+      applyOffset(clampOffset(swipeDx))
+    }
+
+    const finishTouch = () => {
+      clearPress()
+      tracking = false
+      activeTouchId.current = null
+
+      if (openedByPress || longPressFired.current || locking.current === 'hold') {
+        openedByPress = false
+        window.setTimeout(() => {
+          longPressFired.current = false
+          if (locking.current === 'hold') locking.current = null
+        }, MENU_DISMISS_GUARD_MS)
+        setDragging(false)
+        applyOffset(0)
+        return
+      }
+
+      if (swipeMode && locking.current === 'h') {
+        const current = offsetRef.current
+        if (current >= REPLY_THRESHOLD && canReplyRef.current) {
+          onReplyRef.current?.()
+          haptic('reply')
+          setActions(false)
+          reset()
+          return
+        }
+        if (current <= -ACTION_THRESHOLD && canSwipeLeftRef.current) {
+          fireMenu({ immediate: true })
+          locking.current = null
+          setDragging(false)
+          applyOffset(0)
+          return
+        }
+      }
+      if (!actionsOpenRef.current) reset()
+      else {
+        applyOffset(MAX_LEFT + 12)
+        setDragging(false)
+        locking.current = null
+      }
+    }
+
+    root.addEventListener('touchstart', onTouchStart, { passive: true })
+    root.addEventListener('touchmove', onTouchMove, { passive: false })
+    root.addEventListener('touchend', finishTouch, { passive: true })
+    root.addEventListener('touchcancel', finishTouch, { passive: true })
+    return () => {
+      clearPress()
+      root.removeEventListener('touchstart', onTouchStart)
+      root.removeEventListener('touchmove', onTouchMove)
+      root.removeEventListener('touchend', finishTouch)
+      root.removeEventListener('touchcancel', finishTouch)
+    }
+  }, [swipeMode])
+
+  // Desktop: right-click + mouse long-press → action menu.
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return undefined
+
+    const fireMenu = () => {
+      longPressFired.current = true
+      locking.current = 'hold'
+      setActions(false)
+      applyOffset(0)
+      setDragging(false)
+      root.classList.add('is-press-ack')
+      window.setTimeout(() => root.classList.remove('is-press-ack'), 280)
+      openActionMenuRef.current()
+      window.setTimeout(() => {
+        longPressFired.current = false
+        if (locking.current === 'hold') locking.current = null
+      }, MENU_DISMISS_GUARD_MS)
+    }
+
+    const onContextMenu = (event) => {
+      if (isIgnoredPressTarget(event.target)) return
+      event.preventDefault()
+      event.stopPropagation()
+      fireMenu()
+    }
+
+    let mouseTimer = null
+    let origin = { x: 0, y: 0 }
+    const clearMouse = () => {
+      if (mouseTimer != null) {
+        window.clearTimeout(mouseTimer)
+        mouseTimer = null
+      }
+    }
+    const onMouseDown = (event) => {
+      if (swipeMode) return
+      if (event.button !== 0) return
+      if (isIgnoredPressTarget(event.target)) return
+      if (event.sourceCapabilities?.firesTouchEvents) return
+      origin = { x: event.clientX, y: event.clientY }
+      clearMouse()
+      mouseTimer = window.setTimeout(() => {
+        mouseTimer = null
+        fireMenu()
+      }, LONG_PRESS_MS)
+    }
+    const onMouseMove = (event) => {
+      if (!mouseTimer) return
+      const dx = event.clientX - origin.x
+      const dy = event.clientY - origin.y
+      if (Math.abs(dx) > LONG_PRESS_MOVE_PX || Math.abs(dy) > LONG_PRESS_MOVE_PX) {
+        clearMouse()
+      }
+    }
+    const onMouseUp = () => clearMouse()
+
+    root.addEventListener('contextmenu', onContextMenu)
+    root.addEventListener('mousedown', onMouseDown)
+    root.addEventListener('mousemove', onMouseMove)
+    root.addEventListener('mouseup', onMouseUp)
+    root.addEventListener('mouseleave', onMouseUp)
+    return () => {
+      clearMouse()
+      root.removeEventListener('contextmenu', onContextMenu)
+      root.removeEventListener('mousedown', onMouseDown)
+      root.removeEventListener('mousemove', onMouseMove)
+      root.removeEventListener('mouseup', onMouseUp)
+      root.removeEventListener('mouseleave', onMouseUp)
+    }
+  }, [swipeMode])
+
+  const flowerCount = reactionTotal(reactions?.[quickReaction])
   const showFlowerFab = Boolean(showFlowerReact || flowerCount > 0)
-  const modeClass = coarsePointer ? 'is-touch' : 'is-desktop'
-  const desktopClass = !coarsePointer && desktopOpen ? ' is-desktop-open' : ''
+  const modeClass = swipeMode ? 'is-touch' : 'is-desktop'
+  const desktopClass = !swipeMode && desktopOpen ? ' is-desktop-open' : ''
   const copiedClass = copiedFlash ? ' is-copied' : ''
   const menuClass = menuOpen ? ' is-menu-open' : ''
+  const draggingClass = dragging ? ' is-dragging' : ''
+  const replyReady = offset >= REPLY_THRESHOLD
+  const actionReady = offset <= -ACTION_THRESHOLD
+  const showReplyHint = swipeMode && canReply && offset > 8
+  const showActionHint = swipeMode && canSwipeLeft && (offset < -8 || actionsOpen)
 
   const menuPortal = menuOpen
     ? createPortal(
@@ -389,11 +736,11 @@ export default function ChatSwipeBubble({
         className={`chat-msg-menu-overlay${menuArmed ? ' is-armed' : ' is-arming'}`}
         role="presentation"
         onPointerDown={(event) => {
-          // Keep composer focus; don't let overlay steal keyboard.
           if (event.target === event.currentTarget) event.preventDefault()
         }}
         onClick={(event) => {
           if (!menuArmed) return
+          if (Date.now() < suppressMenuDismissUntil.current) return
           if (event.target === event.currentTarget) closeActionMenu()
         }}
       >
@@ -411,13 +758,32 @@ export default function ChatSwipeBubble({
               <button
                 key={emoji}
                 type="button"
-                className={`chat-msg-menu-react${emoji === CHAT_DEFAULT_REACTION ? ' is-default' : ''}`}
+                className={`chat-msg-menu-react${emoji === quickReaction ? ' is-default' : ''}`}
                 onMouseDown={(event) => event.preventDefault()}
-                onClick={() => pickReaction(emoji, emoji === CHAT_DEFAULT_REACTION ? 'increment' : 'set')}
+                onClick={() => pickReaction(emoji, emoji === quickReaction ? 'increment' : 'set')}
               >
                 {emoji}
               </button>
             ))}
+          </div>
+          <div className="chat-msg-menu-moments" role="group" aria-label="スペシャルエフェクト">
+            <p className="chat-msg-menu-moments-label">スペシャル</p>
+            <div className="chat-msg-menu-moments-row">
+              {EMOTION_MOMENTS.map((moment) => (
+                <button
+                  key={moment.id}
+                  type="button"
+                  className={`chat-msg-menu-moment is-${moment.theme}`}
+                  title={moment.label}
+                  aria-label={moment.label}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => playEmotionMoment(moment)}
+                >
+                  <span className="chat-msg-menu-moment-emoji" aria-hidden="true">{moment.emoji}</span>
+                  <span className="chat-msg-menu-moment-text">{moment.label}</span>
+                </button>
+              ))}
+            </div>
           </div>
           <div className="chat-msg-menu-actions">
             {canCopy ? (
@@ -487,41 +853,43 @@ export default function ChatSwipeBubble({
   return (
     <div
       ref={rootRef}
-      className={`chat-swipe ${modeClass}${desktopClass}${menuClass}${copiedClass}${className ? ` ${className}` : ''}`}
+      className={`chat-swipe ${modeClass}${desktopClass}${actionsOpen ? ' is-actions' : ''}${menuClass}${copiedClass}${draggingClass}${className ? ` ${className}` : ''}`}
       onMouseEnter={openDesktopActions}
       onMouseLeave={scheduleCloseDesktopActions}
     >
       <div className="chat-swipe-track">
-        <div className="chat-swipe-sheet">
+        {swipeMode && canReply ? (
           <div
-            className={`chat-swipe-bubble-wrap${showFlowerFab ? ' has-flower' : ''}`}
-            onPointerDown={(event) => {
-              if (isIgnoredPressTarget(event.target)) return
-              if (event.pointerType === 'mouse' && event.button !== 0) return
-              onPressStart(event.clientX, event.clientY)
-            }}
-            onPointerMove={(event) => {
-              if (!pressTimer.current) return
-              onPressMove(event.clientX, event.clientY)
-            }}
-            onPointerUp={onPressEnd}
-            onPointerCancel={onPressEnd}
-            onPointerLeave={(event) => {
-              // Don't cancel on touch leave quirks; only mouse leave.
-              if (event.pointerType === 'mouse') onPressEnd()
-            }}
-            onContextMenu={(event) => {
-              if (isIgnoredPressTarget(event.target)) return
-              event.preventDefault()
-              event.stopPropagation()
-              openActionMenu()
-            }}
+            className={`chat-swipe-hint is-reply${showReplyHint ? ' is-visible' : ''}${replyReady ? ' is-ready' : ''}`}
+            aria-hidden="true"
           >
+            <span className="chat-swipe-hint-icon">
+              <IconReply />
+            </span>
+          </div>
+        ) : null}
+        {swipeMode && canSwipeLeft ? (
+          <div
+            className={`chat-swipe-hint is-actions-hint${showActionHint ? ' is-visible' : ''}${actionReady || actionsOpen ? ' is-ready' : ''}`}
+            aria-hidden="true"
+          >
+            <span className="chat-swipe-hint-icon">
+              <IconMore />
+            </span>
+          </div>
+        ) : null}
+
+        <div
+          className="chat-swipe-sheet"
+          style={swipeMode ? { transform: `translateX(${offset}px)` } : undefined}
+        >
+          <div className={`chat-swipe-bubble-wrap${showFlowerFab ? ' has-flower' : ''}`}>
             {children}
             {showFlowerFab ? (
               <FlowerReactionButton
+                emoji={quickReaction}
                 total={flowerCount}
-                mine={reactionMine(reactions?.[CHAT_DEFAULT_REACTION], reactorId)}
+                mine={reactionMine(reactions?.[quickReaction], reactorId)}
                 disabled={!canReact}
                 onTap={canReact ? handleFlowerTap : undefined}
                 onLongPress={openActionMenu}
@@ -532,12 +900,21 @@ export default function ChatSwipeBubble({
             <ChatReactionChips
               reactions={reactions}
               reactorId={reactorId}
+              defaultReaction={quickReaction}
               includeDefaultReaction={false}
               disabled={!canReact}
-              onToggle={canReact ? (emoji) => onReact?.(emoji, { mode: 'toggle' }) : undefined}
+              onToggle={canReact ? (emoji) => {
+                if (
+                  emoji === CHAT_PARTY_REACTION
+                  && !reactionMine(reactions?.[CHAT_PARTY_REACTION], reactorId)
+                ) {
+                  triggerPartyBurst({ count: 20 })
+                }
+                onReact?.(emoji, { mode: 'toggle' })
+              } : undefined}
             />
           ) : null}
-          {!coarsePointer && hasDesktopActions ? (
+          {!swipeMode && hasDesktopActions ? (
             <div className="chat-desktop-actions" role="toolbar" aria-label="メッセージ操作">
               <button
                 type="button"
@@ -619,12 +996,14 @@ export function ChatReactionChips({
   reactions = {},
   reactorId = '',
   onToggle,
+  defaultReaction = CHAT_DEFAULT_REACTION,
   includeDefaultReaction = false,
   disabled = false,
 }) {
   const rid = String(reactorId || '').trim().toLowerCase()
+  const exclude = String(defaultReaction || CHAT_DEFAULT_REACTION).trim() || CHAT_DEFAULT_REACTION
   const otherEntries = Object.entries(reactions || {}).filter(([emoji, counts]) => {
-    if (!includeDefaultReaction && emoji === CHAT_DEFAULT_REACTION) return false
+    if (!includeDefaultReaction && emoji === exclude) return false
     return reactionTotal(counts) > 0
   })
 
@@ -651,7 +1030,7 @@ export function ChatReactionChips({
           <button
             key={emoji}
             type="button"
-            className={`hana-chat-reaction${mine ? ' is-mine' : ''}${emoji === CHAT_DEFAULT_REACTION ? ' is-flower-chip' : ''}`}
+            className={`hana-chat-reaction${mine ? ' is-mine' : ''}${emoji === exclude ? ' is-flower-chip' : ''}`}
             disabled={disabled || !onToggle}
             aria-pressed={mine > 0}
             title={mine ? 'リアクションを取り消す' : 'リアクションする'}
@@ -671,10 +1050,12 @@ export function ChatReactionChips({
   )
 }
 
-function FlowerReactionButton({ total = 0, mine = 0, disabled = false, onTap, onLongPress }) {
+function FlowerReactionButton({ emoji = CHAT_DEFAULT_REACTION, total = 0, mine = 0, disabled = false, onTap, onLongPress }) {
   const timerRef = useRef(null)
+  const bloomTimerRef = useRef(null)
   const longRef = useRef(false)
   const originRef = useRef({ x: 0, y: 0 })
+  const [blooming, setBlooming] = useState(false)
   const filled = mine > 0 || total > 0
 
   const clear = () => {
@@ -684,16 +1065,28 @@ function FlowerReactionButton({ total = 0, mine = 0, disabled = false, onTap, on
     }
   }
 
-  useEffect(() => () => clear(), [])
+  useEffect(() => () => {
+    clear()
+    if (bloomTimerRef.current != null) window.clearTimeout(bloomTimerRef.current)
+  }, [])
+
+  const playBloom = () => {
+    setBlooming(true)
+    if (bloomTimerRef.current != null) window.clearTimeout(bloomTimerRef.current)
+    bloomTimerRef.current = window.setTimeout(() => {
+      bloomTimerRef.current = null
+      setBlooming(false)
+    }, 560)
+  }
 
   return (
     <button
       type="button"
-      className={`hana-chat-flower-fab${filled ? ' is-filled' : ' is-outline'}${mine ? ' is-mine' : ''}`}
+      className={`hana-chat-flower-fab${filled ? ' is-filled' : ' is-outline'}${mine ? ' is-mine' : ''}${blooming ? ' is-bloom' : ''}`}
       disabled={disabled}
       data-no-bubble-press="true"
-      aria-label="花のリアクション"
-      title="タップで🌸 / 長押しでメニュー"
+      aria-label="クイックリアクション"
+      title={`タップで${emoji} / 長押しでメニュー`}
       onPointerDown={(event) => {
         // Keep the soft keyboard open — don't let this button steal focus from the composer.
         event.preventDefault()
@@ -707,11 +1100,6 @@ function FlowerReactionButton({ total = 0, mine = 0, disabled = false, onTap, on
           timerRef.current = null
           longRef.current = true
           onLongPress?.()
-          try {
-            navigator.vibrate?.(10)
-          } catch {
-            /* ignore */
-          }
         }, LONG_PRESS_MS)
       }}
       onPointerMove={(event) => {
@@ -727,7 +1115,10 @@ function FlowerReactionButton({ total = 0, mine = 0, disabled = false, onTap, on
         event.stopPropagation()
         const wasLong = longRef.current
         clear()
-        if (!wasLong) onTap?.()
+        if (!wasLong) {
+          playBloom()
+          onTap?.({ x: event.clientX, y: event.clientY })
+        }
         longRef.current = false
       }}
       onPointerCancel={() => {
@@ -746,7 +1137,7 @@ function FlowerReactionButton({ total = 0, mine = 0, disabled = false, onTap, on
         onLongPress?.()
       }}
     >
-      <span className="hana-chat-flower-fab-icon" aria-hidden="true">{CHAT_DEFAULT_REACTION}</span>
+      <span className="hana-chat-flower-fab-icon" aria-hidden="true">{emoji}</span>
       {total > 1 ? <span className="hana-chat-reaction-badge">{total}</span> : null}
     </button>
   )

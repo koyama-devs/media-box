@@ -77,14 +77,14 @@ const AVATAR_CACHE_PREFIX = 'hana-chat-avatar-'
 const GUEST_CHAT_ID_KEY = 'hana-chat-guest-id'
 const GUEST_LABELS = ['桜', '蜜', '月', '風', '霧', '蝶', '鈴', '露', '霞', '羽']
 
-/** Password → guest identity (display in UI + how Hanachan addresses them). */
+/** Password -> guest identity (display in UI + how Hanachan addresses them). Seed defaults. */
 export const GUEST_PROFILES = {
   hiro: { key: 'hiro', displayName: 'ヒロ', addressAs: 'ヒロ' },
   zen: { key: 'zen', displayName: 'ぜん', addressAs: 'ぜん' },
   gabusan: { key: 'gabusan', displayName: 'ガブリエル', addressAs: 'ガブさん' },
 }
 
-/** Owner session identity (password `hana`). */
+/** Owner session identity (password `hana`). Seed default. */
 export const OWNER_PROFILE = {
   key: 'hana',
   displayName: 'はな',
@@ -92,27 +92,150 @@ export const OWNER_PROFILE = {
   roleLabel: 'オーナー',
 }
 
-const AVATAR_PALETTE = ['#c45c4a', '#d97706', '#059669', '#2563eb', '#7c3aed', '#db2777']
+/** Built-in accounts used for first-run seed + offline fallback. */
+export const DEFAULT_CHAT_ACCOUNTS = [
+  ...Object.values(GUEST_PROFILES).map((profile) => ({
+    key: profile.key,
+    passKey: profile.key,
+    displayName: profile.displayName,
+    addressAs: profile.addressAs,
+    role: 'guest',
+    roleLabel: 'ゲスト',
+  })),
+  {
+    key: OWNER_PROFILE.key,
+    passKey: OWNER_PROFILE.key,
+    displayName: OWNER_PROFILE.displayName,
+    addressAs: OWNER_PROFILE.addressAs,
+    role: 'owner',
+    roleLabel: OWNER_PROFILE.roleLabel,
+  },
+]
+
+function accountFromDefault(def) {
+  return {
+    id: def.key,
+    key: def.key,
+    passKey: def.passKey || def.key,
+    displayName: def.displayName,
+    addressAs: def.addressAs || def.displayName,
+    role: def.role,
+    roleLabel: def.roleLabel || (def.role === 'owner' ? 'オーナー' : 'ゲスト'),
+    avatarUrl: '',
+    updatedAt: null,
+  }
+}
+
+/** Live account list (Firestore-backed when subscribed). */
+let chatAccountsCache = DEFAULT_CHAT_ACCOUNTS.map(accountFromDefault)
+
+export function getChatAccountsSnapshot() {
+  return chatAccountsCache.slice()
+}
+
+function setChatAccountsCache(next) {
+  chatAccountsCache = Array.isArray(next) && next.length
+    ? next.slice()
+    : DEFAULT_CHAT_ACCOUNTS.map(accountFromDefault)
+}
+
+export function normalizeAccountKey(value) {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '')
+}
+
+export function isValidAccountKey(value) {
+  const key = normalizeAccountKey(value)
+  return key.length >= 2 && key.length <= 24 && /^[a-z0-9][a-z0-9_-]*$/.test(key)
+}
+
+function serializeChatAccount(id, data = {}) {
+  const key = normalizeAccountKey(id)
+  const role = data?.role === 'owner' ? 'owner' : data?.role === 'guest' ? 'guest' : ''
+  const displayName = String(data?.displayName || key || '').trim() || key
+  const addressAs = String(data?.addressAs || displayName).trim() || displayName
+  const passKey = normalizeAccountKey(data?.passKey || key) || key
+  return {
+    id: key,
+    key,
+    passKey,
+    displayName,
+    addressAs,
+    role: role || 'guest',
+    roleLabel: String(data?.roleLabel || '').trim()
+      || (role === 'owner' ? 'オーナー' : 'ゲスト'),
+    avatarUrl: String(data?.avatarUrl || ''),
+    updatedAt: data?.updatedAt?.toDate?.()?.toISOString?.() || data?.updatedAtIso || null,
+  }
+}
+
+export function listGuestProfiles(accounts = chatAccountsCache) {
+  return (accounts || [])
+    .filter((account) => account.role === 'guest')
+    .map((account) => ({
+      key: account.key,
+      displayName: account.displayName,
+      addressAs: account.addressAs,
+      passKey: account.passKey,
+      role: 'guest',
+      roleLabel: account.roleLabel || 'ゲスト',
+    }))
+}
+
+export function listOwnerProfiles(accounts = chatAccountsCache) {
+  return (accounts || [])
+    .filter((account) => account.role === 'owner')
+    .map((account) => ({
+      key: account.key,
+      displayName: account.displayName,
+      addressAs: account.addressAs,
+      passKey: account.passKey,
+      role: 'owner',
+      roleLabel: account.roleLabel || 'オーナー',
+    }))
+}
+
+export function findChatAccountByPassKey(passKey, accounts = chatAccountsCache) {
+  const needle = normalizeAccountKey(passKey)
+  if (!needle) return null
+  return (accounts || []).find((account) => (
+    account.passKey === needle || account.key === needle
+  )) || null
+}
 
 export function getGuestProfile(guestKey) {
-  const key = String(guestKey || '').trim().toLowerCase()
+  const key = normalizeAccountKey(guestKey)
+  if (!key) return null
+  const live = chatAccountsCache.find((account) => (
+    account.role === 'guest' && (account.key === key || account.passKey === key)
+  ))
+  if (live) {
+    return {
+      key: live.key,
+      displayName: live.displayName,
+      addressAs: live.addressAs,
+      passKey: live.passKey,
+    }
+  }
   return GUEST_PROFILES[key] || null
 }
 
 /**
  * Resolve who is logged in for topbar / chat.
  * @param {'owner'|'guest'} authRole
- * @param {string} guestKey
+ * @param {string} guestKey pass key for guest, or owner pass key when role is owner
  */
 export function resolveSessionProfile(authRole, guestKey = '') {
   if (authRole === 'owner') {
+    const owner = findChatAccountByPassKey(guestKey)
+      || listOwnerProfiles()[0]
+      || accountFromDefault(DEFAULT_CHAT_ACCOUNTS.find((a) => a.role === 'owner'))
     return {
-      id: OWNER_PROFILE.key,
-      key: OWNER_PROFILE.key,
-      displayName: OWNER_PROFILE.displayName,
-      addressAs: OWNER_PROFILE.addressAs,
+      id: owner.key,
+      key: owner.key,
+      displayName: owner.displayName,
+      addressAs: owner.addressAs,
       role: 'owner',
-      roleLabel: OWNER_PROFILE.roleLabel,
+      roleLabel: owner.roleLabel || 'オーナー',
     }
   }
   const guest = getGuestProfile(guestKey)
@@ -139,6 +262,8 @@ export function resolveSessionProfile(authRole, guestKey = '') {
 function avatarCacheKey(profileId) {
   return `${AVATAR_CACHE_PREFIX}${String(profileId || 'guest')}`
 }
+
+const AVATAR_PALETTE = ['#c45c4a', '#d97706', '#059669', '#2563eb', '#7c3aed', '#db2777']
 
 export function getCachedAvatarUrl(profileId) {
   try {
@@ -196,12 +321,156 @@ export function resolveAvatarSrc(profileId, displayName, customUrl = '', fallbac
 }
 
 function serializeChatProfile(id, data) {
+  const account = serializeChatAccount(id, data)
   return {
-    id,
-    displayName: String(data?.displayName || ''),
-    avatarUrl: String(data?.avatarUrl || ''),
-    updatedAt: data?.updatedAt?.toDate?.()?.toISOString?.() || data?.updatedAtIso || null,
+    id: account.id,
+    key: account.key,
+    displayName: account.displayName,
+    addressAs: account.addressAs,
+    role: data?.role === 'owner' || data?.role === 'guest' ? account.role : '',
+    passKey: account.passKey,
+    roleLabel: account.roleLabel,
+    avatarUrl: account.avatarUrl,
+    updatedAt: account.updatedAt,
   }
+}
+
+/** Seed built-in guest/owner accounts into chatProfiles if missing. */
+export async function ensureDefaultChatAccounts() {
+  await Promise.all(DEFAULT_CHAT_ACCOUNTS.map(async (def) => {
+    const ref = doc(db, CHAT_PROFILES_COLLECTION, def.key)
+    const snap = await getDoc(ref)
+    if (snap.exists()) {
+      const data = snap.data() || {}
+      if (data.role === 'guest' || data.role === 'owner') return
+      await setDoc(ref, {
+        role: def.role,
+        roleLabel: def.roleLabel,
+        passKey: def.passKey || def.key,
+        displayName: data.displayName || def.displayName,
+        addressAs: data.addressAs || def.addressAs,
+        updatedAt: serverTimestamp(),
+        updatedAtIso: new Date().toISOString(),
+      }, { merge: true })
+      return
+    }
+    await setDoc(ref, {
+      role: def.role,
+      roleLabel: def.roleLabel,
+      passKey: def.passKey || def.key,
+      displayName: def.displayName,
+      addressAs: def.addressAs,
+      updatedAt: serverTimestamp(),
+      updatedAtIso: new Date().toISOString(),
+    }, { merge: true })
+  }))
+}
+
+/**
+ * Subscribe to all guest/owner chat accounts.
+ * @returns {() => void}
+ */
+export function subscribeChatAccounts(onData, onError) {
+  return onSnapshot(
+    collection(db, CHAT_PROFILES_COLLECTION),
+    (snap) => {
+      const accounts = snap.docs
+        .map((item) => serializeChatAccount(item.id, item.data()))
+        .filter((account) => account.role === 'guest' || account.role === 'owner')
+        .sort((a, b) => {
+          if (a.role !== b.role) return a.role === 'owner' ? -1 : 1
+          return a.displayName.localeCompare(b.displayName, 'ja')
+        })
+      const next = accounts.length ? accounts : DEFAULT_CHAT_ACCOUNTS.map(accountFromDefault)
+      setChatAccountsCache(next)
+      onData?.(next)
+    },
+    (error) => onError?.(error),
+  )
+}
+
+/**
+ * Create or update a guest/owner account.
+ * @param {{ key: string, passKey?: string, displayName: string, addressAs?: string, role: 'guest'|'owner', roleLabel?: string }} payload
+ * @param {{ isNew?: boolean }} [options]
+ */
+export async function upsertChatAccount(payload, options = {}) {
+  const key = normalizeAccountKey(payload?.key)
+  if (!isValidAccountKey(key)) {
+    throw new Error('IDは半角英数2〜24文字で入力してください。')
+  }
+  const role = payload?.role === 'owner' ? 'owner' : 'guest'
+  const displayName = String(payload?.displayName || '').trim()
+  if (!displayName) throw new Error('表示名を入力してください。')
+  const addressAs = String(payload?.addressAs || displayName).trim() || displayName
+  const passKey = normalizeAccountKey(payload?.passKey || key)
+  if (!isValidAccountKey(passKey)) {
+    throw new Error('パスワードは半角英数2〜24文字で入力してください。')
+  }
+  const roleLabel = String(payload?.roleLabel || '').trim()
+    || (role === 'owner' ? 'オーナー' : 'ゲスト')
+
+  const ref = doc(db, CHAT_PROFILES_COLLECTION, key)
+  const existing = await getDoc(ref)
+  if (options.isNew && existing.exists() && (existing.data()?.role === 'guest' || existing.data()?.role === 'owner')) {
+    throw new Error('そのIDはすでに使われています。')
+  }
+
+  // Unique passKey across accounts.
+  const clash = chatAccountsCache.find((account) => (
+    account.key !== key && (account.passKey === passKey || account.key === passKey)
+  ))
+  if (clash) {
+    throw new Error('そのパスワードは別のユーザーが使っています。')
+  }
+
+  const nowIso = new Date().toISOString()
+  await setDoc(ref, {
+    role,
+    roleLabel,
+    passKey,
+    displayName,
+    addressAs,
+    updatedAt: serverTimestamp(),
+    updatedAtIso: nowIso,
+  }, { merge: true })
+
+  return serializeChatAccount(key, {
+    role,
+    roleLabel,
+    passKey,
+    displayName,
+    addressAs,
+    avatarUrl: existing.exists() ? existing.data()?.avatarUrl : '',
+    updatedAtIso: nowIso,
+  })
+}
+
+/**
+ * Delete a guest/owner account. Optionally clear their chat thread.
+ * @param {string} accountKey
+ * @param {{ clearHistory?: boolean }} [options]
+ */
+export async function deleteChatAccount(accountKey, options = {}) {
+  const key = normalizeAccountKey(accountKey)
+  if (!key) throw new Error('ユーザーIDがありません。')
+  const account = chatAccountsCache.find((item) => item.key === key)
+    || serializeChatAccount(key, (await getDoc(doc(db, CHAT_PROFILES_COLLECTION, key))).data() || {})
+  if (account.role === 'owner') {
+    const owners = listOwnerProfiles().filter((item) => item.key !== key)
+    if (owners.length === 0) {
+      throw new Error('最後のオーナーは削除できません。')
+    }
+  }
+  await deleteDoc(doc(db, CHAT_PROFILES_COLLECTION, key))
+  if (options.clearHistory && account.role === 'guest') {
+    try {
+      await clearChatThreadHistory(`guest-${key}`, { deleteThread: true })
+    } catch {
+      /* thread may not exist */
+    }
+  }
+  return true
 }
 
 /** @returns {() => void} */
@@ -632,10 +901,25 @@ function serializeChatThread(id, data) {
     guestLastReadAt: data?.guestLastReadAt?.toDate?.()?.toISOString?.() || data?.guestLastReadAtIso || null,
     guestOnlineAt: data?.guestOnlineAt?.toDate?.()?.toISOString?.() || data?.guestOnlineAtIso || null,
     hanaOnlineAt: data?.hanaOnlineAt?.toDate?.()?.toISOString?.() || data?.hanaOnlineAtIso || null,
+    guestStatus: normalizeChatPresenceMode(data?.guestStatus),
+    hanaStatus: normalizeChatPresenceMode(data?.hanaStatus),
   }
 }
 
 const PRESENCE_ONLINE_MS = 45_000
+
+/** Manual presence modes (online/offline still come from heartbeat). */
+export const CHAT_PRESENCE_MODES = [
+  { id: 'auto', label: 'オンライン', hint: '自動（接続中はオンライン）', emoji: '🟢' },
+  { id: 'busy', label: '取り込み中', hint: '忙しいとき', emoji: '🟠' },
+  { id: 'away', label: '外出中', hint: '席を外しているとき', emoji: '🔵' },
+]
+
+export function normalizeChatPresenceMode(value) {
+  const mode = String(value || 'auto').trim().toLowerCase()
+  if (mode === 'busy' || mode === 'away') return mode
+  return 'auto'
+}
 
 /** True if last heartbeat is recent enough to count as online. */
 export function isPresenceOnline(iso, now = Date.now()) {
@@ -643,6 +927,26 @@ export function isPresenceOnline(iso, now = Date.now()) {
   const t = new Date(iso).getTime()
   if (Number.isNaN(t)) return false
   return now - t <= PRESENCE_ONLINE_MS
+}
+
+/**
+ * Resolve display presence from heartbeat + optional manual mode.
+ * @param {{ onlineAt?: string|null, status?: string|null }} input
+ * @param {number} [now]
+ */
+export function resolveChatPresence(input = {}, now = Date.now()) {
+  const online = isPresenceOnline(input.onlineAt, now)
+  const mode = normalizeChatPresenceMode(input.status)
+  if (!online) {
+    return { id: 'offline', mode, label: 'オフライン', className: 'is-offline', online: false }
+  }
+  if (mode === 'busy') {
+    return { id: 'busy', mode, label: '取り込み中', className: 'is-busy', online: true }
+  }
+  if (mode === 'away') {
+    return { id: 'away', mode, label: '外出中', className: 'is-away', online: true }
+  }
+  return { id: 'online', mode: 'auto', label: 'オンライン', className: 'is-online', online: true }
 }
 
 /**
@@ -656,6 +960,21 @@ export async function pulseChatPresence(threadId, role) {
   const patch = role === 'hana'
     ? { hanaOnlineAt: serverTimestamp(), hanaOnlineAtIso: nowIso }
     : { guestOnlineAt: serverTimestamp(), guestOnlineAtIso: nowIso }
+  await setDoc(doc(db, CHAT_THREADS_COLLECTION, threadId), patch, { merge: true })
+}
+
+/**
+ * Set manual presence mode for a role on a thread.
+ * @param {string} threadId
+ * @param {'guest'|'hana'} role
+ * @param {'auto'|'busy'|'away'} status
+ */
+export async function setChatPresenceStatus(threadId, role, status) {
+  if (!threadId || (role !== 'guest' && role !== 'hana')) return
+  const mode = normalizeChatPresenceMode(status)
+  const patch = role === 'hana'
+    ? { hanaStatus: mode }
+    : { guestStatus: mode }
   await setDoc(doc(db, CHAT_THREADS_COLLECTION, threadId), patch, { merge: true })
 }
 

@@ -10,8 +10,13 @@ import {
   unpinChatMessage,
 } from './chatExtras'
 import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
+import FlowerRainLayer from './FlowerRain'
+import EmotionMomentLayer from './EmotionMoment'
+import { readDefaultReaction, writeDefaultReaction } from './chatSettings'
 import {
   chatWithHanachan,
+  CHAT_PRESENCE_MODES,
+  CHAT_REACTION_EMOJIS,
   deliveryStatusLabel,
   ensureChatThread,
   ensureGuestChatId,
@@ -19,17 +24,20 @@ import {
   getFirebaseErrorMessage,
   getGuestProfile,
   getMessageDeliveryStatus,
-  GUEST_PROFILES,
   isAdminUser,
-  isPresenceOnline,
+  listGuestProfiles,
+  ensureDefaultChatAccounts,
+  subscribeChatAccounts,
   markThreadRead,
   migrateLegacyGuestThread,
   OWNER_PROFILE,
   pulseChatPresence,
   resolveAvatarSrc,
+  resolveChatPresence,
   resolveGuestDisplayName,
   resolveSessionProfile,
   sendChatMessage,
+  setChatPresenceStatus,
   softDeleteChatMessage,
   subscribeChatMessages,
   subscribeChatProfiles,
@@ -173,7 +181,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [activeThreadId, setActiveThreadId] = useState(null)
   const [speaking, setSpeaking] = useState(false)
   const [showHumanSuggest, setShowHumanSuggest] = useState(false)
-  const [humanNotice, setHumanNotice] = useState('')
   const [storageReady, setStorageReady] = useState(false)
   const [replyTo, setReplyTo] = useState(null)
   const [editingId, setEditingId] = useState(null)
@@ -184,6 +191,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [suggestPickerGroup, setSuggestPickerGroup] = useState(null) // 'reply' | 'topic' | 'expr' | null
   const [ownerSuggestEnabled, setOwnerSuggestEnabled] = useState(() => readOwnerSuggestEnabled())
   const [guestMenuOpen, setGuestMenuOpen] = useState(false)
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [defaultReaction, setDefaultReaction] = useState(() => readDefaultReaction())
+  const [chatAccounts, setChatAccounts] = useState(() => listGuestProfiles())
   const [copyNote, setCopyNote] = useState('')
   const [actionNote, setActionNote] = useState('')
   const [pins, setPins] = useState([])
@@ -195,6 +206,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const inputRef = useRef(null)
   const composerRef = useRef(null)
   const guestMenuRef = useRef(null)
+  const statusMenuRef = useRef(null)
+  const settingsRef = useRef(null)
   const syncPanelViewportRef = useRef(() => {})
   const viewportApplyRef = useRef({ top: 0, height: 0, width: 0, keyboard: false })
   const viewportDebounceRef = useRef(null)
@@ -245,19 +258,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     })
   }, [actingAsOwner, activeThreadId, threads])
 
-  const ownerActiveGuestKey = useMemo(() => {
-    if (!actingAsOwner || !activeThreadId) return ''
-    const thread = threads.find((entry) => entry.id === activeThreadId)
-    const fromThread = String(thread?.guestKey || '').trim().toLowerCase()
-    if (fromThread) return fromThread
-    const known = String(activeThreadId).match(/^guest-(hiro|zen|gabusan)$/i)
-    return known ? known[1].toLowerCase() : ''
-  }, [actingAsOwner, activeThreadId, threads])
-
   const ownerGuestRoster = useMemo(() => {
     if (!actingAsOwner) return []
     const usedIds = new Set()
-    const known = Object.values(GUEST_PROFILES).map((profile) => {
+    const knownProfiles = chatAccounts.length ? chatAccounts : listGuestProfiles()
+    const known = knownProfiles.map((profile) => {
       const canonicalId = `guest-${profile.key}`
       const matches = threads.filter((t) => (
         t.id === canonicalId
@@ -283,7 +288,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       }
     })
     const extras = threads
-      .filter((t) => !usedIds.has(t.id) && !Object.values(GUEST_PROFILES).some((p) => (
+      .filter((t) => !usedIds.has(t.id) && !knownProfiles.some((p) => (
         p.key === t.guestKey || `guest-${p.key}` === t.id || p.displayName === t.guestLabel
       )))
       .map((thread) => ({
@@ -295,7 +300,16 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         guestKey: thread.guestKey || '',
       }))
     return [...known, ...extras]
-  }, [actingAsOwner, threads])
+  }, [actingAsOwner, threads, chatAccounts])
+
+  const ownerActiveGuestKey = useMemo(() => {
+    if (!actingAsOwner || !activeThreadId) return ''
+    const thread = threads.find((entry) => entry.id === activeThreadId)
+    const fromThread = String(thread?.guestKey || '').trim().toLowerCase()
+    if (fromThread) return fromThread
+    const known = String(activeThreadId).match(/^guest-([a-z0-9_-]+)$/i)
+    return known ? known[1].toLowerCase() : ''
+  }, [actingAsOwner, activeThreadId, threads])
 
   const unreadLauncher = useMemo(() => {
     if (actingAsOwner) {
@@ -330,7 +344,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     setGuestChatId(id)
     setAiMessages(stored?.length ? stored : defaultIntroMessages(guestProfile))
     setChannel(savedChannel)
-    setHumanNotice('')
     setStorageReady(true)
   }, [hidden, guestKey, guestProfile, actingAsOwner])
 
@@ -431,13 +444,22 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   }, [hidden, actingAsOwner, guestChatId])
 
   useEffect(() => {
+    if (hidden) return undefined
+    ensureDefaultChatAccounts().catch(() => {})
+    return subscribeChatAccounts(
+      (next) => setChatAccounts(listGuestProfiles(next)),
+      () => {},
+    )
+  }, [hidden])
+
+  useEffect(() => {
     if (hidden) {
       setChatProfiles({})
       return undefined
     }
     const ids = [
       OWNER_PROFILE.key,
-      ...Object.keys(GUEST_PROFILES),
+      ...chatAccounts.map((profile) => profile.key),
       sessionProfile.id,
       ownerActiveGuestKey,
     ].filter(Boolean)
@@ -446,7 +468,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       (next) => setChatProfiles(next || {}),
       () => {},
     )
-  }, [hidden, sessionProfile.id, ownerActiveGuestKey])
+  }, [hidden, sessionProfile.id, ownerActiveGuestKey, chatAccounts])
 
   const hanaThreadId = actingAsOwner ? activeThreadId : guestChatId
   const guestOnHuman = !actingAsOwner && channel === 'human'
@@ -591,15 +613,58 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     }
   }, [hidden, open, actingAsOwner, activeThreadId, guestChatId])
 
-  const partnerOnline = useMemo(() => {
+  const partnerPresence = useMemo(() => {
     void presenceTick
     if (actingAsOwner) {
-      if (!activeThreadId) return false
-      return isPresenceOnline(activeThreadMeta?.guestOnlineAt)
+      if (!activeThreadId) {
+        return resolveChatPresence({})
+      }
+      return resolveChatPresence({
+        onlineAt: activeThreadMeta?.guestOnlineAt,
+        status: activeThreadMeta?.guestStatus,
+      }, presenceTick)
     }
-    if (channel === 'ai') return true
-    return isPresenceOnline(activeThreadMeta?.hanaOnlineAt)
+    if (channel === 'ai') {
+      return resolveChatPresence({
+        onlineAt: new Date(presenceTick).toISOString(),
+        status: 'auto',
+      }, presenceTick)
+    }
+    return resolveChatPresence({
+      onlineAt: activeThreadMeta?.hanaOnlineAt,
+      status: activeThreadMeta?.hanaStatus,
+    }, presenceTick)
   }, [actingAsOwner, channel, activeThreadMeta, presenceTick, activeThreadId])
+
+  const myPresenceMode = actingAsOwner
+    ? (activeThreadMeta?.hanaStatus || 'auto')
+    : (activeThreadMeta?.guestStatus || 'auto')
+
+  const myPresence = useMemo(() => {
+    const threadId = actingAsOwner ? activeThreadId : guestChatId
+    if (!threadId || !open) {
+      return resolveChatPresence({ status: myPresenceMode })
+    }
+    // While this chat is open we are effectively online; mode may still be busy/away.
+    return resolveChatPresence({
+      onlineAt: new Date(presenceTick).toISOString(),
+      status: myPresenceMode,
+    }, presenceTick)
+  }, [actingAsOwner, activeThreadId, guestChatId, open, myPresenceMode, presenceTick])
+
+  const canEditMyStatus = Boolean(actingAsOwner ? activeThreadId : guestChatId)
+
+  const applyMyPresenceStatus = async (mode) => {
+    const threadId = actingAsOwner ? activeThreadId : guestChatId
+    const role = actingAsOwner ? 'hana' : 'guest'
+    if (!threadId) return
+    setStatusMenuOpen(false)
+    try {
+      await setChatPresenceStatus(threadId, role, mode)
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || 'ステータスを更新できませんでした。')
+    }
+  }
 
   useEffect(() => {
     if (hidden || !open) return undefined
@@ -787,7 +852,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     setChannel('human')
     setShowHumanSuggest(false)
     if (noticeText) {
-      setHumanNotice(noticeText)
       setAiMessages((prev) => {
         if (prev.some((m) => m.id === HUMAN_SWITCH_NOTICE_ID || m.kind === 'human-switch')) {
           return prev
@@ -826,17 +890,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     ? OWNER_PROFILE.key
     : (guestProfile?.key || String(guestKey || '').trim().toLowerCase() || 'guest')
   const canUseReactions = actingAsOwner || guestOnHuman
-
-  const latestOtherMessageId = useMemo(() => {
-    for (let i = visibleMessages.length - 1; i >= 0; i -= 1) {
-      const message = visibleMessages[i]
-      if (!message || message.deleted) continue
-      const isOwn = (message.sender || message.role) === ownSender
-        || (!actingAsOwner && !guestOnHuman && message.role === 'guest')
-      if (!isOwn) return message.id
-    }
-    return null
-  }, [visibleMessages, ownSender, actingAsOwner, guestOnHuman])
 
   const suggestContextKey = useMemo(() => {
     if (!actingAsOwner || !activeThreadId || !ownerSuggestEnabled) return ''
@@ -923,21 +976,33 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     })
   }
 
+  const applyDefaultReaction = (emoji) => {
+    setDefaultReaction(writeDefaultReaction(emoji))
+  }
+
   useEffect(() => {
     setSuggestPickerGroup(null)
     setGuestMenuOpen(false)
+    setStatusMenuOpen(false)
+    setSettingsOpen(false)
   }, [activeThreadId, open])
 
   useEffect(() => {
-    if (!guestMenuOpen) return undefined
+    if (!guestMenuOpen && !statusMenuOpen && !settingsOpen) return undefined
     const onPointerDown = (event) => {
-      if (!guestMenuRef.current?.contains(event.target)) {
+      if (guestMenuOpen && !guestMenuRef.current?.contains(event.target)) {
         setGuestMenuOpen(false)
+      }
+      if (statusMenuOpen && !statusMenuRef.current?.contains(event.target)) {
+        setStatusMenuOpen(false)
+      }
+      if (settingsOpen && !settingsRef.current?.contains(event.target)) {
+        setSettingsOpen(false)
       }
     }
     document.addEventListener('pointerdown', onPointerDown)
     return () => document.removeEventListener('pointerdown', onPointerDown)
-  }, [guestMenuOpen])
+  }, [guestMenuOpen, statusMenuOpen, settingsOpen])
 
   const ownerReplyChips = ownerSuggestions.replies.length
     ? ownerSuggestions.replies
@@ -1057,7 +1122,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const openOwnerThread = (threadId, label, guestKey = '', canonicalId = '') => {
     clearComposerExtras()
     const key = guestKey || (canonicalId || threadId).replace(/^guest-/, '')
-    const canon = canonicalId || (key && GUEST_PROFILES[key] ? `guest-${key}` : '')
+    const canon = canonicalId || (key ? `guest-${key}` : '')
     // Open immediately — do not wait on Firestore writes/migration.
     const openId = threadId || canon
     if (!openId) return
@@ -1467,12 +1532,15 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     : channel === 'human'
       ? 'はな本人'
       : 'はなちゃんとお話し中'
-  const presenceLabel = partnerOnline ? 'オンライン' : 'オフライン'
+  const presenceLabel = partnerPresence.label
+  const myStatusLabel = myPresence.label
 
   if (hidden) return null
 
   return (
     <div className={`hana-chat${open ? ' is-open is-fullscreen' : ''}`}>
+      <FlowerRainLayer />
+      <EmotionMomentLayer />
       <button
         type="button"
         className={`hana-chat-launcher${unreadLauncher ? ' has-unread' : ''}${speaking ? ' is-speaking' : ''}`}
@@ -1500,7 +1568,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             <div className={`hana-chat-avatar${speaking ? ' is-speaking' : ''}`}>
               <img src={partnerAvatarSrc} alt="" />
               <span
-                className={`hana-chat-presence ${partnerOnline ? 'is-online' : 'is-offline'}`}
+                className={`hana-chat-presence ${partnerPresence.className}`}
                 title={presenceLabel}
                 aria-label={presenceLabel}
               />
@@ -1527,7 +1595,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     <span className={`hana-chat-guest-select-caret${guestMenuOpen ? ' is-open' : ''}`} aria-hidden="true">▾</span>
                   </button>
                   {activeThreadId ? (
-                    <p className={`hana-chat-presence-label${partnerOnline ? ' is-online' : ''}`}>
+                    <p className={`hana-chat-presence-label ${partnerPresence.className}`}>
                       {presenceLabel}
                     </p>
                   ) : null}
@@ -1539,6 +1607,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                         ownerGuestRoster.map((entry) => {
                           const unreadN = threadUnreadCount(entry.thread, 'hana')
                           const selected = activeThreadId === entry.threadId || activeThreadId === entry.canonicalId
+                          const guestPresence = resolveChatPresence({
+                            onlineAt: entry.thread?.guestOnlineAt,
+                            status: entry.thread?.guestStatus,
+                          }, presenceTick)
                           return (
                             <button
                               key={`${entry.canonicalId}:${entry.threadId}`}
@@ -1557,18 +1629,21 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                               }}
                             >
                               <span className="hana-chat-guest-option-main">
-                                <img
-                                  className="hana-chat-thread-avatar"
-                                  src={avatarSrcForProfile(
-                                    entry.guestKey || entry.canonicalId.replace(/^guest-/, '') || 'guest',
-                                    entry.label,
-                                  )}
-                                  alt=""
-                                />
-                                <span
-                                  className={`hana-chat-thread-dot ${isPresenceOnline(entry.thread?.guestOnlineAt, presenceTick) ? 'is-online' : 'is-offline'}`}
-                                  aria-hidden="true"
-                                />
+                                <span className="hana-chat-thread-avatar-wrap">
+                                  <img
+                                    className="hana-chat-thread-avatar"
+                                    src={avatarSrcForProfile(
+                                      entry.guestKey || entry.canonicalId.replace(/^guest-/, '') || 'guest',
+                                      entry.label,
+                                    )}
+                                    alt=""
+                                  />
+                                  <span
+                                    className={`hana-chat-thread-dot ${guestPresence.className}`}
+                                    title={guestPresence.label}
+                                    aria-hidden="true"
+                                  />
+                                </span>
                                 <span className="hana-chat-guest-option-name">{entry.label}</span>
                                 {unreadN ? (
                                   <span className="hana-chat-thread-unread" aria-label={`未読 ${unreadN}件`}>
@@ -1588,15 +1663,57 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 </div>
               ) : (
                 <>
-                  <p className="hana-chat-kicker">{humanNotice || modeSub}</p>
+                  <p className="hana-chat-kicker">{modeSub}</p>
                   <div className="hana-chat-heading-row">
                     <h2 className="hana-chat-heading">{modeTitle}</h2>
-                    <p className={`hana-chat-presence-label${partnerOnline ? ' is-online' : ''}`}>
+                    <p className={`hana-chat-presence-label ${partnerPresence.className}`}>
                       {presenceLabel}
                     </p>
                   </div>
                 </>
               )}
+              {canEditMyStatus ? (
+                <div className="hana-chat-my-status" ref={statusMenuRef}>
+                  <button
+                    type="button"
+                    className={`hana-chat-my-status-trigger ${myPresence.className}${statusMenuOpen ? ' is-open' : ''}`}
+                    aria-expanded={statusMenuOpen}
+                    aria-haspopup="listbox"
+                    title="自分のステータス"
+                    onClick={() => {
+                      setGuestMenuOpen(false)
+                      setStatusMenuOpen((value) => !value)
+                    }}
+                  >
+                    <span className={`hana-chat-my-status-dot ${myPresence.className}`} aria-hidden="true" />
+                    <span className="hana-chat-my-status-text">自分 · {myStatusLabel}</span>
+                    <span className="hana-chat-my-status-caret" aria-hidden="true">▾</span>
+                  </button>
+                  {statusMenuOpen ? (
+                    <div className="hana-chat-my-status-menu" role="listbox" aria-label="自分のステータス">
+                      {CHAT_PRESENCE_MODES.map((mode) => {
+                        const selected = myPresenceMode === mode.id
+                        return (
+                          <button
+                            key={mode.id}
+                            type="button"
+                            role="option"
+                            aria-selected={selected}
+                            className={`hana-chat-my-status-option${selected ? ' is-active' : ''}`}
+                            onClick={() => { void applyMyPresenceStatus(mode.id) }}
+                          >
+                            <span className={`hana-chat-presence is-menu ${mode.id === 'auto' ? 'is-online' : `is-${mode.id}`}`} aria-hidden="true" />
+                            <span className="hana-chat-my-status-option-copy">
+                              <strong>{mode.label}</strong>
+                              <small>{mode.hint}</small>
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
             <div className="hana-chat-header-actions">
               {!actingAsOwner && channel === 'human' ? (
@@ -1605,13 +1722,79 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   className="hana-chat-back-ai"
                   onClick={() => {
                     setChannel('ai')
-                    setHumanNotice('')
                   }}
                   title="はなちゃんに戻る"
                 >
                   はなちゃんに戻る
                 </button>
               ) : null}
+              <div className="hana-chat-settings" ref={settingsRef}>
+                <button
+                  type="button"
+                  className={`hana-chat-settings-btn${settingsOpen ? ' is-open' : ''}`}
+                  aria-expanded={settingsOpen}
+                  aria-haspopup="dialog"
+                  aria-label="チャット設定"
+                  title="設定"
+                  onClick={() => {
+                    setGuestMenuOpen(false)
+                    setStatusMenuOpen(false)
+                    setSettingsOpen((value) => !value)
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
+                    <path
+                      fill="currentColor"
+                      d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.2 7.2 0 0 0-1.63-.94l-.36-2.54A.49.49 0 0 0 14 2h-4a.49.49 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.55-1.63.94l-2.39-.96a.49.49 0 0 0-.59.22L2.63 8.87a.49.49 0 0 0 .12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.75 14.52a.49.49 0 0 0-.12.61l1.92 3.32c.13.23.4.32.64.22l2.39-.96c.5.39 1.04.71 1.63.94l.36 2.54c.05.24.25.41.48.41h4c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.55 1.63-.94l2.39.96c.24.1.51 0 .64-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"
+                    />
+                  </svg>
+                </button>
+                {settingsOpen ? (
+                  <div className="hana-chat-settings-panel" role="dialog" aria-label="チャット設定">
+                    <p className="hana-chat-settings-title">設定</p>
+                    <div className="hana-chat-settings-section">
+                      <p className="hana-chat-settings-label">クイックリアクション</p>
+                      <p className="hana-chat-settings-hint">相手のメッセージ角に出すワンタップ絵文字</p>
+                      <div className="hana-chat-settings-emojis" role="listbox" aria-label="クイックリアクション">
+                        {CHAT_REACTION_EMOJIS.map((emoji) => (
+                          <button
+                            key={emoji}
+                            type="button"
+                            role="option"
+                            aria-selected={defaultReaction === emoji}
+                            className={`hana-chat-settings-emoji${defaultReaction === emoji ? ' is-active' : ''}`}
+                            onClick={() => applyDefaultReaction(emoji)}
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {actingAsOwner ? (
+                      <div className="hana-chat-settings-section">
+                        <div className="hana-chat-settings-row">
+                          <div>
+                            <p className="hana-chat-settings-label">返信ヒント</p>
+                            <p className="hana-chat-settings-hint">下に返信案チップを表示</p>
+                          </div>
+                          <button
+                            type="button"
+                            className={`hana-chat-hint-toggle${ownerSuggestEnabled ? ' is-on' : ''}`}
+                            aria-pressed={ownerSuggestEnabled}
+                            title={ownerSuggestEnabled ? 'ヒントをオフ' : 'ヒントをオン'}
+                            onClick={toggleOwnerSuggest}
+                          >
+                            <span className="hana-chat-hint-toggle-label">ヒント</span>
+                            <span className="hana-chat-hint-toggle-track" aria-hidden="true">
+                              <span className="hana-chat-hint-toggle-thumb" />
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
               <button
                 type="button"
                 className="hana-chat-close"
@@ -1705,7 +1888,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                       canEdit={mutable}
                       canDelete={mutable}
                       canReact={!message.deleted}
-                      showFlowerReact={!message.deleted && !isOwn && message.id === latestOtherMessageId}
+                      showFlowerReact={!message.deleted && !isOwn}
+                      defaultReaction={defaultReaction}
                       reactions={message.reactions || {}}
                       reactorId={reactorId}
                       copyText={message.deleted ? '' : (message.rawText || message.text || '')}
@@ -1756,29 +1940,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             </div>
           ) : null}
 
-          {actingAsOwner && activeThreadId ? (
+          {actingAsOwner && activeThreadId && ownerSuggestEnabled ? (
             <div className="hana-chat-suggest hana-chat-suggest--owner" aria-label="返信のヒント">
-              <div className="hana-chat-suggest-toolbar">
-                <span className="hana-chat-suggest-toolbar-label">ヒント</span>
-                <button
-                  type="button"
-                  className={`hana-chat-suggest-toggle${ownerSuggestEnabled ? ' is-on' : ''}`}
-                  aria-pressed={ownerSuggestEnabled}
-                  title={ownerSuggestEnabled ? 'ヒントをオフ' : 'ヒントをオン'}
-                  onClick={toggleOwnerSuggest}
-                >
-                  <span className="hana-chat-suggest-toggle-track" aria-hidden="true">
-                    <span className="hana-chat-suggest-toggle-thumb" />
-                  </span>
-                  <span className="hana-chat-suggest-toggle-text">
-                    {ownerSuggestEnabled ? 'ON' : 'OFF'}
-                  </span>
-                </button>
-              </div>
-              {!ownerSuggestEnabled ? (
-                <p className="hana-chat-suggest-off-note">ヒントはオフです。ONにすると返信案が出ます。</p>
-              ) : (
-                <>
               <div className={`hana-chat-suggest-group${suggestPickerGroup === 'reply' ? ' is-open' : ''}`}>
                 <span className="hana-chat-suggest-label">返信</span>
                 <div className="hana-chat-suggest-chips">
@@ -1917,8 +2080,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   </div>
                 ) : null}
               </div>
-                </>
-              )}
             </div>
           ) : null}
 

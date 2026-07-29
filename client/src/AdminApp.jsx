@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
-import {
-  completeAdminRedirectLogin,
-  getFirebaseErrorMessage,
-  loginAdmin,
-  loginAdminWithGoogle,
-  logoutAdmin,
-  subscribeToAccessLogs,
-  subscribeToAdminAuth,
-} from './firebase'
-import AdminHanaInbox from './AdminHanaInbox'
 import './Admin.css'
+import AdminHanaInbox from './AdminHanaInbox'
+import {
+    completeAdminRedirectLogin,
+    getFirebaseErrorMessage,
+    loginAdmin,
+    loginAdminWithGoogle,
+    logoutAdmin,
+    subscribeToAccessLogs,
+    subscribeToAdminAuth,
+    subscribeToMediaItems,
+} from './firebase'
+
+const TRACK_QUERY_KEY = 'track'
 
 function formatVisitTime(value) {
   if (!value) return '—'
@@ -82,6 +85,26 @@ function localDayBounds(dateValue) {
 
 function countryKey(log) {
   return log.country || log.countryCode || '不明'
+}
+
+/** Extract media track id from access log path (e.g. /?track=abc). */
+function trackIdFromPath(pathValue) {
+  const raw = String(pathValue || '').trim()
+  if (!raw) return ''
+  try {
+    const url = new URL(raw, window.location.origin)
+    return String(url.searchParams.get(TRACK_QUERY_KEY) || '').trim()
+  } catch {
+    const match = raw.match(/[?&]track=([^&#]+)/i)
+    return match ? decodeURIComponent(match[1]).trim() : ''
+  }
+}
+
+function trackOpenHref(pathValue, trackId) {
+  if (trackId) return `/?${TRACK_QUERY_KEY}=${encodeURIComponent(trackId)}`
+  const raw = String(pathValue || '/').trim() || '/'
+  if (raw.startsWith('http://') || raw.startsWith('https://')) return raw
+  return raw.startsWith('/') ? raw : `/${raw}`
 }
 
 function GoogleIcon() {
@@ -200,6 +223,7 @@ function AdminLogin({ onLoggedIn }) {
 
 function AdminDashboard({ user }) {
   const [logs, setLogs] = useState([])
+  const [mediaById, setMediaById] = useState({})
   const [error, setError] = useState('')
   const [deviceFilter, setDeviceFilter] = useState('all')
   const [deviceNameFilter, setDeviceNameFilter] = useState('all')
@@ -218,6 +242,20 @@ function AdminDashboard({ user }) {
         console.error(subscribeError)
         setError(getFirebaseErrorMessage(subscribeError) || 'ログの読み込みに失敗しました。')
       },
+    )
+    return unsubscribe
+  }, [])
+
+  useEffect(() => {
+    const unsubscribe = subscribeToMediaItems(
+      (items) => {
+        const map = {}
+        for (const item of items || []) {
+          if (item?.id) map[item.id] = item
+        }
+        setMediaById(map)
+      },
+      () => {},
     )
     return unsubscribe
   }, [])
@@ -435,20 +473,26 @@ function AdminDashboard({ user }) {
                 <th>デバイス名</th>
                 <th>環境</th>
                 <th>IP</th>
-                <th>参照元</th>
+                <th>パス / 参照元</th>
+                <th>楽曲</th>
               </tr>
             </thead>
             <tbody>
               {filteredLogs.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="admin-empty">
+                  <td colSpan={7} className="admin-empty">
                     {logs.length === 0
                       ? 'まだアクセスログがありません。'
                       : '条件に一致するログがありません。'}
                   </td>
                 </tr>
               ) : (
-                filteredLogs.map((log) => (
+                filteredLogs.map((log) => {
+                  const trackId = trackIdFromPath(log.path)
+                  const trackItem = trackId ? mediaById[trackId] : null
+                  const trackName = trackItem?.name || (trackId ? `(不明な楽曲 ${trackId.slice(0, 8)}…)` : '')
+                  const openHref = trackOpenHref(log.path, trackId)
+                  return (
                   <tr key={log.id}>
                     <td>
                       <div className="admin-cell-main">{formatVisitTime(log.visitedAt)}</div>
@@ -477,11 +521,44 @@ function AdminDashboard({ user }) {
                       <div className="admin-cell-sub">{log.org || ''}</div>
                     </td>
                     <td>
-                      <div className="admin-cell-main admin-cell-truncate">{log.path || '/'}</div>
+                      <div className="admin-cell-main admin-cell-truncate">
+                        <a
+                          className="admin-path-link"
+                          href={openHref}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={trackId ? 'このパスの楽曲を開く' : 'サイトを開く'}
+                        >
+                          {log.path || '/'}
+                        </a>
+                      </div>
                       <div className="admin-cell-sub admin-cell-truncate">{log.referrer || '直接'}</div>
                     </td>
+                    <td>
+                      {trackId ? (
+                        <>
+                          <div className="admin-cell-main admin-cell-truncate">
+                            <a
+                              className="admin-path-link"
+                              href={openHref}
+                              target="_blank"
+                              rel="noreferrer"
+                              title="楽曲を開く"
+                            >
+                              {trackName}
+                            </a>
+                          </div>
+                          <div className="admin-cell-sub admin-cell-truncate">
+                            {trackItem?.type || 'track'}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="admin-cell-sub">—</div>
+                      )}
+                    </td>
                   </tr>
-                ))
+                  )
+                })
               )}
             </tbody>
           </table>
