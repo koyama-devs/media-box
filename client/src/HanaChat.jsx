@@ -25,6 +25,7 @@ import {
 import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
 import EmotionMomentLayer, { EMOTION_MOMENTS, triggerEmotionMoment } from './EmotionMoment'
 import {
+  analyzeGuestMessageForOwner,
   broadcastChatEffect,
   CHAT_PRESENCE_MODES,
   CHAT_REACTION_EMOJIS,
@@ -65,7 +66,6 @@ import {
   translateChatMessage,
   updateChatMessage,
   uploadChatImage,
-  analyzeGuestMessageForOwner,
 } from './firebase'
 import FlowerRainLayer, {
   CHAT_PARTY_REACTION,
