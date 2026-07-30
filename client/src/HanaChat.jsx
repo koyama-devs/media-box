@@ -23,7 +23,6 @@ import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
 import EmotionMomentLayer, { EMOTION_MOMENTS, triggerEmotionMoment } from './EmotionMoment'
 import {
   broadcastChatEffect,
-  CHAT_EFFECT_TTL_MS,
   CHAT_PRESENCE_MODES,
   CHAT_REACTION_EMOJIS,
   chatWithHanachan,
@@ -296,6 +295,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const retainComposerFocusRef = useRef(false)
   const migrationCheckedRef = useRef(new Set())
   const seenEffectRef = useRef(new Set())
+  const effectBaselineRef = useRef('')
   const suggestReqRef = useRef(0)
   const typingStateRef = useRef({ threadId: '', role: '', lastPulseAt: 0 })
   const typingPulseTimerRef = useRef(null)
@@ -839,10 +839,29 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     return () => window.clearInterval(timer)
   }, [hidden, open])
 
-  // Replay the effect the other participant just triggered.
+  /**
+   * Replay the effect the other participant just triggered.
+   *
+   * Freshness is "arrived after we started watching this thread", never a
+   * comparison against the sender's clock: the two devices are only loosely in
+   * sync, and a few seconds of skew silently swallowed one direction.
+   */
   useEffect(() => {
-    if (hidden || !open) return
+    const threadId = activeThreadMeta?.id || ''
+    if (hidden || !open || !threadId) {
+      effectBaselineRef.current = ''
+      return
+    }
+
     const effect = activeThreadMeta?.lastEffect
+
+    // First snapshot for this thread: whatever is stored is history, not news.
+    if (effectBaselineRef.current !== threadId) {
+      effectBaselineRef.current = threadId
+      if (effect?.nonce) seenEffectRef.current.add(effect.nonce)
+      return
+    }
+
     if (!effect?.nonce) return
     if (seenEffectRef.current.has(effect.nonce)) return
 
@@ -851,9 +870,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       seenEffectRef.current = new Set([effect.nonce])
     }
 
-    const mine = effect.by === (actingAsOwner ? 'hana' : 'guest')
-    const stale = effect.atMs > 0 && Date.now() - effect.atMs > CHAT_EFFECT_TTL_MS
-    if (mine || stale) return
+    if (effect.by === (actingAsOwner ? 'hana' : 'guest')) return
 
     if (effect.kind === 'moment') {
       triggerEmotionMoment(effect.momentId)

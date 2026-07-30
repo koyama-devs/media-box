@@ -1042,9 +1042,6 @@ export async function setChatProfileStatus(profileId, status) {
   )
 }
 
-/** How long a broadcast effect stays "fresh" enough to replay on the other side. */
-export const CHAT_EFFECT_TTL_MS = 12_000
-
 /**
  * Broadcast a reaction / special effect so the other side plays the same animation.
  * Stored on the thread doc (both roles already subscribe to it).
