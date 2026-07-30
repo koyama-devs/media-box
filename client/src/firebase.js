@@ -881,6 +881,16 @@ export function normalizeChatSticker(value) {
   return /^[a-z0-9_-]+$/.test(id) ? id : ''
 }
 
+/**
+ * Standalone special-effect message id (flower / party / emotion moment).
+ * Same loose slug check as stickers — the UI maps known ids to big icons.
+ */
+export function normalizeChatEffect(value) {
+  const id = String(value || '').trim().toLowerCase()
+  if (!id || id.length > 32) return ''
+  return /^[a-z0-9_-]+$/.test(id) ? id : ''
+}
+
 function serializeChatMessage(id, data) {
   const deleted = Boolean(data?.deleted)
   return {
@@ -888,6 +898,8 @@ function serializeChatMessage(id, data) {
     text: deleted ? '（削除されたメッセージ）' : String(data?.text || ''),
     rawText: String(data?.text || ''),
     sticker: deleted ? '' : normalizeChatSticker(data?.sticker),
+    effect: deleted ? '' : normalizeChatEffect(data?.effect),
+    effectEmoji: deleted ? '' : String(data?.effectEmoji || '').slice(0, 8),
     sender: data?.sender === 'hana' ? 'hana' : 'guest',
     createdAt: data?.createdAt?.toDate?.()?.toISOString?.() || data?.createdAtIso || null,
     editedAt: data?.editedAt?.toDate?.()?.toISOString?.() || data?.editedAtIso || null,
@@ -1301,7 +1313,7 @@ export async function savePushToken({ userKey, token, platform } = {}) {
   return id
 }
 
-export async function sendChatMessage({ threadId, text, sender, guestLabel, guestKey, replyTo, sticker }) {
+export async function sendChatMessage({ threadId, text, sender, guestLabel, guestKey, replyTo, sticker, effect, effectEmoji }) {
   const trimmed = String(text || '').trim()
   if (!threadId || !trimmed) return null
   if (trimmed.length > 2000) {
@@ -1339,6 +1351,8 @@ export async function sendChatMessage({ threadId, text, sender, guestLabel, gues
   )
 
   const stickerId = normalizeChatSticker(sticker)
+  const effectId = normalizeChatEffect(effect)
+  const emoji = String(effectEmoji || '').slice(0, 8)
   const payload = {
     text: trimmed,
     sender: role,
@@ -1346,6 +1360,8 @@ export async function sendChatMessage({ threadId, text, sender, guestLabel, gues
     createdAtIso: nowIso,
     deleted: false,
     ...(stickerId ? { sticker: stickerId } : {}),
+    ...(effectId ? { effect: effectId } : {}),
+    ...(effectId && emoji ? { effectEmoji: emoji } : {}),
   }
   if (replyTo?.id) {
     payload.replyToId = String(replyTo.id)

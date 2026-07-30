@@ -105,6 +105,32 @@ function nextStickerPendingId() {
   return `pending-sticker-${stickerSendSeq}`
 }
 
+/** Resolve caption + big-icon emoji for a standalone effect-bar tap. */
+function describeStandaloneEffect(payload, defaultReaction) {
+  if (payload?.kind === 'moment') {
+    const moment = EMOTION_MOMENTS.find((item) => item.id === payload.momentId)
+    if (!moment) return null
+    return {
+      effect: moment.id,
+      effectEmoji: moment.emoji,
+      text: moment.caption || moment.label,
+    }
+  }
+  if (payload?.kind === 'party') {
+    return {
+      effect: 'party',
+      effectEmoji: CHAT_PARTY_REACTION,
+      text: 'パーティー！',
+    }
+  }
+  const emoji = String(payload?.emoji || defaultReaction || '🌸').trim() || '🌸'
+  return {
+    effect: 'flower',
+    effectEmoji: emoji,
+    text: '花びらを届けたよ',
+  }
+}
+
 function mergeServerMessagesWithPending(server, previous) {
   const pending = (previous || []).filter((message) => message?.pending)
   if (!pending.length) return server
@@ -1628,16 +1654,84 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     }
   }
 
-  const playStandaloneEffect = (payload) => {
-    if (!effectThreadId || !canUseReactions) return
+  const playStandaloneEffect = async (payload) => {
+    if (!canUseReactions) return
+    if (actingAsOwner && !activeThreadId) {
+      setError('返信する相手を選んでください。')
+      return
+    }
+
+    const described = describeStandaloneEffect(payload, defaultReaction)
+    if (!described) return
+
+    // Play locally right away, then mirror to the other side.
     if (payload?.kind === 'moment') {
       triggerEmotionMoment(payload.momentId)
     } else if (payload?.kind === 'party') {
       triggerPartyBurst({ count: 24 })
     } else {
-      triggerFlowerRain({ count: 26, emoji: payload?.emoji || defaultReaction })
+      triggerFlowerRain({ count: 26, emoji: described.effectEmoji })
     }
-    handleLocalEffect(payload)
+
+    const role = actingAsOwner ? 'hana' : 'guest'
+    const pendingId = nextStickerPendingId()
+    setError('')
+    setBusy(true)
+    try {
+      const threadId = actingAsOwner
+        ? activeThreadId
+        : (guestChatId || ensureGuestChatId(guestKey || 'guest'))
+      if (!actingAsOwner) {
+        if (!guestChatId) setGuestChatId(threadId)
+        if (channel !== 'human') switchToHuman(HUMAN_SWITCH_INTENT)
+      }
+
+      broadcastChatEffect({
+        threadId,
+        kind: payload?.kind,
+        by: role,
+        emoji: described.effectEmoji,
+        momentId: payload?.momentId,
+      }).catch(() => {})
+
+      setHanaMessages((prev) => [
+        ...prev,
+        {
+          id: pendingId,
+          pending: true,
+          role,
+          sender: role,
+          text: described.text,
+          rawText: described.text,
+          effect: described.effect,
+          effectEmoji: described.effectEmoji,
+          createdAt: new Date().toISOString(),
+          replyTo: null,
+        },
+      ])
+      scrollToLatestRef.current()
+
+      await sendChatMessage({
+        threadId,
+        text: described.text,
+        sender: role,
+        effect: described.effect,
+        effectEmoji: described.effectEmoji,
+        ...(actingAsOwner
+          ? {}
+          : {
+              guestLabel: guestThreadLabel,
+              guestKey: guestProfile?.key || guestKey || '',
+            }),
+      })
+      if (!actingAsOwner) setChannel('human')
+    } catch (err) {
+      setHanaMessages((prev) => prev.filter((m) => m.id !== pendingId))
+      setError(getFirebaseErrorMessage(err) || 'エフェクトを送れませんでした。')
+    } finally {
+      setBusy(false)
+      scrollToLatestRef.current()
+    }
   }
 
   const handleReact = async (message, emoji, options = {}) => {
@@ -2369,6 +2463,13 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               const isOwn = (message.sender || message.role) === ownSender
                 || (!actingAsOwner && !guestOnHuman && message.role === 'guest')
               const showsSticker = !message.deleted && isHanaSticker(message.sticker)
+              const effectEmoji = !message.deleted && message.effect
+                ? (String(message.effectEmoji || '').trim()
+                  || EMOTION_MOMENTS.find((item) => item.id === message.effect)?.emoji
+                  || (message.effect === 'party' ? CHAT_PARTY_REACTION : '')
+                  || (message.effect === 'flower' ? defaultReaction : ''))
+                : ''
+              const showsEffect = Boolean(effectEmoji)
               const mutable = isOwn && canMutateOwnMessage(message)
               const sideClass = isOwn ? 'is-own' : 'is-other'
               const avatarSrc = avatarSrcForMessage(message)
@@ -2394,7 +2495,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     <ChatSwipeBubble
                       className={`${sideClass} is-${message.role}`}
                       canReply={!message.deleted}
-                      canEdit={mutable && !showsSticker}
+                      canEdit={mutable && !showsSticker && !showsEffect}
                       canDelete={mutable}
                       canReact={!message.deleted}
                       showFlowerReact={!message.deleted && !isOwn}
@@ -2411,7 +2512,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                       onEffect={handleLocalEffect}
                     >
                       <div
-                        className={`hana-chat-bubble ${sideClass} is-${message.role}${message.kind === 'human-switch' || message.kind === 'intro' ? ' is-notice' : ''}${message.deleted ? ' is-deleted' : ''}${showsSticker ? ' is-sticker' : ''}`}
+                        className={`hana-chat-bubble ${sideClass} is-${message.role}${message.kind === 'human-switch' || message.kind === 'intro' ? ' is-notice' : ''}${message.deleted ? ' is-deleted' : ''}${showsSticker ? ' is-sticker' : ''}${showsEffect ? ' is-effect' : ''}`}
                       >
                         {message.replyTo ? (
                           <div className="hana-chat-quote">
@@ -2421,6 +2522,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                         ) : null}
                         {showsSticker ? (
                           <HanaSticker id={message.sticker} size={104} title={message.text} />
+                        ) : showsEffect ? (
+                          <div className="hana-chat-effect-msg">
+                            <span className="hana-chat-effect-msg-emoji" aria-hidden="true">{effectEmoji}</span>
+                            <p className="hana-chat-effect-msg-caption">{message.text}</p>
+                          </div>
                         ) : (
                           <p>{message.text}</p>
                         )}
@@ -2676,9 +2782,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   className="hana-chat-effect-shortcut is-flower"
                   title="花びら"
                   aria-label="花びら"
+                  disabled={busy}
                   onMouseDown={(event) => event.preventDefault()}
                   onPointerDown={(event) => event.preventDefault()}
-                  onClick={() => playStandaloneEffect({ kind: 'flower', emoji: defaultReaction })}
+                  onClick={() => { void playStandaloneEffect({ kind: 'flower', emoji: defaultReaction }) }}
                 >
                   {defaultReaction}
                 </button>
@@ -2687,9 +2794,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   className="hana-chat-effect-shortcut is-party"
                   title="パーティー"
                   aria-label="パーティー"
+                  disabled={busy}
                   onMouseDown={(event) => event.preventDefault()}
                   onPointerDown={(event) => event.preventDefault()}
-                  onClick={() => playStandaloneEffect({ kind: 'party', emoji: CHAT_PARTY_REACTION })}
+                  onClick={() => { void playStandaloneEffect({ kind: 'party', emoji: CHAT_PARTY_REACTION }) }}
                 >
                   {CHAT_PARTY_REACTION}
                 </button>
@@ -2700,9 +2808,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     className={`hana-chat-effect-shortcut is-${moment.theme}`}
                     title={moment.label}
                     aria-label={moment.label}
+                    disabled={busy}
                     onMouseDown={(event) => event.preventDefault()}
                     onPointerDown={(event) => event.preventDefault()}
-                    onClick={() => playStandaloneEffect({ kind: 'moment', momentId: moment.id })}
+                    onClick={() => { void playStandaloneEffect({ kind: 'moment', momentId: moment.id }) }}
                   >
                     {moment.emoji}
                   </button>

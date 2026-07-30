@@ -1221,6 +1221,48 @@ body.hana-chat-scroll-lock #root {
   margin-bottom: 4px;
 }
 
+/* Standalone special effects leave a lasting sticker-sized mark in the thread. */
+.hana-chat-bubble.is-effect {
+  padding: 6px 4px 8px;
+  border-color: transparent;
+  background: none;
+}
+
+.hana-chat-effect-msg {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 96px;
+  filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.28));
+}
+
+.hana-chat-effect-msg-emoji {
+  display: grid;
+  place-items: center;
+  width: 104px;
+  height: 104px;
+  font-size: 5.2rem;
+  line-height: 1;
+  user-select: none;
+}
+
+.hana-chat-effect-msg-caption {
+  margin: 0;
+  max-width: 11em;
+  text-align: center;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+  color: rgba(255, 248, 240, 0.92);
+  white-space: normal;
+}
+
+.hana-chat-msg-row.is-own .hana-chat-effect-msg-caption {
+  color: rgba(255, 236, 228, 0.95);
+}
+
 .hana-chat-bubble p {
   margin: 0;
   font-size: 0.92rem;

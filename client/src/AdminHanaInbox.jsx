@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
-import FlowerRainLayer from './FlowerRain'
-import EmotionMomentLayer from './EmotionMoment'
+import FlowerRainLayer, { CHAT_PARTY_REACTION } from './FlowerRain'
+import EmotionMomentLayer, { EMOTION_MOMENTS } from './EmotionMoment'
 import HanaSticker, { isHanaSticker } from './HanaStickers'
 import { readDefaultReaction } from './chatSettings'
 import hanachanArt from './assets/hanachan.svg'
@@ -836,6 +836,13 @@ export default function AdminHanaInbox() {
                     const mutable = message.sender === 'hana' && canMutateOwnMessage(message)
                     const isOwn = message.sender === 'hana'
                     const showsSticker = !message.deleted && isHanaSticker(message.sticker)
+                    const effectEmoji = !message.deleted && message.effect
+                      ? (String(message.effectEmoji || '').trim()
+                        || EMOTION_MOMENTS.find((item) => item.id === message.effect)?.emoji
+                        || (message.effect === 'party' ? CHAT_PARTY_REACTION : '')
+                        || (message.effect === 'flower' ? defaultReaction : ''))
+                      : ''
+                    const showsEffect = Boolean(effectEmoji)
                     const avatarSrc = avatarSrcForMessage(message)
                     return (
                       <div key={message.id} className={`hana-chat-msg-row ${isOwn ? 'is-own' : 'is-other'}`}>
@@ -859,7 +866,7 @@ export default function AdminHanaInbox() {
                           <ChatSwipeBubble
                             className={`${isOwn ? 'is-own' : 'is-other'} is-${message.sender}`}
                             canReply={!message.deleted}
-                            canEdit={mutable}
+                            canEdit={mutable && !showsSticker && !showsEffect}
                             canDelete={mutable}
                             canReact={!message.deleted}
                             showFlowerReact={!message.deleted && !isOwn}
@@ -873,7 +880,7 @@ export default function AdminHanaInbox() {
                             onReact={(emoji, options) => { void handleReact(message, emoji, options) }}
                             onMenuAction={(actionId) => handleMenuAction(actionId, message)}
                           >
-                            <div className={`admin-chat-bubble is-${message.sender}${message.deleted ? ' is-deleted' : ''}${showsSticker ? ' is-sticker' : ''}`}>
+                            <div className={`admin-chat-bubble is-${message.sender}${message.deleted ? ' is-deleted' : ''}${showsSticker ? ' is-sticker' : ''}${showsEffect ? ' is-effect' : ''}`}>
                               {message.replyTo ? (
                                 <div className="hana-chat-quote">
                                   <strong>{labelForSender(message.replyTo.sender)}</strong>
@@ -882,6 +889,11 @@ export default function AdminHanaInbox() {
                               ) : null}
                               {showsSticker ? (
                                 <HanaSticker id={message.sticker} size={96} title={message.text} />
+                              ) : showsEffect ? (
+                                <div className="hana-chat-effect-msg">
+                                  <span className="hana-chat-effect-msg-emoji" aria-hidden="true">{effectEmoji}</span>
+                                  <p className="hana-chat-effect-msg-caption">{message.text}</p>
+                                </div>
                               ) : (
                                 <p>{message.text}</p>
                               )}
