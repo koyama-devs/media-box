@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import './Admin.css'
+import ChatImageLightbox from './ChatImageLightbox'
 import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
-import FlowerRainLayer, { CHAT_PARTY_REACTION } from './FlowerRain'
 import EmotionMomentLayer, { EMOTION_MOMENTS } from './EmotionMoment'
+import FlowerRainLayer, { CHAT_PARTY_REACTION } from './FlowerRain'
 import HanaSticker, { isHanaSticker } from './HanaStickers'
-import { readDefaultReaction } from './chatSettings'
 import hanachanArt from './assets/hanachan.svg'
 import {
     addChatReminder,
     remindAtFromChoice,
     toggleChatPin,
 } from './chatExtras'
+import { readDefaultReaction } from './chatSettings'
 import {
     clearAllChatHistories,
     clearChatThreadHistory,
@@ -39,7 +41,6 @@ import {
     upsertChatAccount,
 } from './firebase'
 import './hana-chat.css'
-import './Admin.css'
 
 const EMPTY_ACCOUNT_FORM = {
   key: '',
@@ -68,6 +69,7 @@ export default function AdminHanaInbox() {
   const [chatProfiles, setChatProfiles] = useState({})
   const [translations, setTranslations] = useState({})
   const [remindMessage, setRemindMessage] = useState(null)
+  const [previewImage, setPreviewImage] = useState(null)
   const [defaultReaction] = useState(() => readDefaultReaction())
   const [accountForm, setAccountForm] = useState(EMPTY_ACCOUNT_FORM)
   const [editingAccountKey, setEditingAccountKey] = useState(null)
@@ -891,12 +893,19 @@ export default function AdminHanaInbox() {
                               {showsSticker ? (
                                 <HanaSticker id={message.sticker} size={96} title={message.text} />
                               ) : showsImage ? (
-                                <a
+                                <button
+                                  type="button"
                                   className="hana-chat-image-link"
-                                  href={message.imageUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
                                   data-no-bubble-press="true"
+                                  aria-label="画像を拡大表示"
+                                  onClick={(event) => {
+                                    event.preventDefault()
+                                    event.stopPropagation()
+                                    setPreviewImage({
+                                      src: message.imageUrl,
+                                      alt: message.text || '写真',
+                                    })
+                                  }}
                                 >
                                   <img
                                     className="hana-chat-image"
@@ -904,7 +913,7 @@ export default function AdminHanaInbox() {
                                     alt={message.text || '写真'}
                                     loading="lazy"
                                   />
-                                </a>
+                                </button>
                               ) : showsEffect ? (
                                 <div className="hana-chat-effect-msg">
                                   <span className="hana-chat-effect-msg-emoji" aria-hidden="true">{effectEmoji}</span>
@@ -989,6 +998,13 @@ export default function AdminHanaInbox() {
           </div>
         </div>
       </section>
+      {previewImage ? (
+        <ChatImageLightbox
+          src={previewImage.src}
+          alt={previewImage.alt}
+          onClose={() => setPreviewImage(null)}
+        />
+      ) : null}
     </>
   )
 }

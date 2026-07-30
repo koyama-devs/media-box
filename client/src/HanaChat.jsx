@@ -10,6 +10,7 @@ import {
   toggleChatPin,
   unpinChatMessage,
 } from './chatExtras'
+import ChatImageLightbox from './ChatImageLightbox'
 import { playChatNotifySound, unlockChatNotifySound } from './chatNotifySound'
 import {
   readDefaultReaction,
@@ -69,7 +70,7 @@ import FlowerRainLayer, {
   triggerPartyBurst,
 } from './FlowerRain'
 import './hana-chat.css'
-import HanaSticker, { HANA_STICKERS, isHanaSticker } from './HanaStickers'
+import HanaSticker, { HANA_STICKER_SETS, isHanaSticker } from './HanaStickers'
 
 const AI_HISTORY_PREFIX = 'hana-chat-ai-history-'
 const CHANNEL_PREFIX = 'hana-chat-channel-'
@@ -304,6 +305,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [ownerSuggestEnabled, setOwnerSuggestEnabled] = useState(() => readOwnerSuggestEnabled())
   const [guestMenuOpen, setGuestMenuOpen] = useState(false)
   const [stickerOpen, setStickerOpen] = useState(false)
+  const [stickerSetId, setStickerSetId] = useState(HANA_STICKER_SETS[0].id)
+  const activeStickerSet = HANA_STICKER_SETS.find((set) => set.id === stickerSetId) || HANA_STICKER_SETS[0]
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [defaultReaction, setDefaultReaction] = useState(() => readDefaultReaction())
   const [enterToSend, setEnterToSend] = useState(() => readEnterToSend())
@@ -318,6 +321,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [translations, setTranslations] = useState({})
   const [remindMessage, setRemindMessage] = useState(null)
   const [dueReminders, setDueReminders] = useState([])
+  const [previewImage, setPreviewImage] = useState(null)
   const listRef = useRef(null)
   const panelRef = useRef(null)
   const inputRef = useRef(null)
@@ -2609,12 +2613,21 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                         {showsSticker ? (
                           <HanaSticker id={message.sticker} size={104} title={message.text} />
                         ) : showsImage ? (
-                          <a
+                          <button
+                            type="button"
                             className="hana-chat-image-link"
-                            href={message.imageUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
                             data-no-bubble-press="true"
+                            disabled={Boolean(message.uploading)}
+                            aria-label="画像を拡大表示"
+                            onClick={(event) => {
+                              event.preventDefault()
+                              event.stopPropagation()
+                              if (message.uploading) return
+                              setPreviewImage({
+                                src: message.imageUrl,
+                                alt: message.text || '写真',
+                              })
+                            }}
                           >
                             <img
                               className="hana-chat-image"
@@ -2625,7 +2638,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                             {message.uploading ? (
                               <span className="hana-chat-image-status">送信中…</span>
                             ) : null}
-                          </a>
+                          </button>
                         ) : showsEffect ? (
                           <div className="hana-chat-effect-msg">
                             <span className="hana-chat-effect-msg-emoji" aria-hidden="true">{effectEmoji}</span>
@@ -2883,13 +2896,30 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   <HanaSticker id="smile" size={26} title="" />
                 </button>
                 {stickerOpen ? (
-                  <div className="hana-chat-sticker-panel" role="menu" aria-label="はなスタンプ">
+                  <div className="hana-chat-sticker-panel" role="menu" aria-label="スタンプ">
                     <div className="hana-chat-sticker-panel-head">
-                      <strong>はなスタンプ</strong>
+                      <strong>スタンプ</strong>
                       <button type="button" onClick={() => setStickerOpen(false)} aria-label="閉じる">×</button>
                     </div>
+                    <div className="hana-chat-sticker-tabs" role="tablist" aria-label="スタンプの種類">
+                      {HANA_STICKER_SETS.map((set) => (
+                        <button
+                          key={set.id}
+                          type="button"
+                          role="tab"
+                          aria-selected={set.id === activeStickerSet.id}
+                          className={`hana-chat-sticker-tab${set.id === activeStickerSet.id ? ' is-active' : ''}`}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onPointerDown={(event) => event.preventDefault()}
+                          onClick={() => setStickerSetId(set.id)}
+                        >
+                          <HanaSticker id={set.items[0].id} size={20} title="" />
+                          <span>{set.label}</span>
+                        </button>
+                      ))}
+                    </div>
                     <div className="hana-chat-sticker-grid">
-                      {HANA_STICKERS.map((sticker) => (
+                      {activeStickerSet.items.map((sticker) => (
                         <button
                           key={sticker.id}
                           type="button"
@@ -3051,6 +3081,13 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             </button>
           </form>
         </section>
+      ) : null}
+      {previewImage ? (
+        <ChatImageLightbox
+          src={previewImage.src}
+          alt={previewImage.alt}
+          onClose={() => setPreviewImage(null)}
+        />
       ) : null}
     </div>,
     document.body,

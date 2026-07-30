@@ -1274,11 +1274,24 @@ body.hana-chat-scroll-lock #root {
 .hana-chat-image-link {
   display: block;
   position: relative;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
   border-radius: 12px;
   overflow: hidden;
+  background: transparent;
   text-decoration: none;
   color: inherit;
+  cursor: zoom-in;
   -webkit-tap-highlight-color: transparent;
+  font: inherit;
+  text-align: left;
+}
+
+.hana-chat-image-link:disabled {
+  cursor: default;
+  opacity: 1;
 }
 
 .hana-chat-image {
@@ -1290,6 +1303,7 @@ body.hana-chat-scroll-lock #root {
   object-fit: cover;
   border-radius: 12px;
   background: rgba(0, 0, 0, 0.2);
+  pointer-events: none;
 }
 
 .hana-chat-bubble.is-uploading .hana-chat-image {
@@ -1311,6 +1325,84 @@ body.hana-chat-scroll-lock #root {
   letter-spacing: 0.04em;
   white-space: nowrap;
   pointer-events: none;
+}
+
+.hana-chat-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 10120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  background: rgba(8, 6, 10, 0.82);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  cursor: zoom-out;
+  animation: hana-chat-lightbox-in 0.18s ease-out;
+  font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "BIZ UDPGothic", "Yu Gothic", "YuGothic", sans-serif;
+}
+
+.hana-chat-lightbox-image {
+  display: block;
+  max-width: min(96vw, 920px);
+  max-height: min(88vh, 920px);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  background: rgba(0, 0, 0, 0.25);
+  cursor: zoom-out;
+  animation: hana-chat-lightbox-image-in 0.22s cubic-bezier(0.16, 1.1, 0.3, 1);
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+.hana-chat-lightbox-close {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  z-index: 1;
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 248, 240, 0.14);
+  color: rgba(255, 248, 240, 0.95);
+  font-size: 1.55rem;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.hana-chat-lightbox-close:hover,
+.hana-chat-lightbox-close:focus-visible {
+  background: rgba(255, 248, 240, 0.24);
+  outline: none;
+}
+
+@keyframes hana-chat-lightbox-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes hana-chat-lightbox-image-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hana-chat-lightbox,
+  .hana-chat-lightbox-image {
+    animation: none;
+  }
 }
 
 .hana-chat-bubble p {
@@ -1516,6 +1608,42 @@ body.hana-chat-scroll-lock #root {
   font-size: 1rem;
   line-height: 1;
   cursor: pointer;
+}
+
+.hana-chat-sticker-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.hana-chat-sticker-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: 1 1 0;
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 248, 240, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 248, 240, 0.05);
+  color: rgba(255, 248, 240, 0.62);
+  font: inherit;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.hana-chat-sticker-tab:hover,
+.hana-chat-sticker-tab:focus-visible {
+  background: rgba(255, 248, 240, 0.1);
+  color: rgba(255, 248, 240, 0.85);
+}
+
+.hana-chat-sticker-tab.is-active {
+  border-color: rgba(232, 154, 170, 0.5);
+  background: rgba(232, 154, 170, 0.18);
+  color: rgba(255, 248, 240, 0.95);
 }
 
 .hana-chat-sticker-grid {
