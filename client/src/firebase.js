@@ -1665,6 +1665,35 @@ export async function translateChatMessage(payload) {
   }
 }
 
+/**
+ * Owner-only private assist for a guest message (never stored in Firestore).
+ * @param {{ text: string, guestName?: string, history?: { role: string, text: string }[] }} payload
+ */
+export async function analyzeGuestMessageForOwner(payload) {
+  const callable = httpsCallable(functions, 'analyzeGuestMessageForOwner')
+  const result = await callable({
+    text: String(payload?.text || '').trim().slice(0, 2000),
+    guestName: String(payload?.guestName || '').trim().slice(0, 40),
+    history: Array.isArray(payload?.history) ? payload.history.slice(-8) : [],
+  })
+  const data = result?.data || {}
+  const replies = Array.isArray(data.replies)
+    ? data.replies
+      .map((item) => ({
+        ja: String(item?.ja || '').trim(),
+        vi: String(item?.vi || '').trim(),
+      }))
+      .filter((item) => item.ja)
+      .slice(0, 3)
+    : []
+  return {
+    translationVi: String(data.translationVi || '').trim(),
+    readingHiragana: String(data.readingHiragana || '').trim(),
+    replies,
+    reason: data.reason || null,
+  }
+}
+
 export async function completeAdminRedirectLogin() {
   const result = await getRedirectResult(auth)
   if (!result?.user) return null

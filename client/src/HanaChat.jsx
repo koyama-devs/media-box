@@ -13,18 +13,14 @@ import {
 import ChatImageLightbox from './ChatImageLightbox'
 import { playChatNotifySound, unlockChatNotifySound } from './chatNotifySound'
 import {
-  CHAT_TRANSLATE_LANGS,
   readDefaultReaction,
   readEnterToSend,
   readMessageSound,
   readStickerSet,
-  readTranslateLang,
-  translateLangLabel,
   writeDefaultReaction,
   writeEnterToSend,
   writeMessageSound,
   writeStickerSet,
-  writeTranslateLang,
 } from './chatSettings'
 import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
 import EmotionMomentLayer, { EMOTION_MOMENTS, triggerEmotionMoment } from './EmotionMoment'
@@ -69,6 +65,7 @@ import {
   translateChatMessage,
   updateChatMessage,
   uploadChatImage,
+  analyzeGuestMessageForOwner,
 } from './firebase'
 import FlowerRainLayer, {
   CHAT_PARTY_REACTION,
@@ -77,6 +74,7 @@ import FlowerRainLayer, {
 } from './FlowerRain'
 import './hana-chat.css'
 import HanaSticker, { HANA_STICKER_SETS, isHanaSticker } from './HanaStickers'
+import OwnerMessageAssist from './OwnerMessageAssist'
 
 const AI_HISTORY_PREFIX = 'hana-chat-ai-history-'
 const CHANNEL_PREFIX = 'hana-chat-channel-'
@@ -86,6 +84,15 @@ const DEFAULT_OWNER_GUEST_KEY = 'gabusan'
 /** Composer grows with the draft up to this many lines, then scrolls instead. */
 const COMPOSER_MAX_LINES = 5
 const TYPING_PULSE_MS = 2_000
+const OWNER_ASSIST_CACHE_LIMIT = 40
+
+function isOwnerAssistableGuestMessage(message) {
+  if (!message || message.deleted || message.pending) return false
+  const sender = message.sender || message.role
+  if (sender !== 'guest') return false
+  if (message.sticker || message.imageUrl || message.effect) return false
+  return Boolean(String(message.rawText || message.text || '').trim())
+}
 const TYPING_IDLE_MS = 3_000
 const TYPING_VISIBLE_MS = 6_000
 
@@ -320,12 +327,12 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   // Soft-keyboard phones/tablets keep Enter = newline; the toggle is desktop-only.
   const enterSendsMessage = desktopKeyboard && enterToSend
   const [messageSound, setMessageSound] = useState(() => readMessageSound())
-  const [translateLang, setTranslateLang] = useState(() => readTranslateLang())
   const [chatAccounts, setChatAccounts] = useState(() => listGuestProfiles())
   const [copyNote, setCopyNote] = useState('')
   const [actionNote, setActionNote] = useState('')
   const [pins, setPins] = useState([])
   const [translations, setTranslations] = useState({})
+  const [ownerAssist, setOwnerAssist] = useState({})
   const [remindMessage, setRemindMessage] = useState(null)
   const [dueReminders, setDueReminders] = useState([])
   const [previewImage, setPreviewImage] = useState(null)
@@ -346,6 +353,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const migrationCheckedRef = useRef(new Set())
   const seenEffectRef = useRef(new Set())
   const effectBaselineRef = useRef('')
+  const ownerAssistBaselineRef = useRef('')
+  const ownerAssistSeenRef = useRef(new Set())
+  const ownerAssistSeededRef = useRef(false)
+  const ownerAssistReqRef = useRef(0)
   const suggestReqRef = useRef(0)
   const typingStateRef = useRef({ threadId: '', role: '', lastPulseAt: 0 })
   const typingPulseTimerRef = useRef(null)
@@ -745,6 +756,125 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       unsub()
     }
   }, [hidden, actingAsOwner, activeThreadId])
+
+  const requestOwnerAssist = useCallback(async (message, { force = false } = {}) => {
+    if (!actingAsOwner || !message?.id) return
+    const text = String(message.rawText || message.text || '').trim()
+    if (!text) return
+
+    let shouldSkip = false
+    setOwnerAssist((prev) => {
+      const current = prev[message.id]
+      if (!force && (current?.status === 'loading' || current?.status === 'ready')) {
+        shouldSkip = true
+        return prev
+      }
+      const next = {
+        ...prev,
+        [message.id]: {
+          status: 'loading',
+          translationVi: '',
+          readingHiragana: '',
+          replies: [],
+          reason: null,
+        },
+      }
+      const keys = Object.keys(next)
+      if (keys.length <= OWNER_ASSIST_CACHE_LIMIT) return next
+      const trimmed = { ...next }
+      keys.slice(0, keys.length - OWNER_ASSIST_CACHE_LIMIT).forEach((key) => {
+        delete trimmed[key]
+      })
+      return trimmed
+    })
+    if (shouldSkip) return
+
+    const reqId = ++ownerAssistReqRef.current
+    const index = hanaMessages.findIndex((item) => item.id === message.id)
+    const historySource = (index >= 0 ? hanaMessages.slice(0, index) : hanaMessages)
+      .filter((item) => !item.deleted && String(item.text || '').trim())
+      .slice(-8)
+      .map((item) => ({
+        role: item.sender === 'hana' ? 'model' : 'user',
+        text: String(item.rawText || item.text || '').trim(),
+      }))
+
+    try {
+      const data = await analyzeGuestMessageForOwner({
+        text,
+        guestName: ownerActiveGuestLabel,
+        history: historySource,
+      })
+      if (reqId !== ownerAssistReqRef.current && !force) {
+        // Newer requests may have started; still apply if this id is still loading.
+      }
+      const ok = Boolean(data.translationVi || data.readingHiragana || data.replies?.length)
+      setOwnerAssist((prev) => ({
+        ...prev,
+        [message.id]: {
+          status: ok ? 'ready' : 'error',
+          translationVi: data.translationVi || '',
+          readingHiragana: data.readingHiragana || '',
+          replies: Array.isArray(data.replies) ? data.replies : [],
+          reason: data.reason || (ok ? null : 'empty'),
+        },
+      }))
+    } catch {
+      setOwnerAssist((prev) => ({
+        ...prev,
+        [message.id]: {
+          status: 'error',
+          translationVi: '',
+          readingHiragana: '',
+          replies: [],
+          reason: 'error',
+        },
+      }))
+    }
+  }, [actingAsOwner, hanaMessages, ownerActiveGuestLabel])
+
+  // Seed existing messages as "seen" when opening a thread; only analyze newcomers.
+  useEffect(() => {
+    if (hidden || !actingAsOwner || !activeThreadId) {
+      if (!actingAsOwner) {
+        ownerAssistBaselineRef.current = ''
+        ownerAssistSeenRef.current = new Set()
+        ownerAssistSeededRef.current = false
+      }
+      return undefined
+    }
+
+    if (ownerAssistBaselineRef.current !== activeThreadId) {
+      ownerAssistBaselineRef.current = activeThreadId
+      ownerAssistSeenRef.current = new Set()
+      ownerAssistSeededRef.current = false
+    }
+
+    if (!ownerAssistSeededRef.current) {
+      if (hanaMessages.length === 0) {
+        const timer = window.setTimeout(() => {
+          if (ownerAssistBaselineRef.current !== activeThreadId) return
+          if (ownerAssistSeededRef.current) return
+          ownerAssistSeenRef.current = new Set()
+          ownerAssistSeededRef.current = true
+        }, 600)
+        return () => window.clearTimeout(timer)
+      }
+      ownerAssistSeenRef.current = new Set(hanaMessages.map((item) => item.id).filter(Boolean))
+      ownerAssistSeededRef.current = true
+      return undefined
+    }
+
+    const newcomers = hanaMessages.filter((item) => (
+      isOwnerAssistableGuestMessage(item)
+      && !ownerAssistSeenRef.current.has(item.id)
+    ))
+    newcomers.forEach((item) => {
+      ownerAssistSeenRef.current.add(item.id)
+      void requestOwnerAssist(item)
+    })
+    return undefined
+  }, [hidden, actingAsOwner, activeThreadId, hanaMessages, requestOwnerAssist])
 
   // Only mark read while the chat panel is actually open and visible.
   useEffect(() => {
@@ -1345,10 +1475,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     })
   }
 
-  const applyTranslateLang = (langId) => {
-    setTranslateLang(writeTranslateLang(langId))
-  }
-
   // Grow the composer with the draft, then let it scroll once it hits the line cap.
   const resizeComposer = useCallback(() => {
     const el = inputRef.current
@@ -1934,8 +2060,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     if (actionId === 'translate') {
       const text = String(message.rawText || message.text || '').trim()
       if (!text) return true
-      const targetLang = translateLang || readTranslateLang()
-      const langLabel = translateLangLabel(targetLang)
+      const targetLang = actingAsOwner ? 'vi' : 'ja'
+      const langLabel = actingAsOwner ? 'ベトナム語' : '日本語'
       notifyAction(`${langLabel}に翻訳中…`)
       void translateChatMessage({ text, targetLang })
         .then((data) => {
@@ -2479,27 +2605,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                         </button>
                       </div>
                     </div>
-                    <div className="hana-chat-settings-section">
-                      <p className="hana-chat-settings-label">翻訳先</p>
-                      <p className="hana-chat-settings-hint">
-                        長押しメニューの「翻訳」で {translateLangLabel(translateLang)} に訳す
-                      </p>
-                      <div className="hana-chat-settings-langs" role="listbox" aria-label="翻訳先の言語">
-                        {CHAT_TRANSLATE_LANGS.map((lang) => (
-                          <button
-                            key={lang.id}
-                            type="button"
-                            role="option"
-                            aria-selected={translateLang === lang.id}
-                            className={`hana-chat-settings-lang${translateLang === lang.id ? ' is-active' : ''}`}
-                            onClick={() => applyTranslateLang(lang.id)}
-                          >
-                            <strong>{lang.short}</strong>
-                            <span>{lang.label}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
                     {actingAsOwner ? (
                       <div className="hana-chat-settings-section">
                         <div className="hana-chat-settings-row">
@@ -2691,6 +2796,14 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                         ) : null}
                       </div>
                     </ChatSwipeBubble>
+                    {actingAsOwner && !isOwn && ownerAssist[message.id] ? (
+                      <OwnerMessageAssist
+                        assist={ownerAssist[message.id]}
+                        onCopy={notifyCopied}
+                        onRetry={() => { void requestOwnerAssist(message, { force: true }) }}
+                        onUseReply={applyOwnerSuggest}
+                      />
+                    ) : null}
                     {!isOwn && (timeLabel || (message.editedAt && !message.deleted)) ? (
                       <div className="hana-chat-msg-aside">
                         {timeLabel ? (

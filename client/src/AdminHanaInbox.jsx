@@ -1,18 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './Admin.css'
 import ChatImageLightbox from './ChatImageLightbox'
 import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
 import EmotionMomentLayer, { EMOTION_MOMENTS } from './EmotionMoment'
 import FlowerRainLayer, { CHAT_PARTY_REACTION } from './FlowerRain'
 import HanaSticker, { isHanaSticker } from './HanaStickers'
+import OwnerMessageAssist from './OwnerMessageAssist'
 import hanachanArt from './assets/hanachan.svg'
 import {
     addChatReminder,
     remindAtFromChoice,
     toggleChatPin,
 } from './chatExtras'
-import { readDefaultReaction, readTranslateLang, translateLangLabel } from './chatSettings'
+import { readDefaultReaction } from './chatSettings'
 import {
+    analyzeGuestMessageForOwner,
     clearAllChatHistories,
     clearChatThreadHistory,
     deleteChatAccount,
@@ -50,6 +52,15 @@ const EMPTY_ACCOUNT_FORM = {
   role: 'guest',
 }
 
+const OWNER_ASSIST_CACHE_LIMIT = 40
+
+function isOwnerAssistableGuestMessage(message) {
+  if (!message || message.deleted) return false
+  if (message.sender !== 'guest') return false
+  if (message.sticker || message.imageUrl || message.effect) return false
+  return Boolean(String(message.rawText || message.text || '').trim())
+}
+
 /**
  * Admin inbox for Hana realtime chat + guest roster (used on /admin).
  */
@@ -68,6 +79,7 @@ export default function AdminHanaInbox() {
   const [statusNote, setStatusNote] = useState('')
   const [chatProfiles, setChatProfiles] = useState({})
   const [translations, setTranslations] = useState({})
+  const [ownerAssist, setOwnerAssist] = useState({})
   const [remindMessage, setRemindMessage] = useState(null)
   const [previewImage, setPreviewImage] = useState(null)
   const [defaultReaction] = useState(() => readDefaultReaction())
@@ -76,6 +88,9 @@ export default function AdminHanaInbox() {
   const [accountFormOpen, setAccountFormOpen] = useState(false)
   const [accountBusy, setAccountBusy] = useState(false)
   const listRef = useRef(null)
+  const ownerAssistBaselineRef = useRef('')
+  const ownerAssistSeenRef = useRef(new Set())
+  const ownerAssistSeededRef = useRef(false)
 
   useEffect(() => {
     return subscribeChatThreads(
@@ -272,6 +287,118 @@ export default function AdminHanaInbox() {
     return known?.displayName || activeThread?.guestLabel || 'ゲスト'
   }, [activeId, activeThread, guestRoster])
 
+  const requestOwnerAssist = useCallback(async (message, { force = false } = {}) => {
+    if (!message?.id) return
+    const text = String(message.rawText || message.text || '').trim()
+    if (!text) return
+
+    let shouldSkip = false
+    setOwnerAssist((prev) => {
+      const current = prev[message.id]
+      if (!force && (current?.status === 'loading' || current?.status === 'ready')) {
+        shouldSkip = true
+        return prev
+      }
+      const next = {
+        ...prev,
+        [message.id]: {
+          status: 'loading',
+          translationVi: '',
+          readingHiragana: '',
+          replies: [],
+          reason: null,
+        },
+      }
+      const keys = Object.keys(next)
+      if (keys.length <= OWNER_ASSIST_CACHE_LIMIT) return next
+      const trimmed = { ...next }
+      keys.slice(0, keys.length - OWNER_ASSIST_CACHE_LIMIT).forEach((key) => {
+        delete trimmed[key]
+      })
+      return trimmed
+    })
+    if (shouldSkip) return
+
+    const index = messages.findIndex((item) => item.id === message.id)
+    const historySource = (index >= 0 ? messages.slice(0, index) : messages)
+      .filter((item) => !item.deleted && String(item.text || '').trim())
+      .slice(-8)
+      .map((item) => ({
+        role: item.sender === 'hana' ? 'model' : 'user',
+        text: String(item.rawText || item.text || '').trim(),
+      }))
+
+    try {
+      const data = await analyzeGuestMessageForOwner({
+        text,
+        guestName: activeGuestName,
+        history: historySource,
+      })
+      const ok = Boolean(data.translationVi || data.readingHiragana || data.replies?.length)
+      setOwnerAssist((prev) => ({
+        ...prev,
+        [message.id]: {
+          status: ok ? 'ready' : 'error',
+          translationVi: data.translationVi || '',
+          readingHiragana: data.readingHiragana || '',
+          replies: Array.isArray(data.replies) ? data.replies : [],
+          reason: data.reason || (ok ? null : 'empty'),
+        },
+      }))
+    } catch {
+      setOwnerAssist((prev) => ({
+        ...prev,
+        [message.id]: {
+          status: 'error',
+          translationVi: '',
+          readingHiragana: '',
+          replies: [],
+          reason: 'error',
+        },
+      }))
+    }
+  }, [activeGuestName, messages])
+
+  useEffect(() => {
+    if (!activeId) {
+      ownerAssistBaselineRef.current = ''
+      ownerAssistSeenRef.current = new Set()
+      ownerAssistSeededRef.current = false
+      return undefined
+    }
+
+    if (ownerAssistBaselineRef.current !== activeId) {
+      ownerAssistBaselineRef.current = activeId
+      ownerAssistSeenRef.current = new Set()
+      ownerAssistSeededRef.current = false
+    }
+
+    if (!ownerAssistSeededRef.current) {
+      if (messages.length === 0) {
+        const timer = window.setTimeout(() => {
+          if (ownerAssistBaselineRef.current !== activeId) return
+          if (ownerAssistSeededRef.current) return
+          ownerAssistSeenRef.current = new Set()
+          ownerAssistSeededRef.current = true
+        }, 600)
+        return () => window.clearTimeout(timer)
+      }
+      ownerAssistSeenRef.current = new Set(messages.map((item) => item.id).filter(Boolean))
+      ownerAssistSeededRef.current = true
+      return undefined
+    }
+
+    const newcomers = messages.filter((item) => (
+      isOwnerAssistableGuestMessage(item)
+      && !ownerAssistSeenRef.current.has(item.id)
+    ))
+    newcomers.forEach((item) => {
+      ownerAssistSeenRef.current.add(item.id)
+      void requestOwnerAssist(item)
+    })
+    return undefined
+  }, [activeId, messages, requestOwnerAssist])
+
   const clearComposerExtras = () => {
     setReplyTo(null)
     setEditingId(null)
@@ -378,17 +505,15 @@ export default function AdminHanaInbox() {
     if (actionId === 'translate') {
       const text = String(message.rawText || message.text || '').trim()
       if (!text) return true
-      const targetLang = readTranslateLang()
-      const langLabel = translateLangLabel(targetLang)
-      setStatusNote(`${langLabel}に翻訳中…`)
-      void translateChatMessage({ text, targetLang })
+      setStatusNote('ベトナム語に翻訳中…')
+      void translateChatMessage({ text, targetLang: 'vi' })
         .then((data) => {
           if (!data.translation) {
             setStatusNote(data.reason === 'quota' ? '翻訳クォータ不足です' : '翻訳に失敗しました')
             return
           }
           setTranslations((prev) => ({ ...prev, [message.id]: data.translation }))
-          setStatusNote(`${langLabel}に翻訳しました`)
+          setStatusNote('ベトナム語に翻訳しました')
         })
         .catch((err) => {
           setStatusNote(getFirebaseErrorMessage(err) || '翻訳に失敗しました')
@@ -929,6 +1054,17 @@ export default function AdminHanaInbox() {
                               ) : null}
                             </div>
                           </ChatSwipeBubble>
+                          {!isOwn && ownerAssist[message.id] ? (
+                            <OwnerMessageAssist
+                              assist={ownerAssist[message.id]}
+                              onCopy={(ok) => setStatusNote(ok ? 'コピーしました' : 'コピーに失敗しました')}
+                              onRetry={() => { void requestOwnerAssist(message, { force: true }) }}
+                              onUseReply={(text) => {
+                                setDraft(String(text || '').trim())
+                                setEditingId(null)
+                              }}
+                            />
+                          ) : null}
                           {!isOwn && (timeLabel || (message.editedAt && !message.deleted)) ? (
                             <div className="hana-chat-msg-aside">
                               {timeLabel ? (

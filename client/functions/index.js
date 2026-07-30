@@ -292,6 +292,147 @@ exports.translateHanaChat = onCall({ cors: true }, async (request) => {
   }
 })
 
+const OWNER_ASSIST_SYSTEM_PROMPT = `あなたは「はな」（Hana Mediaboxのオーナー本人）専用の私的アシスタントです。
+ゲストの日本語メッセージをはなが理解しやすくするために、次のJSONだけを返してください（説明・コードフェンス禁止）:
+
+{"translationVi":"...","readingHiragana":"...","replies":[{"ja":"...","vi":"..."},{"ja":"...","vi":"..."}]}
+
+ルール:
+- translationVi: ゲスト文の自然なベトナム語訳。すでにベトナム語なら軽く整える。
+- readingHiragana: ゲスト文の読み方をひらがな中心で。漢字はすべてひらがな化し、句読点は残してよい。英語や固有名詞はそのままでよい。
+- replies: はながゲストへ返す候補。やさしく自然な短めの日本語。友達に近い親しみやすさ。マスコット口調や過度な敬語は避ける。2〜3個。
+  - ja: 日本語の返信文（各40文字以内）
+  - vi: その日本語返信のベトナム語訳（短く）
+- JSON以外は一切出力しない。`
+
+function parseOwnerAssistJson(raw) {
+  const text = String(raw || '').trim()
+  if (!text) {
+    return { translationVi: '', readingHiragana: '', replies: [] }
+  }
+  const fenced = text.match(/\{[\s\S]*\}/)
+  const jsonText = fenced ? fenced[0] : text
+  try {
+    const parsed = JSON.parse(jsonText)
+    const replies = Array.isArray(parsed?.replies)
+      ? parsed.replies
+        .map((item) => ({
+          ja: String(item?.ja || '').trim(),
+          vi: String(item?.vi || '').trim(),
+        }))
+        .filter((item) => item.ja)
+        .slice(0, 3)
+      : []
+    return {
+      translationVi: String(parsed?.translationVi || '').trim(),
+      readingHiragana: String(parsed?.readingHiragana || '').trim(),
+      replies,
+    }
+  } catch {
+    return { translationVi: '', readingHiragana: '', replies: [] }
+  }
+}
+
+async function callGeminiOwnerAssist({ apiKey, text, guestName, history }) {
+  const contents = []
+  for (const turn of history || []) {
+    const role = turn.role === 'model' ? 'model' : 'user'
+    const turnText = String(turn.text || '').trim()
+    if (!turnText) continue
+    contents.push({ role, parts: [{ text: turnText }] })
+  }
+
+  const guest = String(guestName || 'ゲスト').trim().slice(0, 40)
+  const message = String(text || '').trim().slice(0, 2000)
+  contents.push({
+    role: 'user',
+    parts: [{
+      text: `ゲスト「${guest}」の最新メッセージです。はな本人だけが見る私的メモとしてJSONを返して。\nメッセージ:「${message}」`,
+    }],
+  })
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${encodeURIComponent(apiKey)}`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: OWNER_ASSIST_SYSTEM_PROMPT }] },
+      contents,
+      generationConfig: {
+        temperature: 0.35,
+        maxOutputTokens: 768,
+        responseMimeType: 'application/json',
+      },
+    }),
+  })
+
+  if (!response.ok) {
+    const body = await response.text()
+    const error = new Error(`Gemini ${response.status}: ${body.slice(0, 240)}`)
+    error.status = response.status
+    throw error
+  }
+
+  const json = await response.json()
+  const raw = json?.candidates?.[0]?.content?.parts
+    ?.map((part) => part.text || '')
+    .join('')
+    .trim()
+  return parseOwnerAssistJson(raw)
+}
+
+/**
+ * Owner-only private analysis of a guest message:
+ * Vietnamese translation + hiragana reading + bilingual reply drafts.
+ * Result is returned to the caller only — never written to Firestore.
+ */
+exports.analyzeGuestMessageForOwner = onCall({ cors: true }, async (request) => {
+  const text = String(request.data?.text || '').trim()
+  if (!text) {
+    throw new HttpsError('invalid-argument', 'text is required')
+  }
+  if (text.length > 2000) {
+    throw new HttpsError('invalid-argument', 'text too long')
+  }
+
+  const guestName = String(request.data?.guestName || '').trim().slice(0, 40)
+  const history = Array.isArray(request.data?.history) ? request.data.history.slice(-8) : []
+  const key = process.env.GEMINI_API_KEY || ''
+  if (!key) {
+    return {
+      translationVi: '',
+      readingHiragana: '',
+      replies: [],
+      reason: 'quota',
+    }
+  }
+
+  try {
+    const result = await callGeminiOwnerAssist({
+      apiKey: key,
+      text,
+      guestName,
+      history,
+    })
+    const ok = Boolean(result.translationVi || result.readingHiragana || result.replies.length)
+    return {
+      ...result,
+      reason: ok ? null : 'empty',
+    }
+  } catch (error) {
+    console.error('analyzeGuestMessageForOwner', error)
+    if (error?.status === 429 || /credits? are depleted|quota|RESOURCE_EXHAUSTED/i.test(String(error?.message || ''))) {
+      return {
+        translationVi: '',
+        readingHiragana: '',
+        replies: [],
+        reason: 'quota',
+      }
+    }
+    throw new HttpsError('internal', 'メッセージ解析に失敗しました')
+  }
+})
+
 function resolveGuestKeyFromThread(threadId, threadData) {
   const fromDoc = String(threadData?.guestKey || '').trim().toLowerCase()
   if (fromDoc) return fromDoc
