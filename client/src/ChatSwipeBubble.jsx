@@ -18,11 +18,14 @@ const LONG_PRESS_MS = 450
 const LONG_PRESS_MOVE_PX = 28
 const MENU_ARM_MS = 280
 const MENU_DISMISS_GUARD_MS = 700
-const AXIS_LOCK_PX = 8
-// Small so a scroll drag cancels the pending long press right away.
-const PRESS_CANCEL_MOVE_PX = 10
-// Horizontal must clearly dominate, otherwise vertical scrolling wins the gesture.
-const HORIZONTAL_DOMINANCE = 1.3
+// Decide the axis only after a movement long enough to be meaningful: at a few
+// pixels dx and dy are still noise, and picking 'v' there silently kills the swipe.
+const AXIS_LOCK_PX = 12
+// A scroll drag cancels the pending long press, but stay above finger jitter so
+// simply holding a bubble still opens the menu.
+const PRESS_CANCEL_MOVE_PX = 16
+// Horizontal must lead, otherwise vertical scrolling wins the gesture.
+const HORIZONTAL_DOMINANCE = 1.15
 
 const MENU_EXTRA_ACTIONS = [
   { id: 'pin', label: 'ピン', icon: '📌' },

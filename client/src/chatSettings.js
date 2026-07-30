@@ -28,7 +28,7 @@ export function writeDefaultReaction(emoji) {
   return next
 }
 
-/** When true: Enter sends, Shift+Enter inserts a newline. Default on for desktop. */
+/** When true: Enter sends, Shift+Enter inserts a newline. Desktop/laptop only (UI ignores on touch). Default on. */
 export function readEnterToSend() {
   try {
     const raw = window.localStorage.getItem(ENTER_TO_SEND_KEY)

@@ -82,6 +82,22 @@ const TYPING_PULSE_MS = 2_000
 const TYPING_IDLE_MS = 3_000
 const TYPING_VISIBLE_MS = 6_000
 
+/** True on laptop/desktop with a real keyboard — Enter-to-send only applies here. */
+function useDesktopKeyboard() {
+  const [desktop, setDesktop] = useState(() => {
+    if (typeof window === 'undefined') return true
+    return window.matchMedia('(hover: hover) and (pointer: fine)').matches
+  })
+  useEffect(() => {
+    const media = window.matchMedia('(hover: hover) and (pointer: fine)')
+    const sync = () => setDesktop(media.matches)
+    sync()
+    media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
+  }, [])
+  return desktop
+}
+
 /** Keep optimistic (pending) bubbles until the matching Firestore message arrives. */
 let stickerSendSeq = 0
 
@@ -254,6 +270,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [defaultReaction, setDefaultReaction] = useState(() => readDefaultReaction())
   const [enterToSend, setEnterToSend] = useState(() => readEnterToSend())
+  const desktopKeyboard = useDesktopKeyboard()
+  // Soft-keyboard phones/tablets keep Enter = newline; the toggle is desktop-only.
+  const enterSendsMessage = desktopKeyboard && enterToSend
   const [messageSound, setMessageSound] = useState(() => readMessageSound())
   const [chatAccounts, setChatAccounts] = useState(() => listGuestProfiles())
   const [copyNote, setCopyNote] = useState('')
@@ -2161,7 +2180,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                               type="button"
                               role="option"
                               aria-selected={selected}
-                              title={mode.hint}
                               className={`hana-chat-status-mode${selected ? ' is-active' : ''}`}
                               onClick={() => { void applyMyPresenceStatus(mode.id) }}
                             >
@@ -2193,30 +2211,32 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                         ))}
                       </div>
                     </div>
-                    <div className="hana-chat-settings-section">
-                      <div className="hana-chat-settings-row">
-                        <div>
-                          <p className="hana-chat-settings-label">Enterで送信</p>
-                          <p className="hana-chat-settings-hint">
-                            {enterToSend
-                              ? 'Enterで送信・Shift+Enterで改行'
-                              : 'Shift+Enterで送信・Enterで改行'}
-                          </p>
+                    {desktopKeyboard ? (
+                      <div className="hana-chat-settings-section">
+                        <div className="hana-chat-settings-row">
+                          <div>
+                            <p className="hana-chat-settings-label">Enterで送信</p>
+                            <p className="hana-chat-settings-hint">
+                              {enterToSend
+                                ? 'Enterで送信・Shift+Enterで改行'
+                                : 'Shift+Enterで送信・Enterで改行'}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className={`hana-chat-hint-toggle${enterToSend ? ' is-on' : ''}`}
+                            aria-pressed={enterToSend}
+                            title={enterToSend ? 'Enter送信をオフ' : 'Enter送信をオン'}
+                            onClick={toggleEnterToSend}
+                          >
+                            <span className="hana-chat-hint-toggle-label">Enter</span>
+                            <span className="hana-chat-hint-toggle-track" aria-hidden="true">
+                              <span className="hana-chat-hint-toggle-thumb" />
+                            </span>
+                          </button>
                         </div>
-                        <button
-                          type="button"
-                          className={`hana-chat-hint-toggle${enterToSend ? ' is-on' : ''}`}
-                          aria-pressed={enterToSend}
-                          title={enterToSend ? 'Enter送信をオフ' : 'Enter送信をオン'}
-                          onClick={toggleEnterToSend}
-                        >
-                          <span className="hana-chat-hint-toggle-label">Enter</span>
-                          <span className="hana-chat-hint-toggle-track" aria-hidden="true">
-                            <span className="hana-chat-hint-toggle-thumb" />
-                          </span>
-                        </button>
                       </div>
-                    </div>
+                    ) : null}
                     <div className="hana-chat-settings-section">
                       <div className="hana-chat-settings-row">
                         <div>
@@ -2703,6 +2723,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               }}
               onKeyDown={(event) => {
                 if (event.key !== 'Enter') return
+                // Phones/tablets: leave Enter as newline (send via the button).
+                if (!desktopKeyboard) return
                 // IME composition (Japanese etc.): let Enter confirm the candidate.
                 if (event.isComposing || event.keyCode === 229) return
 
@@ -2758,7 +2780,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               maxLength={2000}
               disabled={actingAsOwner && !activeThreadId}
               autoComplete="off"
-              enterKeyHint={enterToSend ? 'send' : 'enter'}
+              enterKeyHint={enterSendsMessage ? 'send' : 'enter'}
             />
             <button
               type="submit"

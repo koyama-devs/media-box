@@ -179,13 +179,13 @@
 }
 
 .hana-chat-presence.is-busy {
-  background: #f59e0b;
-  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.28);
+  background: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.28);
 }
 
 .hana-chat-presence.is-away {
-  background: #60a5fa;
-  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.28);
+  background: #facc15;
+  box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.28);
 }
 
 .hana-chat-presence.is-menu {
@@ -216,11 +216,11 @@
 }
 
 .hana-chat-presence-label.is-busy {
-  color: rgba(251, 191, 36, 0.95);
+  color: rgba(248, 113, 113, 0.95);
 }
 
 .hana-chat-presence-label.is-away {
-  color: rgba(147, 197, 253, 0.95);
+  color: rgba(253, 224, 71, 0.95);
 }
 
 .hana-chat-presence-label.is-offline {
@@ -273,11 +273,11 @@
 }
 
 .hana-chat-status-mode-dot.is-busy {
-  background: #f59e0b;
+  background: #ef4444;
 }
 
 .hana-chat-status-mode-dot.is-away {
-  background: #60a5fa;
+  background: #facc15;
 }
 
 .hana-chat-settings-status-dot {
@@ -297,11 +297,11 @@
 }
 
 .hana-chat-settings-status-dot.is-busy {
-  background: #f59e0b;
+  background: #ef4444;
 }
 
 .hana-chat-settings-status-dot.is-away {
-  background: #60a5fa;
+  background: #facc15;
 }
 
 .hana-chat-kicker {
@@ -880,13 +880,13 @@ body.hana-chat-scroll-lock #root {
 }
 
 .hana-chat-thread-dot.is-busy {
-  background: #f59e0b;
-  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.22);
+  background: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.22);
 }
 
 .hana-chat-thread-dot.is-away {
-  background: #60a5fa;
-  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.22);
+  background: #facc15;
+  box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.22);
 }
 
 .hana-chat-thread-dot.is-offline {
@@ -1051,6 +1051,12 @@ body.hana-chat-scroll-lock #root {
    otherwise flex-end pulls the avatar down to the chip line. */
 .hana-chat-msg-row:has(.hana-chat-reactions) {
   margin-bottom: 34px;
+}
+
+/* Chips are anchored below the bubble wrap, so the flower's reserved space
+   pushes them further down. */
+.hana-chat-msg-row:has(.hana-chat-reactions):has(.has-flower) {
+  margin-bottom: 41px;
 }
 
 .hana-chat-msg-row.is-own {
@@ -1900,14 +1906,16 @@ body.hana-chat-scroll-lock #root {
 }
 
 .chat-swipe-bubble-wrap.has-flower {
-  /* Space so the corner flower isn't clipped under the next row */
-  margin-bottom: 10px;
+  /* Reserve the flower's overhang INSIDE the box: a negative `bottom` would leak
+     past the scroller's content edge and get clipped on the newest message. */
+  padding-bottom: 7px;
+  margin-bottom: 4px;
 }
 
 .hana-chat-flower-fab {
   position: absolute;
   right: -6px;
-  bottom: -7px;
+  bottom: 0;
   z-index: 8;
   display: inline-flex;
   align-items: center;
@@ -2054,7 +2062,7 @@ body.hana-chat-scroll-lock #root {
 .chat-msg-menu-overlay {
   position: fixed;
   inset: 0;
-  z-index: 2400; /* above .hana-chat (1200) */
+  z-index: 10070; /* above .hana-chat (10050) — both are body-level portals */
   /* Portaled to body, so it cannot inherit the stack from .hana-chat. */
   font-family: var(--hana-font-jp);
   display: flex;
@@ -2691,7 +2699,7 @@ body.hana-chat-scroll-lock #root {
 .hana-flower-rain {
   position: fixed;
   inset: 0;
-  z-index: 2300;
+  z-index: 10060;
   pointer-events: none;
   overflow: hidden;
 }
@@ -2872,7 +2880,7 @@ body.hana-chat-scroll-lock #root {
 .hana-emotion-moment {
   position: fixed;
   inset: 0;
-  z-index: 2500;
+  z-index: 10080;
   font-family: var(--hana-font-jp);
   display: grid;
   place-items: center;

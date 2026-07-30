@@ -935,9 +935,9 @@ const PRESENCE_ONLINE_MS = 45_000
 
 /** Manual presence modes (online/offline still come from heartbeat). */
 export const CHAT_PRESENCE_MODES = [
-  { id: 'auto', label: 'オンライン', hint: '自動（接続中はオンライン）', emoji: '🟢' },
-  { id: 'busy', label: '取り込み中', hint: '忙しいとき', emoji: '🟠' },
-  { id: 'away', label: '外出中', hint: '席を外しているとき', emoji: '🔵' },
+  { id: 'auto', label: 'オンライン', emoji: '🟢' },
+  { id: 'busy', label: '取り込み中', emoji: '🔴' },
+  { id: 'away', label: '外出中', emoji: '🟡' },
 ]
 
 export function normalizeChatPresenceMode(value) {

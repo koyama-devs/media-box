@@ -2796,7 +2796,6 @@ const playPrevious = useCallback(() => {
                             />
                             <span className="session-status-copy">
                               <strong>{mode.label}</strong>
-                              <small>{mode.hint}</small>
                             </span>
                           </button>
                         )
