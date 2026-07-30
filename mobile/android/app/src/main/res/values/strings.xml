@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Hana Mediabox</string>
+    <string name="title_activity_main">Hana Mediabox</string>
+    <string name="package_name">app.hanamediabox.mobile</string>
+    <string name="custom_url_scheme">app.hanamediabox.mobile</string>
+</resources>

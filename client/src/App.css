@@ -261,6 +261,7 @@
 }
 
 .session-user-chip {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -269,6 +270,119 @@
   border: 1px solid var(--border);
   background: rgba(15, 23, 42, 0.45);
   max-width: 220px;
+}
+
+.session-user-avatar-wrap {
+  position: relative;
+  flex-shrink: 0;
+  line-height: 0;
+}
+
+.session-status-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid #0f172a;
+  background: #8b8790;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.session-status-dot:hover,
+.session-status-dot.is-open {
+  transform: scale(1.15);
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.28);
+}
+
+.session-status-dot.is-online {
+  background: #34d399;
+}
+
+.session-status-dot.is-busy {
+  background: #f59e0b;
+}
+
+.session-status-dot.is-away {
+  background: #60a5fa;
+}
+
+.session-status-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 60;
+  min-width: 208px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.98);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.35;
+}
+
+.session-status-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-status-option:hover,
+.session-status-option.is-active {
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.session-status-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #8b8790;
+}
+
+.session-status-swatch.is-online {
+  background: #34d399;
+}
+
+.session-status-swatch.is-busy {
+  background: #f59e0b;
+}
+
+.session-status-swatch.is-away {
+  background: #60a5fa;
+}
+
+.session-status-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.session-status-copy strong {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.session-status-copy small {
+  font-size: 0.66rem;
+  opacity: 0.6;
 }
 
 .session-user-avatar-btn {

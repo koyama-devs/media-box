@@ -3,3 +3,13 @@ dist/
 .vite/
 .DS_Store
 .env
+
+# Capacitor mobile (generated / local secrets)
+mobile/www/
+mobile/android/.gradle/
+mobile/android/app/build/
+mobile/android/build/
+mobile/android/local.properties
+mobile/android/app/google-services.json
+mobile/ios/App/Pods/
+mobile/ios/App/App/GoogleService-Info.plist

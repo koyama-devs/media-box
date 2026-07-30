@@ -526,6 +526,15 @@
   background: rgba(148, 163, 184, 0.12);
 }
 
+.admin-chat-bubble.is-sticker {
+  padding: 0;
+  background: none;
+}
+
+.admin-chat-bubble.is-sticker .hana-sticker {
+  display: block;
+}
+
 .admin-chat-bubble.is-guest {
   background: rgba(148, 163, 184, 0.12);
 }

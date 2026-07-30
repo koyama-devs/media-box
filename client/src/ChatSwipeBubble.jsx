@@ -19,6 +19,10 @@ const LONG_PRESS_MOVE_PX = 28
 const MENU_ARM_MS = 280
 const MENU_DISMISS_GUARD_MS = 700
 const AXIS_LOCK_PX = 8
+// Small so a scroll drag cancels the pending long press right away.
+const PRESS_CANCEL_MOVE_PX = 10
+// Horizontal must clearly dominate, otherwise vertical scrolling wins the gesture.
+const HORIZONTAL_DOMINANCE = 1.3
 
 const MENU_EXTRA_ACTIONS = [
   { id: 'pin', label: 'ピン', icon: '📌' },
@@ -232,6 +236,7 @@ export default function ChatSwipeBubble({
   onDelete,
   onReact,
   onMenuAction,
+  onEffect,
   children,
 }) {
   const swipeMode = useIsCoarsePointer()
@@ -359,6 +364,15 @@ export default function ChatSwipeBubble({
 
   const quickReaction = String(defaultReaction || CHAT_DEFAULT_REACTION).trim() || CHAT_DEFAULT_REACTION
 
+  // Mirror the animation to the other participant.
+  const announceEffect = (payload) => {
+    try {
+      onEffect?.(payload)
+    } catch {
+      /* broadcast is best-effort */
+    }
+  }
+
   const pickReaction = (emoji, mode = 'toggle') => {
     setMenuOpen(false)
     setMenuArmed(false)
@@ -366,8 +380,10 @@ export default function ChatSwipeBubble({
     reset()
     if (emoji === quickReaction && (mode === 'increment' || mode === 'set')) {
       triggerFlowerRain({ count: 26, emoji: quickReaction })
+      announceEffect({ kind: 'flower', emoji: quickReaction })
     } else if (emoji === CHAT_PARTY_REACTION && (mode === 'increment' || mode === 'set')) {
       triggerPartyBurst({ count: 24 })
+      announceEffect({ kind: 'party' })
     }
     window.setTimeout(() => {
       try {
@@ -387,6 +403,7 @@ export default function ChatSwipeBubble({
     // Let the action menu unmount first so the moment sits above the chat.
     window.setTimeout(() => {
       triggerEmotionMoment(moment.id)
+      announceEffect({ kind: 'moment', momentId: moment.id })
       if (moment.reaction && canReact) {
         try {
           onReact?.(moment.reaction, { mode: 'set' })
@@ -404,6 +421,7 @@ export default function ChatSwipeBubble({
       count: 30,
       emoji: quickReaction,
     })
+    announceEffect({ kind: 'flower', emoji: quickReaction })
     window.setTimeout(() => {
       try {
         onReact?.(quickReaction, { mode: 'increment' })
@@ -560,19 +578,16 @@ export default function ChatSwipeBubble({
 
       const dx = touch.clientX - originX
       const dy = touch.clientY - originY
-      const moved = Math.abs(dx) > LONG_PRESS_MOVE_PX || Math.abs(dy) > LONG_PRESS_MOVE_PX
 
+      // Menu already open — the gesture belongs to the menu, not the scroller.
       if (longPressFired.current || locking.current === 'hold') {
         event.preventDefault()
         return
       }
 
-      if (pressTimer && !moved) {
-        event.preventDefault()
-        return
-      }
-
-      if (pressTimer && moved) {
+      // Never preventDefault while merely waiting for the long press: doing so
+      // cancels the browser's scroll gesture and the list becomes hard to drag.
+      if (pressTimer && (Math.abs(dx) > PRESS_CANCEL_MOVE_PX || Math.abs(dy) > PRESS_CANCEL_MOVE_PX)) {
         clearPress()
       }
 
@@ -583,12 +598,21 @@ export default function ChatSwipeBubble({
 
       if (!locking.current) {
         if (Math.abs(swipeDx) < AXIS_LOCK_PX && Math.abs(swipeDy) < AXIS_LOCK_PX) return
-        locking.current = Math.abs(swipeDx) > Math.abs(swipeDy) ? 'h' : 'v'
-        if (locking.current === 'h') setDragging(true)
+        locking.current = Math.abs(swipeDx) > Math.abs(swipeDy) * HORIZONTAL_DOMINANCE ? 'h' : 'v'
+        if (locking.current === 'h') {
+          clearPress()
+          setDragging(true)
+        } else {
+          // Vertical scroll: stop tracking so nothing fights the scroller.
+          clearPress()
+          tracking = false
+          activeTouchId.current = null
+          return
+        }
       }
 
       if (locking.current !== 'h') return
-      event.preventDefault()
+      if (event.cancelable) event.preventDefault()
       applyOffset(clampOffset(swipeDx))
     }
 
@@ -909,6 +933,7 @@ export default function ChatSwipeBubble({
                   && !reactionMine(reactions?.[CHAT_PARTY_REACTION], reactorId)
                 ) {
                   triggerPartyBurst({ count: 20 })
+                  announceEffect({ kind: 'party' })
                 }
                 onReact?.(emoji, { mode: 'toggle' })
               } : undefined}

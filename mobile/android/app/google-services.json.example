@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "334684002373",
+    "project_id": "hana-mediabox",
+    "storage_bucket": "hana-mediabox.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "REPLACE_WITH_ANDROID_APP_ID_FROM_FIREBASE_CONSOLE",
+        "android_client_info": {
+          "package_name": "app.hanamediabox.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "REPLACE_WITH_ANDROID_API_KEY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

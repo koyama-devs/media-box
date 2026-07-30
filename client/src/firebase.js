@@ -20,6 +20,7 @@ import {
     getDocs,
     getFirestore,
     increment,
+    initializeFirestore,
     limit,
     onSnapshot,
     orderBy,
@@ -60,7 +61,14 @@ try {
   // analytics may fail in non-browser envs — ignore
 }
 
-const db = getFirestore(app)
+// Android WebView (Capacitor) often fails Firestore's WebChannel streams,
+// so let the SDK fall back to long-polling when it detects a bad connection.
+let db
+try {
+  db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true })
+} catch {
+  db = getFirestore(app)
+}
 const auth = getAuth(app)
 const storage = getStorage(app)
 const googleProvider = new GoogleAuthProvider()
@@ -73,6 +81,7 @@ const SHARED_PLAYLISTS_DOC = 'playlists'
 const SHARED_SPACES_DOC = 'spaces'
 const CHAT_THREADS_COLLECTION = 'chatThreads'
 const CHAT_PROFILES_COLLECTION = 'chatProfiles'
+const PUSH_TOKENS_COLLECTION = 'pushTokens'
 const AVATAR_CACHE_PREFIX = 'hana-chat-avatar-'
 const GUEST_CHAT_ID_KEY = 'hana-chat-guest-id'
 const GUEST_LABELS = ['桜', '蜜', '月', '風', '霧', '蝶', '鈴', '露', '霞', '羽']
@@ -331,6 +340,7 @@ function serializeChatProfile(id, data) {
     passKey: account.passKey,
     roleLabel: account.roleLabel,
     avatarUrl: account.avatarUrl,
+    status: normalizeChatPresenceMode(data?.status),
     updatedAt: account.updatedAt,
   }
 }
@@ -860,12 +870,24 @@ export function reactionMine(counts, reactorId) {
   return Number(counts[rid]) || 0
 }
 
+/**
+ * Hana sticker id carried alongside the text. Kept as a loose slug check so
+ * this module stays decoupled from the sticker artwork; unknown ids simply fall
+ * back to rendering the message text.
+ */
+export function normalizeChatSticker(value) {
+  const id = String(value || '').trim().toLowerCase()
+  if (!id || id.length > 32) return ''
+  return /^[a-z0-9_-]+$/.test(id) ? id : ''
+}
+
 function serializeChatMessage(id, data) {
   const deleted = Boolean(data?.deleted)
   return {
     id,
     text: deleted ? '（削除されたメッセージ）' : String(data?.text || ''),
     rawText: String(data?.text || ''),
+    sticker: deleted ? '' : normalizeChatSticker(data?.sticker),
     sender: data?.sender === 'hana' ? 'hana' : 'guest',
     createdAt: data?.createdAt?.toDate?.()?.toISOString?.() || data?.createdAtIso || null,
     editedAt: data?.editedAt?.toDate?.()?.toISOString?.() || data?.editedAtIso || null,
@@ -901,8 +923,11 @@ function serializeChatThread(id, data) {
     guestLastReadAt: data?.guestLastReadAt?.toDate?.()?.toISOString?.() || data?.guestLastReadAtIso || null,
     guestOnlineAt: data?.guestOnlineAt?.toDate?.()?.toISOString?.() || data?.guestOnlineAtIso || null,
     hanaOnlineAt: data?.hanaOnlineAt?.toDate?.()?.toISOString?.() || data?.hanaOnlineAtIso || null,
+    guestTypingAt: data?.guestTypingAt?.toDate?.()?.toISOString?.() || data?.guestTypingAtIso || null,
+    hanaTypingAt: data?.hanaTypingAt?.toDate?.()?.toISOString?.() || data?.hanaTypingAtIso || null,
     guestStatus: normalizeChatPresenceMode(data?.guestStatus),
     hanaStatus: normalizeChatPresenceMode(data?.hanaStatus),
+    lastEffect: serializeChatEffect(data?.lastEffect),
   }
 }
 
@@ -964,6 +989,25 @@ export async function pulseChatPresence(threadId, role) {
 }
 
 /**
+ * Ephemeral typing heartbeat. It deliberately does not touch `updatedAt`, so
+ * typing never reorders the inbox or changes unread-message state.
+ */
+export async function setChatTyping(threadId, role, typing = true) {
+  if (!threadId || (role !== 'guest' && role !== 'hana')) return
+  const nowIso = new Date().toISOString()
+  const patch = role === 'hana'
+    ? {
+        hanaTypingAt: typing ? serverTimestamp() : null,
+        hanaTypingAtIso: typing ? nowIso : null,
+      }
+    : {
+        guestTypingAt: typing ? serverTimestamp() : null,
+        guestTypingAtIso: typing ? nowIso : null,
+      }
+  await setDoc(doc(db, CHAT_THREADS_COLLECTION, threadId), patch, { merge: true })
+}
+
+/**
  * Set manual presence mode for a role on a thread.
  * @param {string} threadId
  * @param {'guest'|'hana'} role
@@ -976,6 +1020,75 @@ export async function setChatPresenceStatus(threadId, role, status) {
     ? { hanaStatus: mode }
     : { guestStatus: mode }
   await setDoc(doc(db, CHAT_THREADS_COLLECTION, threadId), patch, { merge: true })
+}
+
+/**
+ * Manual status lives on the profile so it is the same everywhere (main page + chat)
+ * instead of being set per conversation.
+ * @param {string} profileId
+ * @param {'auto'|'busy'|'away'} status
+ */
+export async function setChatProfileStatus(profileId, status) {
+  const id = String(profileId || '').trim().toLowerCase()
+  if (!id) return
+  await setDoc(
+    doc(db, CHAT_PROFILES_COLLECTION, id),
+    {
+      status: normalizeChatPresenceMode(status),
+      updatedAt: serverTimestamp(),
+      updatedAtIso: new Date().toISOString(),
+    },
+    { merge: true },
+  )
+}
+
+/** How long a broadcast effect stays "fresh" enough to replay on the other side. */
+export const CHAT_EFFECT_TTL_MS = 12_000
+
+/**
+ * Broadcast a reaction / special effect so the other side plays the same animation.
+ * Stored on the thread doc (both roles already subscribe to it).
+ * @param {{
+ *   threadId: string,
+ *   kind: 'flower'|'party'|'moment',
+ *   by: 'guest'|'hana',
+ *   emoji?: string,
+ *   momentId?: string,
+ * }} payload
+ */
+export async function broadcastChatEffect({ threadId, kind, by, emoji, momentId } = {}) {
+  if (!threadId) return
+  const type = kind === 'party' || kind === 'moment' ? kind : 'flower'
+  const role = by === 'hana' ? 'hana' : 'guest'
+  await setDoc(
+    doc(db, CHAT_THREADS_COLLECTION, threadId),
+    {
+      lastEffect: {
+        nonce: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        kind: type,
+        by: role,
+        emoji: String(emoji || '').slice(0, 8),
+        momentId: String(momentId || '').slice(0, 32),
+        atIso: new Date().toISOString(),
+      },
+    },
+    { merge: true },
+  )
+}
+
+function serializeChatEffect(raw) {
+  const nonce = String(raw?.nonce || '').trim()
+  if (!nonce) return null
+  const atIso = String(raw?.atIso || '')
+  return {
+    nonce,
+    kind: raw?.kind === 'party' || raw?.kind === 'moment' ? raw.kind : 'flower',
+    by: raw?.by === 'hana' ? 'hana' : 'guest',
+    emoji: String(raw?.emoji || ''),
+    momentId: String(raw?.momentId || ''),
+    atIso,
+    atMs: atIso ? new Date(atIso).getTime() : 0,
+  }
 }
 
 /** Format message timestamp for chat UI (Asia/Tokyo-friendly local). */
@@ -1155,7 +1268,43 @@ export function subscribeChatThreads(onData, onError) {
  *   replyTo?: { id: string, text: string, sender: string }|null,
  * }} payload
  */
-export async function sendChatMessage({ threadId, text, sender, guestLabel, guestKey, replyTo }) {
+async function hashPushToken(token) {
+  const raw = String(token || '')
+  if (!raw) return ''
+  try {
+    const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw))
+    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
+  } catch {
+    let hash = 0
+    for (let i = 0; i < raw.length; i += 1) {
+      hash = (Math.imul(31, hash) + raw.charCodeAt(i)) | 0
+    }
+    return `f_${(hash >>> 0).toString(36)}_${raw.length}`
+  }
+}
+
+/**
+ * Register/update an FCM device token for a chat account key (e.g. zen, hana).
+ * Used by the Capacitor shell; safe no-op if token/user missing.
+ */
+export async function savePushToken({ userKey, token, platform } = {}) {
+  const key = normalizeAccountKey(userKey)
+  const value = String(token || '').trim()
+  if (!key || !value) return null
+  const id = await hashPushToken(value)
+  if (!id) return null
+  const payload = {
+    userKey: key,
+    token: value,
+    platform: String(platform || 'unknown').slice(0, 32),
+    updatedAt: serverTimestamp(),
+    updatedAtIso: new Date().toISOString(),
+  }
+  await setDoc(doc(db, PUSH_TOKENS_COLLECTION, id), payload, { merge: true })
+  return id
+}
+
+export async function sendChatMessage({ threadId, text, sender, guestLabel, guestKey, replyTo, sticker }) {
   const trimmed = String(text || '').trim()
   if (!threadId || !trimmed) return null
   if (trimmed.length > 2000) {
@@ -1192,12 +1341,14 @@ export async function sendChatMessage({ threadId, text, sender, guestLabel, gues
     { merge: true },
   )
 
+  const stickerId = normalizeChatSticker(sticker)
   const payload = {
     text: trimmed,
     sender: role,
     createdAt: serverTimestamp(),
     createdAtIso: nowIso,
     deleted: false,
+    ...(stickerId ? { sticker: stickerId } : {}),
   }
   if (replyTo?.id) {
     payload.replyToId = String(replyTo.id)

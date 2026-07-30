@@ -5,6 +5,7 @@ import hanachanArt from './assets/hanachan.svg'
 import { clearBookBookmark, getAllBookBookmarks, getBookBookmark } from './bookProgress'
 import DailyKotoba from './DailyKotoba'
 import {
+  CHAT_PRESENCE_MODES,
   deleteMediaItem,
   ensureDefaultChatAccounts,
   findChatAccountByPassKey,
@@ -14,11 +15,14 @@ import {
   loadMediaBytes,
   MAX_BOOK_FILE_SIZE,
   MAX_FILE_SIZE,
+  normalizeChatPresenceMode,
   recordAccessVisit,
   resolveAvatarSrc,
   resolveSessionProfile,
+  savePushToken,
   saveSharedPlaylists,
   saveSharedSpaces,
+  setChatProfileStatus,
   sortMediaItems,
   subscribeChatAccounts,
   subscribeChatProfile,
@@ -360,9 +364,12 @@ function App() {
   const [authRole, setAuthRole] = useState(() => readStoredAuthRole())
   const [guestKey, setGuestKey] = useState(() => readStoredGuestKey())
   const [sessionAvatarUrl, setSessionAvatarUrl] = useState('')
+  const [sessionStatus, setSessionStatus] = useState('auto')
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false)
   const [avatarUploading, setAvatarUploading] = useState(false)
   const [chatAccounts, setChatAccounts] = useState(() => [])
   const avatarInputRef = useRef(null)
+  const statusChipRef = useRef(null)
 
   useEffect(() => {
     let cancelled = false
@@ -379,6 +386,40 @@ function App() {
     }
   }, [])
 
+  // Capacitor only: persist FCM token for the logged-in chat account.
+  useEffect(() => {
+    if (!isLoggedIn || !guestKey) return undefined
+
+    const persist = (token, platform) => {
+      const value = String(token || '').trim()
+      if (!value) return
+      savePushToken({
+        userKey: guestKey,
+        token: value,
+        platform: platform || window.__HANA_CAPACITOR__?.platform || 'native',
+      }).catch((err) => {
+        console.warn('[push] save token failed', err)
+      })
+    }
+
+    const existing =
+      window.__HANA_CAPACITOR__?.pushToken
+      || (() => {
+        try {
+          return window.localStorage.getItem('hana_fcm_token') || ''
+        } catch {
+          return ''
+        }
+      })()
+    if (existing) persist(existing)
+
+    const onToken = (event) => {
+      persist(event?.detail?.token, event?.detail?.platform)
+    }
+    window.addEventListener('hana-push-token', onToken)
+    return () => window.removeEventListener('hana-push-token', onToken)
+  }, [isLoggedIn, guestKey])
+
   const sessionProfile = useMemo(
     () => resolveSessionProfile(authRole, guestKey),
     [authRole, guestKey, chatAccounts],
@@ -393,6 +434,11 @@ function App() {
     ),
     [sessionProfile, sessionAvatarUrl],
   )
+  const sessionStatusMode = useMemo(
+    () => CHAT_PRESENCE_MODES.find((mode) => mode.id === sessionStatus) || CHAT_PRESENCE_MODES[0],
+    [sessionStatus],
+  )
+  const sessionStatusClass = sessionStatus === 'auto' ? 'is-online' : `is-${sessionStatus}`
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [items, setItems] = useState([])
@@ -1689,6 +1735,7 @@ const playPrevious = useCallback(() => {
   useEffect(() => {
     if (!isLoggedIn) {
       setSessionAvatarUrl('')
+      setSessionStatus('auto')
       return undefined
     }
     setSessionAvatarUrl('')
@@ -1696,10 +1743,27 @@ const playPrevious = useCallback(() => {
       sessionProfile.id,
       (profile) => {
         setSessionAvatarUrl(profile?.avatarUrl || '')
+        setSessionStatus(normalizeChatPresenceMode(profile?.status))
       },
       () => {},
     )
   }, [isLoggedIn, sessionProfile.id])
+
+  useEffect(() => {
+    if (!statusMenuOpen) return undefined
+    const onPointerDown = (event) => {
+      if (!statusChipRef.current?.contains(event.target)) setStatusMenuOpen(false)
+    }
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setStatusMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [statusMenuOpen])
 
   useEffect(() => {
     if (!isLoggedIn) {
@@ -2106,6 +2170,17 @@ const playPrevious = useCallback(() => {
       setError(getFirebaseErrorMessage(avatarError) || avatarError?.message || 'アバターの更新に失敗しました。')
     } finally {
       setAvatarUploading(false)
+    }
+  }
+
+  const applySessionStatus = async (mode) => {
+    const next = normalizeChatPresenceMode(mode)
+    setSessionStatus(next)
+    setStatusMenuOpen(false)
+    try {
+      await setChatProfileStatus(sessionProfile.id, next)
+    } catch (statusError) {
+      setError(getFirebaseErrorMessage(statusError) || statusError?.message || 'ステータスの更新に失敗しました。')
     }
   }
 
@@ -2678,16 +2753,57 @@ const playPrevious = useCallback(() => {
               <span className="stat-badge" title="全メディアの合計サイズ">
                 {mediaCounts.totalSize ? formatSize(mediaCounts.totalSize) : '0 MB'}
               </span>
-              <div className="session-user-chip" title={`${sessionProfile.displayName}（アバターをタップで変更）`}>
-                <button
-                  type="button"
-                  className="session-user-avatar-btn"
-                  onClick={() => avatarInputRef.current?.click()}
-                  disabled={avatarUploading}
-                  aria-label="アバターを変更"
-                >
-                  <img src={sessionAvatarSrc} alt="" className="session-user-avatar" />
-                </button>
+              <div
+                className="session-user-chip"
+                ref={statusChipRef}
+                title={`${sessionProfile.displayName}（アバターをタップで変更）`}
+              >
+                <div className="session-user-avatar-wrap">
+                  <button
+                    type="button"
+                    className="session-user-avatar-btn"
+                    onClick={() => avatarInputRef.current?.click()}
+                    disabled={avatarUploading}
+                    aria-label="アバターを変更"
+                  >
+                    <img src={sessionAvatarSrc} alt="" className="session-user-avatar" />
+                  </button>
+                  <button
+                    type="button"
+                    className={`session-status-dot ${sessionStatusClass}${statusMenuOpen ? ' is-open' : ''}`}
+                    aria-expanded={statusMenuOpen}
+                    aria-haspopup="listbox"
+                    aria-label={`ステータス: ${sessionStatusMode.label}`}
+                    title={`ステータス: ${sessionStatusMode.label}`}
+                    onClick={() => setStatusMenuOpen((value) => !value)}
+                  />
+                  {statusMenuOpen ? (
+                    <div className="session-status-menu" role="listbox" aria-label="自分のステータス">
+                      {CHAT_PRESENCE_MODES.map((mode) => {
+                        const selected = mode.id === sessionStatus
+                        return (
+                          <button
+                            key={mode.id}
+                            type="button"
+                            role="option"
+                            aria-selected={selected}
+                            className={`session-status-option${selected ? ' is-active' : ''}`}
+                            onClick={() => { void applySessionStatus(mode.id) }}
+                          >
+                            <span
+                              className={`session-status-swatch ${mode.id === 'auto' ? 'is-online' : `is-${mode.id}`}`}
+                              aria-hidden="true"
+                            />
+                            <span className="session-status-copy">
+                              <strong>{mode.label}</strong>
+                              <small>{mode.hint}</small>
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ) : null}
+                </div>
                 <div className="session-user-meta">
                   <strong>{sessionProfile.displayName}</strong>
                 </div>

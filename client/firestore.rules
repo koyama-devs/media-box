@@ -68,6 +68,18 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /pushTokens/{tokenId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['userKey', 'token'])
+        && request.resource.data.userKey is string
+        && request.resource.data.userKey.size() > 0
+        && request.resource.data.userKey.size() <= 40
+        && request.resource.data.token is string
+        && request.resource.data.token.size() > 10
+        && request.resource.data.token.size() <= 4096;
+      allow delete: if true;
+    }
+
     // Private shared-password app: owner (password hana) may list without Google admin.
     match /chatThreads/{threadId} {
       allow read, create, update: if true;

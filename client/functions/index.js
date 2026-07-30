@@ -1,9 +1,16 @@
 const { onCall, HttpsError } = require('firebase-functions/v2/https')
+const { onDocumentCreated } = require('firebase-functions/v2/firestore')
 const { setGlobalOptions } = require('firebase-functions/v2')
 const { initializeApp } = require('firebase-admin/app')
+const { getFirestore } = require('firebase-admin/firestore')
+const { getMessaging } = require('firebase-admin/messaging')
 
 setGlobalOptions({ region: 'asia-northeast1' })
 initializeApp()
+
+const OWNER_PUSH_KEY = 'hana'
+const PUSH_TOKENS_COLLECTION = 'pushTokens'
+const CHAT_THREADS_COLLECTION = 'chatThreads'
 
 const SYSTEM_PROMPT = `あなたは「はなちゃん」。Hana Mediabox（共有メディアスペース）の案内マスコットです。
 口調はやさしく、少し可愛らしく、敬語すぎず親しみやすい日本語で話します。短めの返信を心がけてください。
@@ -274,3 +281,121 @@ exports.translateHanaChat = onCall({ cors: true }, async (request) => {
     throw new HttpsError('internal', '翻訳できませんでした')
   }
 })
+
+function resolveGuestKeyFromThread(threadId, threadData) {
+  const fromDoc = String(threadData?.guestKey || '').trim().toLowerCase()
+  if (fromDoc) return fromDoc
+  const match = String(threadId || '').match(/^guest-(.+)$/i)
+  return match ? String(match[1] || '').trim().toLowerCase() : ''
+}
+
+function previewText(text) {
+  const raw = String(text || '').replace(/\s+/g, ' ').trim()
+  if (!raw) return '新しいメッセージ'
+  return raw.length > 100 ? `${raw.slice(0, 100)}…` : raw
+}
+
+/**
+ * When a chat message is created, notify the other party's registered devices.
+ * guest → owner (hana); hana → that thread's guest.
+ */
+exports.notifyOnChatMessage = onDocumentCreated(
+  {
+    document: `${CHAT_THREADS_COLLECTION}/{threadId}/messages/{messageId}`,
+    region: 'asia-northeast1',
+  },
+  async (event) => {
+    const snap = event.data
+    if (!snap) return null
+    const message = snap.data() || {}
+    if (message.deleted) return null
+
+    const sender = message.sender === 'hana' ? 'hana' : message.sender === 'guest' ? 'guest' : ''
+    if (!sender) return null
+
+    const threadId = event.params.threadId
+    const db = getFirestore()
+    const threadSnap = await db.collection(CHAT_THREADS_COLLECTION).doc(threadId).get()
+    const threadData = threadSnap.exists ? threadSnap.data() : {}
+
+    let targetUserKey = ''
+    let title = 'Hana Mediabox'
+    if (sender === 'guest') {
+      targetUserKey = OWNER_PUSH_KEY
+      title = String(threadData?.guestLabel || resolveGuestKeyFromThread(threadId, threadData) || 'ゲスト')
+    } else {
+      targetUserKey = resolveGuestKeyFromThread(threadId, threadData)
+      title = 'はな'
+    }
+    if (!targetUserKey) return null
+
+    const tokensSnap = await db
+      .collection(PUSH_TOKENS_COLLECTION)
+      .where('userKey', '==', targetUserKey)
+      .limit(50)
+      .get()
+
+    const tokenDocs = tokensSnap.docs
+      .map((document) => ({ id: document.id, token: String(document.data()?.token || '').trim() }))
+      .filter((row) => row.token)
+
+    if (!tokenDocs.length) {
+      console.info('notifyOnChatMessage: no tokens for', targetUserKey)
+      return null
+    }
+
+    const body = previewText(message.text)
+    const tokens = tokenDocs.map((row) => row.token)
+    const response = await getMessaging().sendEachForMulticast({
+      tokens,
+      notification: {
+        title,
+        body,
+      },
+      data: {
+        threadId: String(threadId),
+        sender: String(sender),
+        type: 'chat',
+      },
+      android: {
+        priority: 'high',
+        notification: {
+          channelId: 'hana_chat',
+          sound: 'default',
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: 'default',
+            badge: 1,
+          },
+        },
+      },
+    })
+
+    const staleIds = []
+    response.responses.forEach((result, index) => {
+      if (result.success) return
+      const code = result.error?.code || ''
+      if (
+        code === 'messaging/registration-token-not-registered'
+        || code === 'messaging/invalid-registration-token'
+      ) {
+        staleIds.push(tokenDocs[index].id)
+      } else {
+        console.warn('notifyOnChatMessage send fail', code, result.error?.message)
+      }
+    })
+
+    await Promise.all(
+      staleIds.map((id) => db.collection(PUSH_TOKENS_COLLECTION).doc(id).delete().catch(() => null)),
+    )
+
+    console.info(
+      'notifyOnChatMessage',
+      { targetUserKey, sent: response.successCount, failed: response.failureCount, cleaned: staleIds.length },
+    )
+    return null
+  },
+)

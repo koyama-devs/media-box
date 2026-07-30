@@ -1,0 +1,30 @@
+{
+  "name": "hana-mediabox-mobile",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Capacitor shell for Hana Mediabox — parallel to client/ web app",
+  "type": "module",
+  "scripts": {
+    "sync:web": "node ./scripts/sync-web.mjs",
+    "sync:web:build": "node ./scripts/sync-web.mjs --build",
+    "cap:sync": "npm run sync:web && npx cap sync",
+    "cap:sync:build": "npm run sync:web:build && npx cap sync",
+    "android": "npx cap open android",
+    "ios": "npx cap open ios",
+    "add:android": "npx cap add android",
+    "add:ios": "npx cap add ios"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.4.3",
+    "@capacitor/app": "^7.1.0",
+    "@capacitor/core": "^7.4.3",
+    "@capacitor/ios": "^7.4.3",
+    "@capacitor/keyboard": "^7.0.3",
+    "@capacitor/push-notifications": "^7.0.3",
+    "@capacitor/splash-screen": "^7.0.3",
+    "@capacitor/status-bar": "^7.0.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.4.3"
+  }
+}

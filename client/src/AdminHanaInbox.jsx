@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
 import FlowerRainLayer from './FlowerRain'
 import EmotionMomentLayer from './EmotionMoment'
+import HanaSticker, { isHanaSticker } from './HanaStickers'
 import { readDefaultReaction } from './chatSettings'
 import hanachanArt from './assets/hanachan.svg'
 import {
@@ -834,6 +835,7 @@ export default function AdminHanaInbox() {
                     const timeLabel = formatChatTimestamp(message.createdAt)
                     const mutable = message.sender === 'hana' && canMutateOwnMessage(message)
                     const isOwn = message.sender === 'hana'
+                    const showsSticker = !message.deleted && isHanaSticker(message.sticker)
                     const avatarSrc = avatarSrcForMessage(message)
                     return (
                       <div key={message.id} className={`hana-chat-msg-row ${isOwn ? 'is-own' : 'is-other'}`}>
@@ -871,14 +873,18 @@ export default function AdminHanaInbox() {
                             onReact={(emoji, options) => { void handleReact(message, emoji, options) }}
                             onMenuAction={(actionId) => handleMenuAction(actionId, message)}
                           >
-                            <div className={`admin-chat-bubble is-${message.sender}${message.deleted ? ' is-deleted' : ''}`}>
+                            <div className={`admin-chat-bubble is-${message.sender}${message.deleted ? ' is-deleted' : ''}${showsSticker ? ' is-sticker' : ''}`}>
                               {message.replyTo ? (
                                 <div className="hana-chat-quote">
                                   <strong>{labelForSender(message.replyTo.sender)}</strong>
                                   <span>{message.replyTo.text}</span>
                                 </div>
                               ) : null}
-                              <p>{message.text}</p>
+                              {showsSticker ? (
+                                <HanaSticker id={message.sticker} size={96} title={message.text} />
+                              ) : (
+                                <p>{message.text}</p>
+                              )}
                               {translations[message.id] ? (
                                 <p className="hana-chat-translation">{translations[message.id]}</p>
                               ) : null}
