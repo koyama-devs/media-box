@@ -13,14 +13,18 @@ import {
 import ChatImageLightbox from './ChatImageLightbox'
 import { playChatNotifySound, unlockChatNotifySound } from './chatNotifySound'
 import {
+  CHAT_TRANSLATE_LANGS,
   readDefaultReaction,
   readEnterToSend,
   readMessageSound,
   readStickerSet,
+  readTranslateLang,
+  translateLangLabel,
   writeDefaultReaction,
   writeEnterToSend,
   writeMessageSound,
   writeStickerSet,
+  writeTranslateLang,
 } from './chatSettings'
 import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
 import EmotionMomentLayer, { EMOTION_MOMENTS, triggerEmotionMoment } from './EmotionMoment'
@@ -316,6 +320,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   // Soft-keyboard phones/tablets keep Enter = newline; the toggle is desktop-only.
   const enterSendsMessage = desktopKeyboard && enterToSend
   const [messageSound, setMessageSound] = useState(() => readMessageSound())
+  const [translateLang, setTranslateLang] = useState(() => readTranslateLang())
   const [chatAccounts, setChatAccounts] = useState(() => listGuestProfiles())
   const [copyNote, setCopyNote] = useState('')
   const [actionNote, setActionNote] = useState('')
@@ -1340,6 +1345,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     })
   }
 
+  const applyTranslateLang = (langId) => {
+    setTranslateLang(writeTranslateLang(langId))
+  }
+
   // Grow the composer with the draft, then let it scroll once it hits the line cap.
   const resizeComposer = useCallback(() => {
     const el = inputRef.current
@@ -1925,15 +1934,17 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     if (actionId === 'translate') {
       const text = String(message.rawText || message.text || '').trim()
       if (!text) return true
-      notifyAction('翻訳中…')
-      void translateChatMessage({ text, targetLang: 'ja' })
+      const targetLang = translateLang || readTranslateLang()
+      const langLabel = translateLangLabel(targetLang)
+      notifyAction(`${langLabel}に翻訳中…`)
+      void translateChatMessage({ text, targetLang })
         .then((data) => {
           if (!data.translation) {
             notifyAction(data.reason === 'quota' ? '翻訳クォータ不足です' : '翻訳に失敗しました')
             return
           }
           setTranslations((prev) => ({ ...prev, [message.id]: data.translation }))
-          notifyAction('翻訳しました')
+          notifyAction(`${langLabel}に翻訳しました`)
         })
         .catch((err) => {
           notifyAction(getFirebaseErrorMessage(err) || '翻訳に失敗しました')
@@ -2466,6 +2477,27 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                             <span className="hana-chat-hint-toggle-thumb" />
                           </span>
                         </button>
+                      </div>
+                    </div>
+                    <div className="hana-chat-settings-section">
+                      <p className="hana-chat-settings-label">翻訳先</p>
+                      <p className="hana-chat-settings-hint">
+                        長押しメニューの「翻訳」で {translateLangLabel(translateLang)} に訳す
+                      </p>
+                      <div className="hana-chat-settings-langs" role="listbox" aria-label="翻訳先の言語">
+                        {CHAT_TRANSLATE_LANGS.map((lang) => (
+                          <button
+                            key={lang.id}
+                            type="button"
+                            role="option"
+                            aria-selected={translateLang === lang.id}
+                            className={`hana-chat-settings-lang${translateLang === lang.id ? ' is-active' : ''}`}
+                            onClick={() => applyTranslateLang(lang.id)}
+                          >
+                            <strong>{lang.short}</strong>
+                            <span>{lang.label}</span>
+                          </button>
+                        ))}
                       </div>
                     </div>
                     {actingAsOwner ? (

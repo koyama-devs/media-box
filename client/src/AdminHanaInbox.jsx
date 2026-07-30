@@ -11,7 +11,7 @@ import {
     remindAtFromChoice,
     toggleChatPin,
 } from './chatExtras'
-import { readDefaultReaction } from './chatSettings'
+import { readDefaultReaction, readTranslateLang, translateLangLabel } from './chatSettings'
 import {
     clearAllChatHistories,
     clearChatThreadHistory,
@@ -378,15 +378,17 @@ export default function AdminHanaInbox() {
     if (actionId === 'translate') {
       const text = String(message.rawText || message.text || '').trim()
       if (!text) return true
-      setStatusNote('翻訳中…')
-      void translateChatMessage({ text, targetLang: 'ja' })
+      const targetLang = readTranslateLang()
+      const langLabel = translateLangLabel(targetLang)
+      setStatusNote(`${langLabel}に翻訳中…`)
+      void translateChatMessage({ text, targetLang })
         .then((data) => {
           if (!data.translation) {
             setStatusNote(data.reason === 'quota' ? '翻訳クォータ不足です' : '翻訳に失敗しました')
             return
           }
           setTranslations((prev) => ({ ...prev, [message.id]: data.translation }))
-          setStatusNote('翻訳しました')
+          setStatusNote(`${langLabel}に翻訳しました`)
         })
         .catch((err) => {
           setStatusNote(getFirebaseErrorMessage(err) || '翻訳に失敗しました')

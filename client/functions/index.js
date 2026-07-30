@@ -212,16 +212,24 @@ exports.suggestHanaChat = onCall({ cors: true }, async (request) => {
   }
 })
 
-const TRANSLATE_SYSTEM_PROMPT = `あなたは翻訳アシスタントです。入力文を自然で読みやすい日本語に翻訳してください。
+const TRANSLATE_LANG_LABELS = {
+  ja: 'Japanese',
+  en: 'English',
+  vi: 'Vietnamese',
+  zh: 'Chinese',
+  ko: 'Korean',
+}
+
+const TRANSLATE_SYSTEM_PROMPT_JA = `あなたは翻訳アシスタントです。入力文を自然で読みやすい日本語に翻訳してください。
 すでに日本語なら、より自然な日本語に整えてください。
 説明や注釈は書かず、翻訳文だけを返してください。`
 
 async function callGeminiTranslate({ apiKey, text, targetLang }) {
   const lang = String(targetLang || 'ja').trim().toLowerCase()
-  const langLabel = lang === 'en' ? 'English' : lang === 'vi' ? 'Vietnamese' : 'Japanese'
+  const langLabel = TRANSLATE_LANG_LABELS[lang] || 'Japanese'
   const systemText = lang === 'ja'
-    ? TRANSLATE_SYSTEM_PROMPT
-    : `You are a translation assistant. Translate the input into natural ${langLabel}. Return only the translation, no notes.`
+    ? TRANSLATE_SYSTEM_PROMPT_JA
+    : `You are a translation assistant. Translate the input into natural ${langLabel}. If the input is already ${langLabel}, lightly polish it. Return only the translation, no notes or quotes.`
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${encodeURIComponent(apiKey)}`
   const response = await fetch(url, {
@@ -261,7 +269,8 @@ exports.translateHanaChat = onCall({ cors: true }, async (request) => {
     throw new HttpsError('invalid-argument', 'text too long')
   }
 
-  const targetLang = String(request.data?.targetLang || 'ja').trim().toLowerCase() || 'ja'
+  const rawLang = String(request.data?.targetLang || 'ja').trim().toLowerCase() || 'ja'
+  const targetLang = TRANSLATE_LANG_LABELS[rawLang] ? rawLang : 'ja'
   const key = process.env.GEMINI_API_KEY || ''
   if (!key) {
     return { translation: null, reason: 'quota' }
@@ -272,6 +281,7 @@ exports.translateHanaChat = onCall({ cors: true }, async (request) => {
     return {
       translation: translation || null,
       reason: translation ? null : 'empty',
+      targetLang,
     }
   } catch (error) {
     console.error('translateHanaChat', error)
