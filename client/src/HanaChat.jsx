@@ -2799,7 +2799,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     {actingAsOwner && !isOwn && ownerAssist[message.id] ? (
                       <OwnerMessageAssist
                         assist={ownerAssist[message.id]}
-                        onCopy={notifyCopied}
                         onRetry={() => { void requestOwnerAssist(message, { force: true }) }}
                         onUseReply={applyOwnerSuggest}
                       />

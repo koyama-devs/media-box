@@ -2,23 +2,10 @@
  * Owner-only private assist card under a guest bubble.
  * Never synced to Firestore — guests never see this UI.
  */
-export default function OwnerMessageAssist({ assist, onRetry, onCopy, onUseReply }) {
+export default function OwnerMessageAssist({ assist, onRetry, onUseReply }) {
   if (!assist) return null
 
   const status = assist.status || 'loading'
-  const copy = async (text) => {
-    const value = String(text || '').trim()
-    if (!value) {
-      onCopy?.(false)
-      return
-    }
-    try {
-      await navigator.clipboard.writeText(value)
-      onCopy?.(true)
-    } catch {
-      onCopy?.(false)
-    }
-  }
 
   if (status === 'loading') {
     return (
@@ -54,7 +41,6 @@ export default function OwnerMessageAssist({ assist, onRetry, onCopy, onUseReply
         <div className="hana-owner-assist-block">
           <div className="hana-owner-assist-block-head">
             <strong>ベトナム語</strong>
-            <button type="button" onClick={() => { void copy(assist.translationVi) }}>コピー</button>
           </div>
           <p className="hana-owner-assist-text">{assist.translationVi}</p>
         </div>
@@ -64,7 +50,6 @@ export default function OwnerMessageAssist({ assist, onRetry, onCopy, onUseReply
         <div className="hana-owner-assist-block">
           <div className="hana-owner-assist-block-head">
             <strong>読み（ひらがな）</strong>
-            <button type="button" onClick={() => { void copy(assist.readingHiragana) }}>コピー</button>
           </div>
           <p className="hana-owner-assist-text is-reading">{assist.readingHiragana}</p>
         </div>
@@ -81,20 +66,16 @@ export default function OwnerMessageAssist({ assist, onRetry, onCopy, onUseReply
                 <div className="hana-owner-assist-reply-line">
                   <span className="hana-owner-assist-lang">JP</span>
                   <p>{reply.ja}</p>
-                  <div className="hana-owner-assist-actions">
-                    <button type="button" onClick={() => { void copy(reply.ja) }}>コピー</button>
-                    {onUseReply ? (
+                  {onUseReply ? (
+                    <div className="hana-owner-assist-actions">
                       <button type="button" onClick={() => onUseReply(reply.ja)}>使う</button>
-                    ) : null}
-                  </div>
+                    </div>
+                  ) : null}
                 </div>
                 {reply.vi ? (
                   <div className="hana-owner-assist-reply-line is-vi">
                     <span className="hana-owner-assist-lang">VI</span>
                     <p>{reply.vi}</p>
-                    <div className="hana-owner-assist-actions">
-                      <button type="button" onClick={() => { void copy(reply.vi) }}>コピー</button>
-                    </div>
                   </div>
                 ) : null}
               </li>

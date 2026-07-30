@@ -1057,7 +1057,6 @@ export default function AdminHanaInbox() {
                           {!isOwn && ownerAssist[message.id] ? (
                             <OwnerMessageAssist
                               assist={ownerAssist[message.id]}
-                              onCopy={(ok) => setStatusNote(ok ? 'コピーしました' : 'コピーに失敗しました')}
                               onRetry={() => { void requestOwnerAssist(message, { force: true }) }}
                               onUseReply={(text) => {
                                 setDraft(String(text || '').trim())
