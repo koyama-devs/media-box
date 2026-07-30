@@ -1205,6 +1205,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         text: m.text,
         rawText: m.rawText,
         sticker: m.sticker || '',
+        effect: m.effect || '',
+        effectEmoji: m.effectEmoji || '',
+        imageUrl: m.imageUrl || '',
         createdAt: m.createdAt,
         editedAt: m.editedAt,
         deleted: m.deleted,
@@ -1212,6 +1215,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         sender: m.sender || m.role,
         reactions: m.reactions || {},
         pending: Boolean(m.pending),
+        uploading: Boolean(m.uploading),
       }))
     : aiMessages
 
