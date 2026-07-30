@@ -535,6 +535,15 @@
   display: block;
 }
 
+.admin-chat-bubble.is-effect {
+  padding: 6px 4px 8px;
+  background: none;
+}
+
+.admin-chat-bubble.is-effect .hana-chat-effect-msg-caption {
+  color: #e2e8f0;
+}
+
 .admin-chat-bubble.is-guest {
   background: rgba(148, 163, 184, 0.12);
 }

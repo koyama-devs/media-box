@@ -942,6 +942,8 @@ body.hana-chat-scroll-lock #root {
   -webkit-overflow-scrolling: touch;
   padding: 12px;
   padding-top: 28px;
+  /* Room for the newest bubble's corner flower to clear the scroller edge. */
+  padding-bottom: 20px;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -1056,7 +1058,7 @@ body.hana-chat-scroll-lock #root {
 /* Chips are anchored below the bubble wrap, so the flower's reserved space
    pushes them further down. */
 .hana-chat-msg-row:has(.hana-chat-reactions):has(.has-flower) {
-  margin-bottom: 41px;
+  margin-bottom: 45px;
 }
 
 .hana-chat-msg-row.is-own {
@@ -1948,10 +1950,11 @@ body.hana-chat-scroll-lock #root {
 }
 
 .chat-swipe-bubble-wrap.has-flower {
-  /* Reserve the flower's overhang INSIDE the box: a negative `bottom` would leak
-     past the scroller's content edge and get clipped on the newest message. */
-  padding-bottom: 7px;
-  margin-bottom: 4px;
+  /* Reserve the flower's room INSIDE the box. A negative `bottom` — or a bottom
+     margin, which scroll containers may leave out of their scrollable area —
+     lets the corner fall past the scroller's edge on the newest message. */
+  padding-bottom: 11px;
+  margin-bottom: 0;
 }
 
 .hana-chat-flower-fab {
