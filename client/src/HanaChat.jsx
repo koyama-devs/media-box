@@ -16,9 +16,11 @@ import {
   readDefaultReaction,
   readEnterToSend,
   readMessageSound,
+  readStickerSet,
   writeDefaultReaction,
   writeEnterToSend,
   writeMessageSound,
+  writeStickerSet,
 } from './chatSettings'
 import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
 import EmotionMomentLayer, { EMOTION_MOMENTS, triggerEmotionMoment } from './EmotionMoment'
@@ -305,7 +307,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [ownerSuggestEnabled, setOwnerSuggestEnabled] = useState(() => readOwnerSuggestEnabled())
   const [guestMenuOpen, setGuestMenuOpen] = useState(false)
   const [stickerOpen, setStickerOpen] = useState(false)
-  const [stickerSetId, setStickerSetId] = useState(HANA_STICKER_SETS[0].id)
+  const [stickerSetId, setStickerSetId] = useState(() => readStickerSet({ asOwner: appRole === 'owner' }))
   const activeStickerSet = HANA_STICKER_SETS.find((set) => set.id === stickerSetId) || HANA_STICKER_SETS[0]
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [defaultReaction, setDefaultReaction] = useState(() => readDefaultReaction())
@@ -369,6 +371,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     [actingAsOwner, guestKey],
   )
   const extrasProfileId = sessionProfile?.id || 'guest'
+
+  // Owner ↔ guest roles keep separate sticker-set prefs on this device.
+  useEffect(() => {
+    setStickerSetId(readStickerSet({ asOwner: actingAsOwner }))
+  }, [actingAsOwner])
 
   useEffect(() => {
     setPins(loadChatPins(extrasProfileId))
@@ -2911,7 +2918,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                           className={`hana-chat-sticker-tab${set.id === activeStickerSet.id ? ' is-active' : ''}`}
                           onMouseDown={(event) => event.preventDefault()}
                           onPointerDown={(event) => event.preventDefault()}
-                          onClick={() => setStickerSetId(set.id)}
+                          onClick={() => {
+                            setStickerSetId(set.id)
+                            writeStickerSet(set.id, { asOwner: actingAsOwner })
+                          }}
                         >
                           <HanaSticker id={set.items[0].id} size={20} title="" />
                           <span>{set.label}</span>
