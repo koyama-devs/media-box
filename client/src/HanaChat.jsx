@@ -61,6 +61,7 @@ import {
   toggleChatReaction,
   translateChatMessage,
   updateChatMessage,
+  uploadChatImage,
 } from './firebase'
 import FlowerRainLayer, {
   CHAT_PARTY_REACTION,
@@ -134,10 +135,21 @@ function describeStandaloneEffect(payload, defaultReaction) {
 function mergeServerMessagesWithPending(server, previous) {
   const pending = (previous || []).filter((message) => message?.pending)
   if (!pending.length) return server
-  const kept = pending.filter((item) => !server.some((row) => (
-    (row.sender || row.role) === (item.sender || item.role)
-    && String(row.text || '') === String(item.text || '')
-  )))
+  const usedServerIds = new Set()
+  const kept = []
+  for (const item of pending) {
+    const match = server.find((row) => {
+      if (usedServerIds.has(row.id)) return false
+      if ((row.sender || row.role) !== (item.sender || item.role)) return false
+      if (String(row.text || '') !== String(item.text || '')) return false
+      if (String(row.sticker || '') !== String(item.sticker || '')) return false
+      if (String(row.effect || '') !== String(item.effect || '')) return false
+      if (Boolean(row.imageUrl) !== Boolean(item.imageUrl)) return false
+      return true
+    })
+    if (match) usedServerIds.add(match.id)
+    else kept.push(item)
+  }
   return kept.length ? [...server, ...kept] : server
 }
 
@@ -312,6 +324,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const composerRef = useRef(null)
   const guestMenuRef = useRef(null)
   const stickerRef = useRef(null)
+  const imageInputRef = useRef(null)
   const settingsRef = useRef(null)
   const syncPanelViewportRef = useRef(() => {})
   const scrollToLatestRef = useRef(() => {})
@@ -1654,6 +1667,74 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     }
   }
 
+  /** Pick/take a photo → compress → Storage → chat message with imageUrl. */
+  const handleSendImage = async (file) => {
+    if (!file || busy) return
+    if (actingAsOwner && !activeThreadId) {
+      setError('返信する相手を選んでください。')
+      return
+    }
+    setStickerOpen(false)
+    setError('')
+    setBusy(true)
+    const role = actingAsOwner ? 'hana' : 'guest'
+    const pendingId = nextStickerPendingId()
+    const localUrl = URL.createObjectURL(file)
+    try {
+      const threadId = actingAsOwner
+        ? activeThreadId
+        : (guestChatId || ensureGuestChatId(guestKey || 'guest'))
+      if (!actingAsOwner) {
+        if (!guestChatId) setGuestChatId(threadId)
+        if (channel !== 'human') switchToHuman(HUMAN_SWITCH_INTENT)
+      }
+
+      setHanaMessages((prev) => [
+        ...prev,
+        {
+          id: pendingId,
+          pending: true,
+          uploading: true,
+          role,
+          sender: role,
+          text: '写真',
+          rawText: '写真',
+          imageUrl: localUrl,
+          createdAt: new Date().toISOString(),
+          replyTo: null,
+        },
+      ])
+      scrollToLatestRef.current()
+
+      const imageUrl = await uploadChatImage(threadId, file)
+      setHanaMessages((prev) => prev.map((m) => (
+        m.id === pendingId ? { ...m, imageUrl, uploading: false } : m
+      )))
+      URL.revokeObjectURL(localUrl)
+      await sendChatMessage({
+        threadId,
+        text: '写真',
+        sender: role,
+        imageUrl,
+        ...(actingAsOwner
+          ? {}
+          : {
+              guestLabel: guestThreadLabel,
+              guestKey: guestProfile?.key || guestKey || '',
+            }),
+      })
+      if (!actingAsOwner) setChannel('human')
+    } catch (err) {
+      URL.revokeObjectURL(localUrl)
+      setHanaMessages((prev) => prev.filter((m) => m.id !== pendingId))
+      setError(getFirebaseErrorMessage(err) || err?.message || '写真を送れませんでした。')
+    } finally {
+      setBusy(false)
+      scrollToLatestRef.current()
+      if (imageInputRef.current) imageInputRef.current.value = ''
+    }
+  }
+
   const playStandaloneEffect = async (payload) => {
     if (!canUseReactions) return
     if (actingAsOwner && !activeThreadId) {
@@ -2463,6 +2544,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               const isOwn = (message.sender || message.role) === ownSender
                 || (!actingAsOwner && !guestOnHuman && message.role === 'guest')
               const showsSticker = !message.deleted && isHanaSticker(message.sticker)
+              const showsImage = !message.deleted && Boolean(message.imageUrl)
               const effectEmoji = !message.deleted && message.effect
                 ? (String(message.effectEmoji || '').trim()
                   || EMOTION_MOMENTS.find((item) => item.id === message.effect)?.emoji
@@ -2495,14 +2577,14 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     <ChatSwipeBubble
                       className={`${sideClass} is-${message.role}`}
                       canReply={!message.deleted}
-                      canEdit={mutable && !showsSticker && !showsEffect}
+                      canEdit={mutable && !showsSticker && !showsEffect && !showsImage}
                       canDelete={mutable}
                       canReact={!message.deleted}
                       showFlowerReact={!message.deleted && !isOwn}
                       defaultReaction={defaultReaction}
                       reactions={message.reactions || {}}
                       reactorId={reactorId}
-                      copyText={message.deleted ? '' : (message.rawText || message.text || '')}
+                      copyText={message.deleted || showsImage ? '' : (message.rawText || message.text || '')}
                       onCopy={notifyCopied}
                       onReply={() => startReply(message)}
                       onEdit={() => startEdit(message)}
@@ -2512,7 +2594,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                       onEffect={handleLocalEffect}
                     >
                       <div
-                        className={`hana-chat-bubble ${sideClass} is-${message.role}${message.kind === 'human-switch' || message.kind === 'intro' ? ' is-notice' : ''}${message.deleted ? ' is-deleted' : ''}${showsSticker ? ' is-sticker' : ''}${showsEffect ? ' is-effect' : ''}`}
+                        className={`hana-chat-bubble ${sideClass} is-${message.role}${message.kind === 'human-switch' || message.kind === 'intro' ? ' is-notice' : ''}${message.deleted ? ' is-deleted' : ''}${showsSticker ? ' is-sticker' : ''}${showsEffect ? ' is-effect' : ''}${showsImage ? ' is-image' : ''}${message.uploading ? ' is-uploading' : ''}`}
                       >
                         {message.replyTo ? (
                           <div className="hana-chat-quote">
@@ -2522,6 +2604,24 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                         ) : null}
                         {showsSticker ? (
                           <HanaSticker id={message.sticker} size={104} title={message.text} />
+                        ) : showsImage ? (
+                          <a
+                            className="hana-chat-image-link"
+                            href={message.imageUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            data-no-bubble-press="true"
+                          >
+                            <img
+                              className="hana-chat-image"
+                              src={message.imageUrl}
+                              alt={message.text || '写真'}
+                              loading="lazy"
+                            />
+                            {message.uploading ? (
+                              <span className="hana-chat-image-status">送信中…</span>
+                            ) : null}
+                          </a>
                         ) : showsEffect ? (
                           <div className="hana-chat-effect-msg">
                             <span className="hana-chat-effect-msg-emoji" aria-hidden="true">{effectEmoji}</span>
@@ -2735,6 +2835,35 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
           {canUseReactions && effectThreadId ? (
             <div className="hana-chat-effect-bar" role="toolbar" aria-label="スタンプとエフェクト">
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                tabIndex={-1}
+                aria-hidden="true"
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+                  if (file) void handleSendImage(file)
+                }}
+              />
+              <button
+                type="button"
+                className="hana-chat-image-trigger"
+                title="写真を送る"
+                aria-label="写真を送る"
+                disabled={busy}
+                onMouseDown={(event) => event.preventDefault()}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={() => imageInputRef.current?.click()}
+              >
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
+                  <path
+                    fill="currentColor"
+                    d="M9 3 7.2 5H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.2L15 3H9zm3 5.5A4.5 4.5 0 1 1 7.5 13 4.5 4.5 0 0 1 12 8.5zm0 2A2.5 2.5 0 1 0 14.5 13 2.5 2.5 0 0 0 12 10.5z"
+                  />
+                </svg>
+              </button>
               <div className="hana-chat-sticker" ref={stickerRef}>
                 <button
                   type="button"

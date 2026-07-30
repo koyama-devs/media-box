@@ -1265,6 +1265,54 @@ body.hana-chat-scroll-lock #root {
   color: rgba(255, 236, 228, 0.95);
 }
 
+.hana-chat-bubble.is-image {
+  padding: 4px;
+  overflow: hidden;
+  max-width: min(280px, 72vw);
+}
+
+.hana-chat-image-link {
+  display: block;
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.hana-chat-image {
+  display: block;
+  width: 100%;
+  max-width: min(272px, calc(72vw - 8px));
+  max-height: min(360px, 55vh);
+  height: auto;
+  object-fit: cover;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.hana-chat-bubble.is-uploading .hana-chat-image {
+  opacity: 0.72;
+  filter: saturate(0.85);
+}
+
+.hana-chat-image-status {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(14, 10, 12, 0.72);
+  color: rgba(255, 248, 240, 0.92);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .hana-chat-bubble p {
   margin: 0;
   font-size: 0.92rem;
@@ -1395,6 +1443,35 @@ body.hana-chat-scroll-lock #root {
 }
 
 .hana-chat-sticker-trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.hana-chat-image-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid rgba(255, 248, 240, 0.16);
+  border-radius: 12px;
+  background: rgba(255, 248, 240, 0.06);
+  color: rgba(255, 248, 240, 0.88);
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+}
+
+.hana-chat-image-trigger:hover,
+.hana-chat-image-trigger:focus-visible {
+  transform: translateY(-1px);
+  background: rgba(255, 248, 240, 0.12);
+  border-color: rgba(232, 154, 170, 0.4);
+}
+
+.hana-chat-image-trigger:disabled {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;

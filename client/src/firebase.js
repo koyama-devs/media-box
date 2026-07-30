@@ -592,6 +592,28 @@ export async function uploadUserAvatar(profileId, file, meta = {}) {
   return avatarUrl
 }
 
+/**
+ * Compress and upload a chat image to Storage; returns the download URL.
+ * @param {string} threadId
+ * @param {File|Blob} file
+ */
+export async function uploadChatImage(threadId, file) {
+  const tid = String(threadId || '').trim()
+  if (!tid) throw new Error('スレッドがありません。')
+  if (!file || !String(file.type || '').startsWith('image/')) {
+    throw new Error('画像ファイルを選んでください。')
+  }
+  if (file.size > 8 * 1024 * 1024) {
+    throw new Error('画像は8MB以下にしてください。')
+  }
+
+  const blob = await resizeImageToJpegBlob(file, 1600)
+  const stamp = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  const objectRef = storageRef(storage, `chat-images/${tid}/${stamp}.jpg`)
+  await uploadBytes(objectRef, blob, { contentType: 'image/jpeg' })
+  return getDownloadURL(objectRef)
+}
+
 /** Resolve a friendly guest display name from thread id / guestKey / stored label. */
 export function resolveGuestDisplayName({ threadId, guestKey, guestLabel } = {}) {
   const fromKey = getGuestProfile(guestKey)
@@ -891,6 +913,14 @@ export function normalizeChatEffect(value) {
   return /^[a-z0-9_-]+$/.test(id) ? id : ''
 }
 
+/** HTTPS download URL for a chat image message (Firebase Storage). */
+export function normalizeChatImageUrl(value) {
+  const url = String(value || '').trim()
+  if (!url || url.length > 2048) return ''
+  if (!/^https:\/\//i.test(url)) return ''
+  return url
+}
+
 function serializeChatMessage(id, data) {
   const deleted = Boolean(data?.deleted)
   return {
@@ -900,6 +930,7 @@ function serializeChatMessage(id, data) {
     sticker: deleted ? '' : normalizeChatSticker(data?.sticker),
     effect: deleted ? '' : normalizeChatEffect(data?.effect),
     effectEmoji: deleted ? '' : String(data?.effectEmoji || '').slice(0, 8),
+    imageUrl: deleted ? '' : normalizeChatImageUrl(data?.imageUrl),
     sender: data?.sender === 'hana' ? 'hana' : 'guest',
     createdAt: data?.createdAt?.toDate?.()?.toISOString?.() || data?.createdAtIso || null,
     editedAt: data?.editedAt?.toDate?.()?.toISOString?.() || data?.editedAtIso || null,
@@ -1313,7 +1344,7 @@ export async function savePushToken({ userKey, token, platform } = {}) {
   return id
 }
 
-export async function sendChatMessage({ threadId, text, sender, guestLabel, guestKey, replyTo, sticker, effect, effectEmoji }) {
+export async function sendChatMessage({ threadId, text, sender, guestLabel, guestKey, replyTo, sticker, effect, effectEmoji, imageUrl }) {
   const trimmed = String(text || '').trim()
   if (!threadId || !trimmed) return null
   if (trimmed.length > 2000) {
@@ -1353,6 +1384,7 @@ export async function sendChatMessage({ threadId, text, sender, guestLabel, gues
   const stickerId = normalizeChatSticker(sticker)
   const effectId = normalizeChatEffect(effect)
   const emoji = String(effectEmoji || '').slice(0, 8)
+  const image = normalizeChatImageUrl(imageUrl)
   const payload = {
     text: trimmed,
     sender: role,
@@ -1362,6 +1394,7 @@ export async function sendChatMessage({ threadId, text, sender, guestLabel, gues
     ...(stickerId ? { sticker: stickerId } : {}),
     ...(effectId ? { effect: effectId } : {}),
     ...(effectId && emoji ? { effectEmoji: emoji } : {}),
+    ...(image ? { imageUrl: image } : {}),
   }
   if (replyTo?.id) {
     payload.replyToId = String(replyTo.id)

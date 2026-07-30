@@ -544,6 +544,12 @@
   color: #e2e8f0;
 }
 
+.admin-chat-bubble.is-image {
+  padding: 4px;
+  background: none;
+  max-width: min(320px, 70%);
+}
+
 .admin-chat-bubble.is-guest {
   background: rgba(148, 163, 184, 0.12);
 }
