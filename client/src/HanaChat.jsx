@@ -2885,15 +2885,15 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 <button
                   type="button"
                   className={`hana-chat-sticker-trigger${stickerOpen ? ' is-open' : ''}`}
-                  title="はなスタンプ"
-                  aria-label="はなスタンプ"
+                  title={`${activeStickerSet.label}スタンプ`}
+                  aria-label={`${activeStickerSet.label}スタンプ`}
                   aria-expanded={stickerOpen}
                   disabled={busy}
                   onMouseDown={(event) => event.preventDefault()}
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={() => setStickerOpen((prev) => !prev)}
                 >
-                  <HanaSticker id="smile" size={26} title="" />
+                  <HanaSticker id={activeStickerSet.items[0].id} size={26} title="" />
                 </button>
                 {stickerOpen ? (
                   <div className="hana-chat-sticker-panel" role="menu" aria-label="スタンプ">
