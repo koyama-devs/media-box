@@ -39,7 +39,6 @@ import {
   uploadUserAvatar,
 } from './firebase'
 import HanaChat from './HanaChat.jsx'
-import JapaneseMusic from './JapaneseMusic.jsx'
 import ListeningPostcard from './ListeningPostcard'
 import ListeningSpace, { ListeningSpaceSettings } from './ListeningSpace'
 import {
@@ -61,7 +60,6 @@ import {
 import { pickPostcardLyric } from './lyrics'
 import LyricsPanel from './LyricsPanel'
 import { blobToThumbnailUrl, mapPool } from './mediaPerf'
-import SeasonalAnime from './SeasonalAnime.jsx'
 import {
   appendTodayRecordHistory,
   formatTodayDateLabel,
@@ -75,6 +73,7 @@ import {
   useTodayShuffle,
 } from './todayPick'
 import TodayRecord from './TodayRecord'
+import TodayShelf from './TodayShelf.jsx'
 import { useFloatingPanel } from './useFloatingPanel'
 import {
   createPlaylistId,
@@ -2692,15 +2691,21 @@ const playPrevious = useCallback(() => {
 
   return (
     <div
-      className={`app-shell${showTodayHero ? ' app-shell--today' : ''}${listeningSpaceOpen ? ' app-shell--listening-space' : ''}${listeningSpaceOpen && !playerExpanded ? ' is-player-compact-view' : ''}`}
+      className={`app-shell${!isLoggedIn ? ' app-shell--gate' : ''}${showTodayHero ? ' app-shell--today' : ''}${listeningSpaceOpen ? ' app-shell--listening-space' : ''}${listeningSpaceOpen && !playerExpanded ? ' is-player-compact-view' : ''}`}
       style={shellSpaceStyle}
     >
       {!isLoggedIn ? (
-        <section className="login-card">
-          <div className="brand-mark" aria-hidden="true">M</div>
-          <p className="eyebrow">共有用メディアボックス</p>
-          <h1>動画・音声・画像を簡単に共有できます。</h1>
-          <p className="lead">ログインしてファイルを追加し、すぐに確認できます。</p>
+        <section className="login-card" aria-labelledby="login-brand-title">
+          <div className="login-hero" aria-hidden="true">
+            <img className="login-hero-art" src={hanachanArt} alt="" />
+            <span className="login-hero-petal" />
+            <span className="login-hero-petal is-2" />
+          </div>
+          <p className="login-kicker">Hana Mediabox</p>
+          <h1 id="login-brand-title">はなメディボ</h1>
+          <p className="lead">
+            はなの小さな箱。音楽、本、写真、好きなリスト——一緒に味わって、一緒に分かちあう。
+          </p>
 
           <form className="login-form" onSubmit={handleLogin}>
             <label className="sr-only" htmlFor="password">
@@ -2717,7 +2722,7 @@ const playPrevious = useCallback(() => {
               spellCheck={false}
               onChange={(event) => setPassword(event.target.value)}
             />
-            <button type="submit">ログイン</button>
+            <button type="submit">はいる</button>
           </form>
 
           {error ? <p className="message error">{error}</p> : null}
@@ -2814,6 +2819,16 @@ const playPrevious = useCallback(() => {
                   onChange={handleAvatarPick}
                 />
               </div>
+              {listeningSpaceOpen && !focusMode ? (
+                <button
+                  type="button"
+                  className="secondary-button space-home-btn is-active"
+                  onClick={() => handleFocusModeChange(true)}
+                  title="景色だけに集中する"
+                >
+                  景色に集中
+                </button>
+              ) : null}
               <button type="button" className="secondary-button" onClick={handleLogout}>
                 ログアウト
               </button>
@@ -2822,8 +2837,6 @@ const playPrevious = useCallback(() => {
 
           <div className={listeningSpaceOpen && focusMode ? 'is-space-hidden' : ''}>
             <DailyKotoba />
-            <SeasonalAnime />
-            <JapaneseMusic />
           </div>
 
           <section className={`upload-card${listeningSpaceOpen && focusMode ? ' is-space-hidden' : ''}`}>
@@ -2994,6 +3007,21 @@ const playPrevious = useCallback(() => {
                         ) : null}
                         <button
                           type="button"
+                          className={`secondary-button space-home-btn${focusMode ? '' : ' is-active'}`}
+                          onClick={() => {
+                            handleFocusModeChange(!focusMode)
+                            if (focusMode) setSpaceSettingsOpen(false)
+                          }}
+                          title={
+                            focusMode
+                              ? 'メディボの画面に戻って操作する'
+                              : '景色だけに集中する'
+                          }
+                        >
+                          {focusMode ? 'メディボに入る' : '景色に集中'}
+                        </button>
+                        <button
+                          type="button"
                           className={`secondary-button space-settings-btn${spaceSettingsOpen ? ' is-active' : ''}`}
                           onClick={() => setSpaceSettingsOpen((current) => !current)}
                           title={spaceSettingsOpen ? '場所の設定を閉じる' : '場所の設定を開く'}
@@ -3046,6 +3074,20 @@ const playPrevious = useCallback(() => {
                       >
                         聴く場所
                       </button>
+                    </div>
+                  ) : null}
+
+                  {listeningSpaceOpen && !focusMode && selectedItem.kind === 'audio' ? (
+                    <div className="player-space-access">
+                      <button
+                        type="button"
+                        className="secondary-button space-home-btn is-active"
+                        onClick={() => handleFocusModeChange(true)}
+                        title="景色だけに集中する"
+                      >
+                        景色に集中
+                      </button>
+                      <p className="player-space-hint">聴く場所は開いたままです。景色だけ見たいときはここから戻れます。</p>
                     </div>
                   ) : null}
 
@@ -3939,6 +3981,8 @@ const playPrevious = useCallback(() => {
               ) : null}
             </aside>
           </main>
+
+          <TodayShelf hidden={listeningSpaceOpen && focusMode} />
         </>
       )}
 

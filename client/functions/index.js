@@ -12,8 +12,67 @@ const OWNER_PUSH_KEY = 'hana'
 const PUSH_TOKENS_COLLECTION = 'pushTokens'
 const CHAT_THREADS_COLLECTION = 'chatThreads'
 
+/** Fallback chain: the lite model has its own quota bucket on the free tier. */
+const GEMINI_MODEL_CHAIN = ['gemini-flash-latest', 'gemini-flash-lite-latest']
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * POST to Gemini, retrying rate limits (429) and transient 5xx with backoff and
+ * then falling back to the next model, so short bursts still get an answer.
+ * @returns {Promise<object>} parsed response JSON
+ */
+async function callGeminiApi({ apiKey, payload, attemptsPerModel = 3 }) {
+  let lastError = null
+
+  for (const model of GEMINI_MODEL_CHAIN) {
+    for (let attempt = 0; attempt < attemptsPerModel; attempt += 1) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`
+      let response = null
+      try {
+        response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+      } catch (error) {
+        lastError = error
+        await sleep(400 * (attempt + 1))
+        continue
+      }
+
+      if (response.ok) return response.json()
+
+      const body = await response.text()
+      const error = new Error(`Gemini ${response.status} (${model}): ${body.slice(0, 240)}`)
+      error.status = response.status
+      lastError = error
+
+      const retryable = response.status === 429 || response.status >= 500
+      if (!retryable) throw error
+      // Jitter keeps parallel callers from retrying in lockstep.
+      await sleep(700 * (attempt + 1) + Math.floor(Math.random() * 300))
+    }
+  }
+
+  throw lastError || new Error('Gemini request failed')
+}
+
+function geminiReplyText(json) {
+  return json?.candidates?.[0]?.content?.parts
+    ?.map((part) => part.text || '')
+    .join('')
+    .trim() || ''
+}
+
 const SYSTEM_PROMPT = `あなたは「はなちゃん」。Hana Mediabox（共有メディアスペース）の案内マスコットです。
 口調はやさしく、少し可愛らしく、敬語すぎず親しみやすい日本語で話します。短めの返信を心がけてください。
+
+重要な本人情報：
+- 「はな」と「Mika（ミカ・みか）」は同一人物です。
+- 相手が「Mika」「ミカ」「みか」と呼びかけたり、その名前について話した場合、それは原則としてあなた自身（はな）を指しています。別人として扱わず、自分への呼びかけ・自分についての発言として文脈を理解し、自然に返答してください。
 
 アプリの案内（知っている範囲で）：
 - ログイン後、音声・動画・画像・PDFをアップロードして共有できる
@@ -41,33 +100,18 @@ async function callGemini({ apiKey, message, history, guestName, addressAs }) {
     systemText += `\n\n相手の情報：このゲストの名前は「${name}」です。返事では必ず「${callName}」と呼んでください（「あなた」は使わない）。`
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${encodeURIComponent(apiKey)}`
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const json = await callGeminiApi({
+    apiKey,
+    payload: {
       systemInstruction: { parts: [{ text: systemText }] },
       contents,
       generationConfig: {
         temperature: 0.85,
         maxOutputTokens: 512,
       },
-    }),
+    },
   })
-
-  if (!response.ok) {
-    const body = await response.text()
-    const error = new Error(`Gemini ${response.status}: ${body.slice(0, 240)}`)
-    error.status = response.status
-    throw error
-  }
-
-  const json = await response.json()
-  const reply = json?.candidates?.[0]?.content?.parts
-    ?.map((part) => part.text || '')
-    .join('')
-    .trim()
-  return reply || ''
+  return geminiReplyText(json)
 }
 
 exports.chatHanachan = onCall({ cors: true }, async (request) => {
@@ -108,6 +152,10 @@ exports.chatHanachan = onCall({ cors: true }, async (request) => {
 
 const SUGGEST_SYSTEM_PROMPT = `あなたは「はな」（Hana Mediaboxのオーナー本人）がゲストへ返すチャット文の下書きを手伝うアシスタントです。
 はなの口調は、やさしく自然な日本語で短め。友達に近い親しみやすさ。マスコット口調や過度な敬語は避ける。
+
+重要な本人情報：
+- 「はな」と「Mika（ミカ・みか）」は同一人物です。
+- ゲストが「Mika」「ミカ」「みか」と呼びかけたり、その名前について話した場合、それは原則として返信者本人のはなを指す。別人の話だと解釈せず、はな本人への呼びかけ・はな本人についての発言として文脈を理解し、それに合う返信案を作る。
 
 必ずJSONだけを返す（説明・コードフェンス禁止）:
 {"replies":["...","...","..."],"topics":["...","..."],"expressions":["...","...","..."]}
@@ -154,11 +202,9 @@ async function callGeminiSuggest({ apiKey, history, lastReply, guestName }) {
   ask += '\nJSONのみで返して。'
   contents.push({ role: 'user', parts: [{ text: ask }] })
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${encodeURIComponent(apiKey)}`
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const json = await callGeminiApi({
+    apiKey,
+    payload: {
       systemInstruction: { parts: [{ text: SUGGEST_SYSTEM_PROMPT }] },
       contents,
       generationConfig: {
@@ -166,22 +212,9 @@ async function callGeminiSuggest({ apiKey, history, lastReply, guestName }) {
         maxOutputTokens: 256,
         responseMimeType: 'application/json',
       },
-    }),
+    },
   })
-
-  if (!response.ok) {
-    const body = await response.text()
-    const error = new Error(`Gemini ${response.status}: ${body.slice(0, 240)}`)
-    error.status = response.status
-    throw error
-  }
-
-  const json = await response.json()
-  const raw = json?.candidates?.[0]?.content?.parts
-    ?.map((part) => part.text || '')
-    .join('')
-    .trim()
-  return parseSuggestJson(raw)
+  return parseSuggestJson(geminiReplyText(json))
 }
 
 /** Owner (real Hana) reply/topic suggestions for a guest thread. */
@@ -231,32 +264,18 @@ async function callGeminiTranslate({ apiKey, text, targetLang }) {
     ? TRANSLATE_SYSTEM_PROMPT_JA
     : `You are a translation assistant. Translate the input into natural ${langLabel}. If the input is already ${langLabel}, lightly polish it. Return only the translation, no notes or quotes.`
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${encodeURIComponent(apiKey)}`
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const json = await callGeminiApi({
+    apiKey,
+    payload: {
       systemInstruction: { parts: [{ text: systemText }] },
       contents: [{ role: 'user', parts: [{ text }] }],
       generationConfig: {
         temperature: 0.2,
         maxOutputTokens: 1024,
       },
-    }),
+    },
   })
-
-  if (!response.ok) {
-    const body = await response.text()
-    const error = new Error(`Gemini ${response.status}: ${body.slice(0, 240)}`)
-    error.status = response.status
-    throw error
-  }
-
-  const json = await response.json()
-  return json?.candidates?.[0]?.content?.parts
-    ?.map((part) => part.text || '')
-    .join('')
-    .trim() || ''
+  return geminiReplyText(json)
 }
 
 /** Translate a chat message (default target: Japanese). */
@@ -294,6 +313,11 @@ exports.translateHanaChat = onCall({ cors: true }, async (request) => {
 
 const OWNER_ASSIST_SYSTEM_PROMPT = `あなたは「はな」（Hana Mediaboxのオーナー本人）専用の私的アシスタントです。
 ゲストの日本語メッセージをはなが理解しやすくするために、次のJSONだけを返してください（説明・コードフェンス禁止）:
+
+重要な本人情報：
+- 「はな」と「Mika（ミカ・みか）」は同一人物です。
+- ゲストが「Mika」「ミカ」「みか」と呼びかけたり、その名前について話した場合、それは原則として返信者本人のはなを指す。Mikaを別人として扱わず、はな本人への呼びかけ・はな本人についての発言として文脈を理解する。
+- translationViでは原文の名前を自然に保ち、repliesでは「自分がMikaである」という前提に沿った自然な返答を作る。
 
 {"translationVi":"...","readingHiragana":"...","replies":[{"ja":"...","vi":"..."},{"ja":"...","vi":"..."}]}
 
@@ -351,34 +375,30 @@ async function callGeminiOwnerAssist({ apiKey, text, guestName, history }) {
     }],
   })
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${encodeURIComponent(apiKey)}`
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const json = await callGeminiApi({
+    apiKey,
+    payload: {
       systemInstruction: { parts: [{ text: OWNER_ASSIST_SYSTEM_PROMPT }] },
       contents,
       generationConfig: {
         temperature: 0.35,
-        maxOutputTokens: 768,
+        // Generous budget: a truncated response is not valid JSON, which used to
+        // surface as an empty analysis for longer messages.
+        maxOutputTokens: 1600,
         responseMimeType: 'application/json',
       },
-    }),
+    },
   })
 
-  if (!response.ok) {
-    const body = await response.text()
-    const error = new Error(`Gemini ${response.status}: ${body.slice(0, 240)}`)
-    error.status = response.status
-    throw error
+  const parsed = parseOwnerAssistJson(geminiReplyText(json))
+  const empty = !parsed.translationVi && !parsed.readingHiragana && !parsed.replies.length
+  if (empty) {
+    console.warn('ownerAssist empty response', {
+      finishReason: json?.candidates?.[0]?.finishReason || '',
+      promptFeedback: json?.promptFeedback?.blockReason || '',
+    })
   }
-
-  const json = await response.json()
-  const raw = json?.candidates?.[0]?.content?.parts
-    ?.map((part) => part.text || '')
-    .join('')
-    .trim()
-  return parseOwnerAssistJson(raw)
+  return parsed
 }
 
 /**
@@ -408,12 +428,30 @@ exports.analyzeGuestMessageForOwner = onCall({ cors: true }, async (request) => 
   }
 
   try {
-    const result = await callGeminiOwnerAssist({
+    let result = await callGeminiOwnerAssist({
       apiKey: key,
       text,
       guestName,
       history,
     })
+
+    // The JSON step is nondeterministic; retry once without history, which is
+    // both a shorter prompt and a fresh roll of the dice.
+    if (!result.translationVi && !result.readingHiragana && !result.replies.length) {
+      result = await callGeminiOwnerAssist({ apiKey: key, text, guestName, history: [] })
+    }
+
+    // Last resort: a plain translation call so Hana always gets the meaning,
+    // even when the structured analysis keeps coming back empty.
+    if (!result.translationVi) {
+      const translationVi = await callGeminiTranslate({
+        apiKey: key,
+        text,
+        targetLang: 'vi',
+      }).catch(() => '')
+      result = { ...result, translationVi }
+    }
+
     const ok = Boolean(result.translationVi || result.readingHiragana || result.replies.length)
     return {
       ...result,

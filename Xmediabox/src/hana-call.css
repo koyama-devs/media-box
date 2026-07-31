@@ -1,0 +1,234 @@
+.hana-call-buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hana-call-buttons button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.hana-call-buttons button:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: rgba(129, 140, 248, 0.45);
+}
+
+.hana-call-buttons button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.hana-call-buttons svg,
+.hana-call-actions svg {
+  width: 17px;
+  height: 17px;
+  fill: currentColor;
+}
+
+.hana-call-buttons.is-compact button {
+  width: 34px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.hana-call-inline-error {
+  margin: 0;
+  color: #fca5a5;
+  font-size: 0.75rem;
+}
+
+.hana-call-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483600;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  box-sizing: border-box;
+  background: rgba(3, 6, 14, 0.82);
+  backdrop-filter: blur(16px);
+  color: #f8fafc;
+  font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.hana-call-stage {
+  position: relative;
+  width: min(100%, 760px);
+  min-height: min(680px, calc(100vh - 36px));
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 24px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 50% 20%, rgba(99, 102, 241, 0.3), transparent 45%),
+    linear-gradient(160deg, #151b2a, #080b12);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.55);
+}
+
+.hana-call-stage.is-video {
+  background: #05070c;
+}
+
+.hana-call-remote-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hana-call-stage.is-voice .hana-call-remote-video {
+  display: none;
+}
+
+.hana-call-local-video {
+  position: absolute;
+  z-index: 2;
+  right: 18px;
+  top: 18px;
+  width: min(28%, 180px);
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 16px;
+  background: #111827;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+}
+
+.hana-call-info {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 24px;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.8);
+}
+
+.hana-call-stage.is-video .hana-call-info {
+  margin-top: auto;
+  width: 100%;
+  box-sizing: border-box;
+  padding-bottom: 120px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+}
+
+.hana-call-avatar {
+  display: grid;
+  place-items: center;
+  width: 96px;
+  height: 96px;
+  margin-bottom: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  background: linear-gradient(145deg, #818cf8, #4f46e5);
+  color: #fff;
+  font-size: 2.1rem;
+  font-weight: 700;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+}
+
+.hana-call-stage.is-video .hana-call-avatar,
+.hana-call-overlay.is-connected .hana-call-stage.is-video .hana-call-info {
+  display: none;
+}
+
+.hana-call-info h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 650;
+}
+
+.hana-call-info p {
+  margin: 8px 0 0;
+  color: rgba(226, 232, 240, 0.78);
+}
+
+.hana-call-info .hana-call-error {
+  color: #fecaca;
+}
+
+.hana-call-actions {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  bottom: 30px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  width: max-content;
+  max-width: calc(100% - 28px);
+}
+
+.hana-call-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 76px;
+  height: 48px;
+  padding: 0 17px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  backdrop-filter: blur(12px);
+  cursor: pointer;
+}
+
+.hana-call-actions button.is-off {
+  background: rgba(251, 191, 36, 0.3);
+  color: #fef3c7;
+}
+
+.hana-call-actions button.is-decline {
+  background: #ef4444;
+}
+
+.hana-call-actions button.is-accept {
+  background: #22c55e;
+}
+
+@media (max-width: 600px) {
+  .hana-call-overlay {
+    padding: 0;
+  }
+
+  .hana-call-stage {
+    width: 100%;
+    min-height: 100dvh;
+    border: none;
+    border-radius: 0;
+  }
+
+  .hana-call-local-video {
+    top: max(14px, env(safe-area-inset-top));
+    right: 14px;
+    width: 30%;
+  }
+
+  .hana-call-actions {
+    bottom: max(24px, env(safe-area-inset-bottom));
+  }
+}

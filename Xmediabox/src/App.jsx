@@ -1,0 +1,4308 @@
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import './App.css'
+import hanachanArt from './assets/hanachan.svg'
+import { clearBookBookmark, getAllBookBookmarks, getBookBookmark } from './bookProgress'
+import DailyKotoba from './DailyKotoba'
+import {
+    CHAT_PRESENCE_MODES,
+    deleteMediaItem,
+    ensureDefaultChatAccounts,
+    findChatAccountByPassKey,
+    getFirebaseErrorMessage,
+    getMaxUploadBytes,
+    loadMediaBlobUrl,
+    loadMediaBytes,
+    MAX_BOOK_FILE_SIZE,
+    MAX_FILE_SIZE,
+    normalizeChatPresenceMode,
+    recordAccessVisit,
+    resolveAvatarSrc,
+    resolveSessionProfile,
+    savePushToken,
+    saveSharedPlaylists,
+    saveSharedSpaces,
+    setChatProfileStatus,
+    sortMediaItems,
+    subscribeChatAccounts,
+    subscribeChatProfile,
+    subscribeToMediaItems,
+    subscribeToSharedPlaylists,
+    subscribeToSharedSpaces,
+    updateMediaCover,
+    updateMediaJacket,
+    updateMediaJacketStyle,
+    updateMediaLyrics,
+    updateMediaName,
+    updatePlaylistOrder,
+    uploadMediaFile,
+    uploadUserAvatar,
+} from './firebase'
+import HanaChat from './HanaChat.jsx'
+import ListeningPostcard from './ListeningPostcard'
+import ListeningSpace, { ListeningSpaceSettings } from './ListeningSpace'
+import {
+    compressImageFileToJpegFile,
+    createCustomSpaceDraft,
+    hydrateCustomSpace,
+    isKnownSpaceId,
+    LISTENING_SPACES,
+    listeningSpaceStyleVars,
+    loadAmbientSettings,
+    loadSavedListeningSpaceId,
+    loadSpaceBackgrounds,
+    MAX_CUSTOM_SPACES,
+    resolveTodayJacketStyleId,
+    saveListeningSpaceId,
+    suggestListeningSpace,
+    toSharedSpaceRecord,
+} from './listeningSpaces'
+import { pickPostcardLyric } from './lyrics'
+import LyricsPanel from './LyricsPanel'
+import { blobToThumbnailUrl, mapPool } from './mediaPerf'
+import { brandTitle, readProfile, saveProfile } from './profile'
+import {
+    appendTodayRecordHistory,
+    formatTodayDateLabel,
+    getTodayShuffleRemaining,
+    isTodayRecordShown,
+    loadTodayRecordHistory,
+    markTodayRecordShown,
+    pickTodayAudioItem,
+    resolveJacketUrl,
+    resolveTodayReveal,
+    useTodayShuffle,
+} from './todayPick'
+import TodayRecord from './TodayRecord'
+import TodayShelf from './TodayShelf.jsx'
+import { useFloatingPanel } from './useFloatingPanel'
+import {
+    createPlaylistId,
+    loadCustomPlaylists,
+    loadFavoriteIds,
+    loadListFilter,
+    saveCustomPlaylists,
+    saveFavoriteIds,
+    saveListFilter,
+} from './userPlaylists'
+import VinylPlayer from './VinylPlayer'
+
+const BookReader = lazy(() => import('./BookReader'))
+
+const AUTH_KEY = 'xmediabox-auth'
+const AUTH_ROLE_KEY = 'xmediabox-role'
+const AUTH_GUEST_KEY = 'xmediabox-guest'
+const GUEST_PASSWORD_ALIASES = {
+  gabu: 'gabusan',
+  gabriel: 'gabusan',
+  ガブリエル: 'gabusan',
+}
+const TRACK_QUERY_KEY = 'track'
+
+function normalizeLoginPassword(raw) {
+  const trimmed = String(raw || '').trim().toLowerCase()
+  return GUEST_PASSWORD_ALIASES[trimmed] || trimmed
+}
+
+function readStoredAuthRole() {
+  try {
+    return window.localStorage.getItem(AUTH_ROLE_KEY) === 'owner' ? 'owner' : 'guest'
+  } catch {
+    return 'guest'
+  }
+}
+
+function readStoredGuestKey() {
+  try {
+    const key = normalizeLoginPassword(window.localStorage.getItem(AUTH_GUEST_KEY) || '')
+    if (!key) return ''
+    const account = findChatAccountByPassKey(key)
+    if (!account) return key
+    // Keep pass key for both guest and owner sessions.
+    return account.passKey || account.key
+  } catch {
+    return ''
+  }
+}
+
+function getTrackShareUrl(itemId) {
+  const url = new URL(window.location.href)
+  url.searchParams.set(TRACK_QUERY_KEY, itemId)
+  return url.toString()
+}
+
+function syncTrackQuery(itemId) {
+  try {
+    const url = new URL(window.location.href)
+    if (itemId) {
+      url.searchParams.set(TRACK_QUERY_KEY, itemId)
+    } else {
+      url.searchParams.delete(TRACK_QUERY_KEY)
+    }
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+  } catch {
+    /* ignore */
+  }
+}
+
+function getMediaKind(fileType, fileName = '') {
+  const type = (fileType || '').toLowerCase()
+  const extension = (fileName || '').toLowerCase().split('.').pop() || ''
+
+  if (type.startsWith('video/')) return 'video'
+  if (type.startsWith('audio/')) return 'audio'
+  if (type.startsWith('image/')) return 'image'
+  if (type === 'application/pdf' || extension === 'pdf') return 'book'
+
+  if (['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'].includes(extension)) return 'video'
+  if (['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'oga', 'opus', 'wma', 'aiff', 'aif', 'weba', 'caf'].includes(extension)) {
+    return 'audio'
+  }
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(extension)) return 'image'
+  if (extension === 'pdf') return 'book'
+
+  return 'file'
+}
+
+/** Prefer MIME/extension; fall back to stored kind for older uploads. */
+function resolveMediaKind(item) {
+  const derived = getMediaKind(item?.type, item?.originalName || item?.name || '')
+  if (derived !== 'file') return derived
+  if (item?.kind === 'audio' || item?.kind === 'video' || item?.kind === 'image' || item?.kind === 'book') {
+    return item.kind
+  }
+  return 'file'
+}
+
+function normalizeMediaItem(item) {
+  if (!item) return item
+  return { ...item, kind: resolveMediaKind(item) }
+}
+
+function getFileExtension(fileName = '') {
+  const base = String(fileName).trim()
+  const dot = base.lastIndexOf('.')
+  if (dot <= 0 || dot === base.length - 1) return ''
+  return base.slice(dot + 1).toLowerCase()
+}
+
+function getDisplayName(fileName = '') {
+  const base = String(fileName).trim()
+  if (!base) return '無題'
+  const extension = getFileExtension(base)
+  if (!extension) return base
+  return base.slice(0, -(extension.length + 1)) || base
+}
+
+function withOriginalExtension(displayName, originalName = '') {
+  const trimmed = String(displayName || '').trim()
+  if (!trimmed) return ''
+
+  // User typed an extension themselves — keep as-is
+  if (getFileExtension(trimmed)) return trimmed
+
+  const extension = getFileExtension(originalName)
+  return extension ? `${trimmed}.${extension}` : trimmed
+}
+
+function getKindLabel(kind) {
+  if (kind === 'audio') return '音声'
+  if (kind === 'video') return '動画'
+  if (kind === 'image') return '画像'
+  if (kind === 'book') return '本'
+  return 'ファイル'
+}
+
+function createMediaMetadata(file, extras = {}) {
+  return {
+    name: getDisplayName(file.name),
+    originalName: file.name,
+    type: file.type || 'application/octet-stream',
+    kind: getMediaKind(file.type, file.name),
+    ...extras,
+  }
+}
+
+function formatSize(bytes) {
+  if (!bytes) return '0 KB'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  const value = bytes / 1024 ** index
+  return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`
+}
+
+function HeartIcon({ filled = false }) {
+  return (
+    <svg className="action-icon" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} aria-hidden="true">
+      <path
+        d="M12 20s-6.4-3.9-8.6-7.2C1.7 10.3 2.5 6.8 5.4 5.6c1.7-.7 3.6-.2 4.8 1.1L12 8.5l1.8-1.8c1.2-1.3 3.1-1.8 4.8-1.1 2.9 1.2 3.7 4.7 2 7.2C18.4 16.1 12 20 12 20z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function PlaylistAddIcon() {
+  return (
+    <svg className="action-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M4 7h11M4 12h8M4 17h8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M16 14v6M13 17h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function ShareIcon() {
+  return (
+    <svg className="action-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="18" cy="5" r="2.4" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="6" cy="12" r="2.4" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="18" cy="19" r="2.4" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M8.2 10.8 15.7 6.4M8.2 13.2 15.7 17.6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
+function LinkIcon() {
+  return (
+    <svg className="action-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M10 13a5 5 0 0 0 7.07.07l1.86-1.86a5 5 0 0 0-7.07-7.07L10.4 5.6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M14 11a5 5 0 0 0-7.07-.07L5.07 12.8a5 5 0 0 0 7.07 7.07L13.6 18.4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function CheckIcon() {
+  return (
+    <svg className="action-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M5.5 12.5 10 17l8.5-9"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function RenameIcon() {
+  return (
+    <svg className="action-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M5 19h3.2L18.4 8.8a1.9 1.9 0 0 0 0-2.7L17 4.7a1.9 1.9 0 0 0-2.7 0L4.1 14.9V19z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M13.4 5.6 17.5 9.7"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
+function SpinnerIcon() {
+  return (
+    <svg className="action-icon action-icon--spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle
+        cx="12"
+        cy="12"
+        r="8"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeOpacity="0.25"
+      />
+      <path
+        d="M12 4a8 8 0 0 1 8 8"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
+function App() {
+  const [isLoggedIn, setIsLoggedIn] = useState(() => {
+    try {
+      if (window.localStorage.getItem(AUTH_KEY) !== 'true') return false
+      const role = readStoredAuthRole()
+      // Legacy sessions may be "logged in" as guest without a known guest key.
+      if (role === 'guest' && !readStoredGuestKey()) {
+        window.localStorage.removeItem(AUTH_KEY)
+        window.localStorage.removeItem(AUTH_ROLE_KEY)
+        window.localStorage.removeItem(AUTH_GUEST_KEY)
+        return false
+      }
+      return true
+    } catch {
+      return false
+    }
+  })
+  const [authRole, setAuthRole] = useState(() => readStoredAuthRole())
+  const [guestKey, setGuestKey] = useState(() => readStoredGuestKey())
+  const [sessionAvatarUrl, setSessionAvatarUrl] = useState('')
+  const [sessionStatus, setSessionStatus] = useState('auto')
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false)
+  const [avatarUploading, setAvatarUploading] = useState(false)
+  const [chatAccounts, setChatAccounts] = useState(() => [])
+  const avatarInputRef = useRef(null)
+  const statusChipRef = useRef(null)
+
+  useEffect(() => {
+    let cancelled = false
+    ensureDefaultChatAccounts().catch(() => {})
+    const unsub = subscribeChatAccounts(
+      (next) => {
+        if (!cancelled) setChatAccounts(next || [])
+      },
+      () => {},
+    )
+    return () => {
+      cancelled = true
+      unsub?.()
+    }
+  }, [])
+
+  // Capacitor only: persist FCM token for the logged-in chat account.
+  useEffect(() => {
+    if (!isLoggedIn || !guestKey) return undefined
+
+    const persist = (token, platform) => {
+      const value = String(token || '').trim()
+      if (!value) return
+      savePushToken({
+        userKey: guestKey,
+        token: value,
+        platform: platform || window.__HANA_CAPACITOR__?.platform || 'native',
+      }).catch((err) => {
+        console.warn('[push] save token failed', err)
+      })
+    }
+
+    const existing =
+      window.__HANA_CAPACITOR__?.pushToken
+      || (() => {
+        try {
+          return window.localStorage.getItem('x_fcm_token') || ''
+        } catch {
+          return ''
+        }
+      })()
+    if (existing) persist(existing)
+
+    const onToken = (event) => {
+      persist(event?.detail?.token, event?.detail?.platform)
+    }
+    window.addEventListener('hana-push-token', onToken)
+    return () => window.removeEventListener('hana-push-token', onToken)
+  }, [isLoggedIn, guestKey])
+
+  const sessionProfile = useMemo(
+    () => resolveSessionProfile(authRole, guestKey),
+    [authRole, guestKey, chatAccounts],
+  )
+
+  const sessionAvatarSrc = useMemo(
+    () => resolveAvatarSrc(
+      sessionProfile.id,
+      sessionProfile.displayName,
+      sessionAvatarUrl,
+      sessionProfile.id === 'hana' ? hanachanArt : '',
+    ),
+    [sessionProfile, sessionAvatarUrl],
+  )
+  const sessionStatusMode = useMemo(
+    () => CHAT_PRESENCE_MODES.find((mode) => mode.id === sessionStatus) || CHAT_PRESENCE_MODES[0],
+    [sessionStatus],
+  )
+  const sessionStatusClass = sessionStatus === 'auto' ? 'is-online' : `is-${sessionStatus}`
+  const [password, setPassword] = useState('')
+  const [nicknameDraft, setNicknameDraft] = useState(() => readProfile().nickname)
+  const [userNickname, setUserNickname] = useState(() => readProfile().nickname)
+  const [nicknameEditing, setNicknameEditing] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    document.title = brandTitle(userNickname)
+  }, [userNickname])
+
+  const handleNicknameSubmit = useCallback(
+    (event) => {
+      event?.preventDefault?.()
+      const next = String(nicknameDraft || '').trim()
+      setNicknameEditing(false)
+      if (!next) {
+        setNicknameDraft(userNickname)
+        return
+      }
+      const profile = saveProfile({ nickname: next, onboarded: true })
+      setUserNickname(profile.nickname)
+      setNicknameDraft(profile.nickname)
+    },
+    [nicknameDraft, userNickname],
+  )
+  const [items, setItems] = useState([])
+  const [selectedItemId, setSelectedItemId] = useState(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadingFileName, setUploadingFileName] = useState('')
+  const [uploadingFileIndex, setUploadingFileIndex] = useState(0)
+  const [uploadingFileTotal, setUploadingFileTotal] = useState(0)
+  const [uploadTargetPlaylistId, setUploadTargetPlaylistId] = useState('all')
+  const [uploadCreatingPlaylist, setUploadCreatingPlaylist] = useState(false)
+  const [uploadPlaylistNameDraft, setUploadPlaylistNameDraft] = useState('')
+  const [loadingItems, setLoadingItems] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState(null)
+  const [loadingPreview, setLoadingPreview] = useState(false)
+  const [playlistMode, setPlaylistMode] = useState(true)
+  const [favoriteIds, setFavoriteIds] = useState(() => loadFavoriteIds())
+  const [customPlaylists, setCustomPlaylists] = useState(() => loadCustomPlaylists())
+  const [playlistSyncReady, setPlaylistSyncReady] = useState(false)
+  const [customSpaces, setCustomSpaces] = useState([])
+  const [spacesSyncReady, setSpacesSyncReady] = useState(false)
+  const [listFilter, setListFilter] = useState(() => loadListFilter())
+  const [playlistMenuItemId, setPlaylistMenuItemId] = useState(null)
+  const [playlistMenuPos, setPlaylistMenuPos] = useState(null)
+  const [creatingPlaylist, setCreatingPlaylist] = useState(false)
+  const [playlistNameDraft, setPlaylistNameDraft] = useState('')
+  const [renamingPlaylistId, setRenamingPlaylistId] = useState(null)
+  const [pendingPlaylistTrackId, setPendingPlaylistTrackId] = useState(null)
+  const [dragPlaylistId, setDragPlaylistId] = useState(null)
+  const [dragOverPlaylistId, setDragOverPlaylistId] = useState(null)
+  const [isMediaPlaying, setIsMediaPlaying] = useState(false)
+  const [playbackTime, setPlaybackTime] = useState(0)
+  const [playbackDuration, setPlaybackDuration] = useState(0)
+  const [lyricsBusy, setLyricsBusy] = useState(false)
+  const [coverPreviewUrl, setCoverPreviewUrl] = useState(null)
+  const [jacketPreviewUrl, setJacketPreviewUrl] = useState(null)
+  const [libraryThumbUrls, setLibraryThumbUrls] = useState({})
+  const [libraryViewerItemId, setLibraryViewerItemId] = useState(null)
+  const [librarySlideshowIndex, setLibrarySlideshowIndex] = useState(0)
+  const [librarySlideshowPaused, setLibrarySlideshowPaused] = useState(false)
+  const [readingBookId, setReadingBookId] = useState(null)
+  const [readingBookUrl, setReadingBookUrl] = useState(null)
+  const [readingBookBytes, setReadingBookBytes] = useState(null)
+  const [readingBookBusy, setReadingBookBusy] = useState(false)
+  const [readingBookStartPage, setReadingBookStartPage] = useState(1)
+  const [bookBookmarks, setBookBookmarks] = useState(() => getAllBookBookmarks())
+  const [coverBusy, setCoverBusy] = useState(false)
+  const [jacketBusy, setJacketBusy] = useState(false)
+  const [editingItemId, setEditingItemId] = useState(null)
+  const [editingName, setEditingName] = useState('')
+  const [dragItemId, setDragItemId] = useState(null)
+  const [dragOverItemId, setDragOverItemId] = useState(null)
+  const [copiedItemId, setCopiedItemId] = useState(null)
+  const [sharingItemId, setSharingItemId] = useState(null)
+  const [sharedItemId, setSharedItemId] = useState(null)
+  const [postcardItemId, setPostcardItemId] = useState(null)
+  const [postcardMode, setPostcardMode] = useState('share')
+  const [postcardJacketUrl, setPostcardJacketUrl] = useState(null)
+  const [postcardCoverUrl, setPostcardCoverUrl] = useState(null)
+  const [todayOpen, setTodayOpen] = useState(() => !isTodayRecordShown())
+  const [todayJacketUrl, setTodayJacketUrl] = useState(null)
+  const [todaySpaceBackgroundUrl, setTodaySpaceBackgroundUrl] = useState(null)
+  const [todayOverrideId, setTodayOverrideId] = useState(null)
+  const [todayPickedIds, setTodayPickedIds] = useState([])
+  const [todayHistory, setTodayHistory] = useState(() => loadTodayRecordHistory())
+  const [todayShuffleRemaining, setTodayShuffleRemaining] = useState(() => getTodayShuffleRemaining())
+  const ambientBoot = useMemo(() => loadAmbientSettings(), [])
+  const [listeningSpaceOpen, setListeningSpaceOpen] = useState(false)
+  const [listeningSpaceId, setListeningSpaceId] = useState(() => loadSavedListeningSpaceId())
+  const [ambientEnabled, setAmbientEnabled] = useState(() => ambientBoot.enabled)
+  const [ambientVolume, setAmbientVolume] = useState(() => ambientBoot.volume)
+  const [focusMode, setFocusMode] = useState(true)
+  const [playerExpanded, setPlayerExpanded] = useState(true)
+  const [spaceSettingsOpen, setSpaceSettingsOpen] = useState(false)
+  const [spaceBackgrounds, setSpaceBackgrounds] = useState(() => loadSpaceBackgrounds())
+  const {
+    panelRef: playerPanelRef,
+    panelStyle: playerPanelStyle,
+    panelClassName: playerPanelClassName,
+    onPointerDown: onPlayerPanelPointerDown,
+    resetPosition: resetPlayerPanelPosition,
+  } = useFloatingPanel('hana-player-card-pos')
+  const [pendingDeleteId, setPendingDeleteId] = useState(null)
+  const [swipeReveal, setSwipeReveal] = useState(null)
+  const urlTrackAppliedRef = useRef(false)
+  const skipTodayFromDeepLinkRef = useRef(false)
+  const swipeStartRef = useRef({ x: 0, y: 0, id: null, ignoring: false })
+  const swipeOffsetRef = useRef(0)
+  const blobUrlsRef = useRef(new Set())
+  const mediaUrlCacheRef = useRef(new Map())
+  const mediaLoadInflightRef = useRef(new Map())
+  const thumbUrlCacheRef = useRef(new Map())
+  const thumbLoadInflightRef = useRef(new Map())
+  const itemsRef = useRef(items)
+  itemsRef.current = items
+
+  // Ref tới player hiện tại (audio hoặc video)
+  const mediaRef = useRef(null)
+  const initialLocalPlaylistsRef = useRef(loadCustomPlaylists())
+  const remotePlaylistsHashRef = useRef('')
+  const remoteSpacesHashRef = useRef('')
+  
+  // Có cần autoplay sau khi đổi bài không
+  const shouldAutoPlayRef = useRef(false)
+  
+  // Đánh dấu media hiện tại đã sẵn sàng
+  const mediaReadyRef = useRef(false)
+  
+  // Tránh play() nhiều lần
+  const playRequestRef = useRef(0)
+
+  const previewRequestRef = useRef(0)
+
+  // Đang chuyển bài trong playlist — bỏ qua pause/reset
+  const isPlaylistAdvancingRef = useRef(false)
+
+  const playableItems = useMemo(
+    () => items.filter((item) => item.kind === 'audio' || item.kind === 'video'),
+    [items],
+  )
+
+  const playableIdSet = useMemo(
+    () => new Set(playableItems.map((item) => item.id)),
+    [playableItems],
+  )
+
+  const mediaCounts = useMemo(() => {
+    let audio = 0
+    let video = 0
+    let image = 0
+    let book = 0
+    let totalSize = 0
+    for (const item of items) {
+      totalSize += item.size || 0
+      if (item.kind === 'audio') audio += 1
+      else if (item.kind === 'video') video += 1
+      // Only count images in the shared library; jacket/cover/space
+      // background uploads are private assets.
+      else if (item.kind === 'image' && item.inLibrary !== false) image += 1
+      else if (item.kind === 'book') book += 1
+    }
+    return { audio, video, image, book, totalSize }
+  }, [items])
+
+  const playlistLiveCounts = useMemo(() => {
+    const map = {}
+    for (const playlist of customPlaylists) {
+      map[playlist.id] = playlist.trackIds.filter((id) => playableIdSet.has(id)).length
+    }
+    return map
+  }, [customPlaylists, playableIdSet])
+
+  const favoriteLiveCount = useMemo(
+    () => favoriteIds.filter((id) => playableIdSet.has(id)).length,
+    [favoriteIds, playableIdSet],
+  )
+
+  const todayBaseItem = useMemo(() => {
+    if (!isLoggedIn || !todayOpen || skipTodayFromDeepLinkRef.current) return null
+    if (!playlistSyncReady) return null
+    return pickTodayAudioItem(playableItems, customPlaylists)
+  }, [isLoggedIn, todayOpen, playableItems, customPlaylists, playlistSyncReady])
+
+  const todayItem = useMemo(() => {
+    if (!todayOverrideId) return todayBaseItem
+    return playableItems.find((item) => item.id === todayOverrideId) || todayBaseItem
+  }, [todayOverrideId, playableItems, todayBaseItem])
+
+  const todayReveal = useMemo(
+    () => resolveTodayReveal(todayItem),
+    [todayItem],
+  )
+
+  const showTodayHero = Boolean(
+    isLoggedIn
+      && todayOpen
+      && todayItem
+      && !loadingItems
+      && playlistSyncReady
+      && !skipTodayFromDeepLinkRef.current,
+  )
+
+  const todayHistoryView = useMemo(
+    () =>
+      todayHistory
+        .filter((entry) => entry?.id && entry.id !== todayItem?.id)
+        .map((entry) => ({
+          ...entry,
+          title: entry.title || getDisplayName(items.find((item) => item.id === entry.id)?.name || ''),
+        }))
+        .slice(0, 8),
+    [todayHistory, todayItem?.id, items],
+  )
+
+  const activePlaylistName = useMemo(() => {
+    if (listFilter === 'all' || listFilter === 'favorites') return ''
+    return customPlaylists.find((playlist) => playlist.id === listFilter)?.name || ''
+  }, [listFilter, customPlaylists])
+
+  const todaySpaceId = useMemo(
+    () =>
+      suggestListeningSpace({
+        item: todayItem,
+        jacketStyleId: resolveTodayJacketStyleId(todayItem),
+        savedSpaceId: listeningSpaceId,
+        customSpaces,
+      }),
+    [todayItem, listeningSpaceId, customSpaces],
+  )
+
+  const postcardSpaceId = useMemo(
+    () =>
+      suggestListeningSpace({
+        item: postcardItemId ? items.find((item) => item.id === postcardItemId) : null,
+        jacketStyleId: items.find((item) => item.id === postcardItemId)?.jacketStyle || null,
+        savedSpaceId: listeningSpaceId,
+        customSpaces,
+      }),
+    [postcardItemId, items, listeningSpaceId, customSpaces],
+  )
+
+  const shellSpaceStyle = useMemo(() => {
+    if (showTodayHero) return listeningSpaceStyleVars(todaySpaceId, customSpaces)
+    if (listeningSpaceOpen) return listeningSpaceStyleVars(listeningSpaceId, customSpaces)
+    return undefined
+  }, [showTodayHero, todaySpaceId, listeningSpaceOpen, listeningSpaceId, customSpaces])
+
+  const reducedMotion = useMemo(
+    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    [],
+  )
+
+  const favoriteIdSet = useMemo(() => new Set(favoriteIds), [favoriteIds])
+
+  const visiblePlayableItems = useMemo(() => {
+    if (listFilter === 'all') return playableItems
+    if (listFilter === 'favorites') {
+      return playableItems.filter((item) => favoriteIdSet.has(item.id))
+    }
+    const playlist = customPlaylists.find((entry) => entry.id === listFilter)
+    if (!playlist) return playableItems
+    const order = new Map(playlist.trackIds.map((id, index) => [id, index]))
+    return playableItems
+      .filter((item) => order.has(item.id))
+      .sort((a, b) => order.get(a.id) - order.get(b.id))
+  }, [playableItems, listFilter, favoriteIdSet, customPlaylists])
+
+  const imageItems = useMemo(
+    () => items.filter((item) => item.kind === 'image' && item.inLibrary !== false),
+    [items],
+  )
+
+  const bookItems = useMemo(
+    () => items.filter((item) => item.kind === 'book'),
+    [items],
+  )
+
+  const libraryViewerIndex = useMemo(
+    () => imageItems.findIndex((item) => item.id === libraryViewerItemId),
+    [imageItems, libraryViewerItemId],
+  )
+  const libraryViewerItem = libraryViewerIndex >= 0 ? imageItems[libraryViewerIndex] : null
+
+  const librarySlideshowItem = imageItems.length > 0
+    ? imageItems[librarySlideshowIndex % imageItems.length]
+    : null
+
+  const stepLibraryViewer = useCallback((offset) => {
+    setLibraryViewerItemId((currentId) => {
+      const currentIndex = imageItems.findIndex((item) => item.id === currentId)
+      if (currentIndex < 0 || imageItems.length === 0) return currentId
+      const nextIndex = (currentIndex + offset + imageItems.length) % imageItems.length
+      return imageItems[nextIndex]?.id || currentId
+    })
+  }, [imageItems])
+
+  const stepLibrarySlideshow = useCallback((offset) => {
+    setLibrarySlideshowIndex((current) => {
+      if (imageItems.length === 0) return 0
+      return (current + offset + imageItems.length) % imageItems.length
+    })
+  }, [imageItems.length])
+
+  useEffect(() => {
+    if (imageItems.length === 0) {
+      setLibrarySlideshowIndex(0)
+      return
+    }
+    setLibrarySlideshowIndex((current) => current % imageItems.length)
+  }, [imageItems.length])
+
+  useEffect(() => {
+    if (imageItems.length < 2 || librarySlideshowPaused || libraryViewerItem) return undefined
+    const timer = window.setInterval(() => {
+      setLibrarySlideshowIndex((current) => (current + 1) % imageItems.length)
+    }, 4500)
+    return () => window.clearInterval(timer)
+  }, [imageItems.length, librarySlideshowPaused, libraryViewerItem])
+
+  useEffect(() => {
+    if (!libraryViewerItem) return undefined
+    const onKey = (event) => {
+      if (event.key === 'Escape') setLibraryViewerItemId(null)
+      if (event.key === 'ArrowRight') stepLibraryViewer(1)
+      if (event.key === 'ArrowLeft') stepLibraryViewer(-1)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [libraryViewerItem, stepLibraryViewer])
+
+  const getLibraryTileShape = useCallback((index) => {
+    // Varied aspect ratios for masonry columns — no empty grid holes.
+    const pattern = ['hero', 'tall', 'sq', 'wide', 'tall', 'sq', 'portrait', 'wide', 'sq', 'tall', 'hero', 'sq']
+    return pattern[index % pattern.length]
+  }, [])
+
+  const selectedItem = useMemo(
+    () => items.find((item) => item.id === selectedItemId) || visiblePlayableItems[0] || playableItems[0] || null,
+    [items, selectedItemId, visiblePlayableItems, playableItems],
+  )
+
+  const suggestedListeningSpaceId = useMemo(
+    () =>
+      suggestListeningSpace({
+        item: selectedItem,
+        jacketStyleId: selectedItem?.jacketStyle || null,
+        playlistName: activePlaylistName,
+        savedSpaceId: listeningSpaceId,
+        customSpaces,
+      }),
+    [selectedItem, activePlaylistName, listeningSpaceId, customSpaces],
+  )
+
+  const selectedPlayableIndex = useMemo(
+    () => visiblePlayableItems.findIndex((item) => item.id === selectedItemId),
+    [visiblePlayableItems, selectedItemId],
+  )
+
+  const getItemIdAtOffset = useCallback((offset) => {
+    if (visiblePlayableItems.length === 0) return null
+    const baseIndex = selectedPlayableIndex >= 0 ? selectedPlayableIndex : 0
+    const nextIndex = (baseIndex + offset + visiblePlayableItems.length) % visiblePlayableItems.length
+    return visiblePlayableItems[nextIndex]?.id || null
+  }, [visiblePlayableItems, selectedPlayableIndex])
+
+  useEffect(() => {
+    saveFavoriteIds(favoriteIds)
+  }, [favoriteIds])
+
+  useEffect(() => {
+    saveListFilter(listFilter)
+  }, [listFilter])
+
+  useEffect(() => {
+    saveCustomPlaylists(customPlaylists)
+  }, [customPlaylists])
+
+  useEffect(() => {
+    if (listFilter === 'all' || listFilter === 'favorites') return
+    if (!customPlaylists.some((playlist) => playlist.id === listFilter)) {
+      setListFilter('all')
+    }
+  }, [listFilter, customPlaylists])
+
+  useEffect(() => {
+    if (uploadTargetPlaylistId === 'all') return
+    if (!customPlaylists.some((playlist) => playlist.id === uploadTargetPlaylistId)) {
+      setUploadTargetPlaylistId('all')
+    }
+  }, [uploadTargetPlaylistId, customPlaylists])
+
+  useEffect(() => {
+    if (!playlistMenuItemId) return undefined
+    const onPointerDown = (event) => {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      if (target.closest('.playlist-add-wrap') || target.closest('.playlist-add-menu')) return
+      setPlaylistMenuItemId(null)
+      setPlaylistMenuPos(null)
+    }
+    const onRepositionClose = () => {
+      setPlaylistMenuItemId(null)
+      setPlaylistMenuPos(null)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    window.addEventListener('resize', onRepositionClose)
+    window.addEventListener('scroll', onRepositionClose, true)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('resize', onRepositionClose)
+      window.removeEventListener('scroll', onRepositionClose, true)
+    }
+  }, [playlistMenuItemId])
+
+  const toggleFavorite = useCallback((itemId) => {
+    setFavoriteIds((current) => (
+      current.includes(itemId)
+        ? current.filter((id) => id !== itemId)
+        : [...current, itemId]
+    ))
+  }, [])
+
+  const createCustomPlaylist = useCallback((name, initialTrackId = null) => {
+    const trimmed = String(name || '').trim().slice(0, 40)
+    if (!trimmed) return null
+    const playlist = {
+      id: createPlaylistId(),
+      name: trimmed,
+      trackIds: initialTrackId ? [initialTrackId] : [],
+    }
+    setCustomPlaylists((current) => [...current, playlist])
+    return playlist.id
+  }, [])
+
+  const submitCreatePlaylistForUpload = () => {
+    const id = createCustomPlaylist(uploadPlaylistNameDraft)
+    if (!id) return
+    setUploadPlaylistNameDraft('')
+    setUploadCreatingPlaylist(false)
+    setUploadTargetPlaylistId(id)
+    setListFilter(id)
+  }
+
+  const renameCustomPlaylist = useCallback((playlistId, name) => {
+    const trimmed = String(name || '').trim().slice(0, 40)
+    if (!trimmed) return
+    setCustomPlaylists((current) =>
+      current.map((playlist) => (
+        playlist.id === playlistId ? { ...playlist, name: trimmed } : playlist
+      )),
+    )
+  }, [])
+
+  const deleteCustomPlaylist = useCallback((playlistId) => {
+    setCustomPlaylists((current) => current.filter((playlist) => playlist.id !== playlistId))
+    setListFilter((current) => (current === playlistId ? 'all' : current))
+  }, [])
+
+  const reorderCustomPlaylists = useCallback((fromId, toId) => {
+    if (!fromId || !toId || fromId === toId) return
+    setCustomPlaylists((current) => {
+      const fromIndex = current.findIndex((playlist) => playlist.id === fromId)
+      const toIndex = current.findIndex((playlist) => playlist.id === toId)
+      if (fromIndex < 0 || toIndex < 0) return current
+      const next = [...current]
+      const [moved] = next.splice(fromIndex, 1)
+      next.splice(toIndex, 0, moved)
+      return next
+    })
+  }, [])
+
+  const toggleTrackInPlaylist = useCallback((playlistId, trackId) => {
+    setCustomPlaylists((current) =>
+      current.map((playlist) => {
+        if (playlist.id !== playlistId) return playlist
+        const exists = playlist.trackIds.includes(trackId)
+        return {
+          ...playlist,
+          trackIds: exists
+            ? playlist.trackIds.filter((id) => id !== trackId)
+            : [...playlist.trackIds, trackId],
+        }
+      }),
+    )
+  }, [])
+
+  const addTracksToPlaylist = useCallback((playlistId, trackIds) => {
+    if (!playlistId || playlistId === 'all' || !Array.isArray(trackIds) || trackIds.length === 0) return
+    setCustomPlaylists((current) =>
+      current.map((playlist) => {
+        if (playlist.id !== playlistId) return playlist
+        const next = [...playlist.trackIds]
+        for (const id of trackIds) {
+          if (id && !next.includes(id)) next.push(id)
+        }
+        return { ...playlist, trackIds: next }
+      }),
+    )
+  }, [])
+
+  const ensureMediaUrl = useCallback(async (itemId, mimeType, hint = null) => {
+    const cached = mediaUrlCacheRef.current.get(itemId)
+    if (cached) return cached
+
+    const inflight = mediaLoadInflightRef.current.get(itemId)
+    if (inflight) return inflight
+
+    const metaHint = hint || itemsRef.current.find((entry) => entry.id === itemId) || null
+    const request = loadMediaBlobUrl(itemId, mimeType, metaHint)
+      .then((url) => {
+        mediaUrlCacheRef.current.set(itemId, url)
+        blobUrlsRef.current.add(url)
+        return url
+      })
+      .finally(() => {
+        mediaLoadInflightRef.current.delete(itemId)
+      })
+
+    mediaLoadInflightRef.current.set(itemId, request)
+    return request
+  }, [])
+
+  const ensureThumbUrl = useCallback(async (item) => {
+    if (!item?.id) return null
+    const cached = thumbUrlCacheRef.current.get(item.id)
+    if (cached) return cached
+
+    const inflight = thumbLoadInflightRef.current.get(item.id)
+    if (inflight) return inflight
+
+    const request = (async () => {
+      const fullUrl = await ensureMediaUrl(item.id, item.type || 'image/jpeg', item)
+      const response = await fetch(fullUrl)
+      if (!response.ok) throw new Error('thumb fetch failed')
+      const blob = await response.blob()
+      const thumbUrl = await blobToThumbnailUrl(blob, 560, 0.72)
+      thumbUrlCacheRef.current.set(item.id, thumbUrl)
+      if (thumbUrl.startsWith('blob:')) blobUrlsRef.current.add(thumbUrl)
+      return thumbUrl
+    })().finally(() => {
+      thumbLoadInflightRef.current.delete(item.id)
+    })
+
+    thumbLoadInflightRef.current.set(item.id, request)
+    return request
+  }, [ensureMediaUrl])
+
+  // Load photo-library thumbnails in parallel (not one-by-one).
+  useEffect(() => {
+    if (!isLoggedIn || imageItems.length === 0) return undefined
+    let cancelled = false
+    const load = async () => {
+      await mapPool(imageItems, 4, async (item) => {
+        if (cancelled) return
+        if (thumbUrlCacheRef.current.has(item.id)) {
+          const existing = thumbUrlCacheRef.current.get(item.id)
+          if (existing && !cancelled) {
+            setLibraryThumbUrls((current) => (
+              current[item.id] === existing ? current : { ...current, [item.id]: existing }
+            ))
+          }
+          return
+        }
+        try {
+          const url = await ensureThumbUrl(item)
+          if (cancelled || !url) return
+          setLibraryThumbUrls((current) => (
+            current[item.id] === url ? current : { ...current, [item.id]: url }
+          ))
+        } catch {
+          /* skip broken thumbnails */
+        }
+      })
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [isLoggedIn, imageItems, ensureThumbUrl])
+
+  useEffect(() => {
+    if (!showTodayHero) {
+      setTodaySpaceBackgroundUrl(null)
+      return undefined
+    }
+    const entry = spaceBackgrounds[todaySpaceId] || null
+    let cancelled = false
+    if (!entry) {
+      setTodaySpaceBackgroundUrl(null)
+      return undefined
+    }
+    if (entry.source === 'upload' && entry.dataUrl) {
+      setTodaySpaceBackgroundUrl(entry.dataUrl)
+      return undefined
+    }
+    if (entry.source === 'library' && entry.itemId) {
+      ensureMediaUrl(entry.itemId, entry.mimeType || 'image/jpeg')
+        .then((url) => {
+          if (!cancelled) setTodaySpaceBackgroundUrl(url)
+        })
+        .catch(() => {
+          if (!cancelled) setTodaySpaceBackgroundUrl(null)
+        })
+      return () => {
+        cancelled = true
+      }
+    }
+    setTodaySpaceBackgroundUrl(null)
+    return undefined
+  }, [showTodayHero, todaySpaceId, spaceBackgrounds, ensureMediaUrl])
+
+  useEffect(() => {
+    if (!todayItem || !showTodayHero) {
+      setTodayJacketUrl(null)
+      return undefined
+    }
+
+    // One show per device per day — mark as soon as the hero is displayed.
+    markTodayRecordShown()
+    appendTodayRecordHistory({ id: todayItem.id, title: getDisplayName(todayItem.name) })
+    setTodayHistory(loadTodayRecordHistory())
+
+    let cancelled = false
+    const loadJacket = async () => {
+      if (todayItem.jacketId) {
+        const jacketItem = items.find((entry) => entry.id === todayItem.jacketId)
+        if (jacketItem) {
+          try {
+            const url = await ensureMediaUrl(jacketItem.id, jacketItem.type)
+            if (!cancelled) setTodayJacketUrl(url)
+            return
+          } catch (error) {
+            console.error(error)
+          }
+        }
+      }
+      if (!cancelled) {
+        setTodayJacketUrl(resolveJacketUrl(null, todayItem.jacketStyle || null))
+      }
+    }
+
+    loadJacket()
+    return () => {
+      cancelled = true
+    }
+  }, [todayItem, showTodayHero, items, ensureMediaUrl])
+
+  useEffect(() => {
+    if (!showTodayHero) return
+    setTodayShuffleRemaining(getTodayShuffleRemaining())
+    if (todayBaseItem?.id) {
+      setTodayPickedIds((current) => Array.from(new Set([...current, todayBaseItem.id])))
+    }
+  }, [showTodayHero, todayBaseItem?.id])
+
+  const prefetchMediaUrl = useCallback((item) => {
+    if (!item || item.kind === 'image') return
+    if (mediaUrlCacheRef.current.has(item.id)) return
+
+    ensureMediaUrl(item.id, item.type).catch((err) => {
+      console.error('Prefetch failed:', err)
+    })
+  }, [ensureMediaUrl])
+
+  const selectItem = useCallback((itemId, autoPlay = false) => {
+
+    mediaReadyRef.current = false
+
+    playRequestRef.current++
+
+    shouldAutoPlayRef.current = autoPlay
+
+    setSelectedItemId(itemId)
+    syncTrackQuery(itemId)
+
+}, [])
+
+  const openBook = useCallback(async (bookId) => {
+    const book = items.find((item) => item.id === bookId && item.kind === 'book')
+    if (!book) return
+    setReadingBookBusy(true)
+    setError('')
+    try {
+      const bookmark = getBookBookmark(book.id)
+      setReadingBookStartPage(bookmark?.page > 1 ? bookmark.page : 1)
+      // Open shell immediately so the reading room appears while bytes download.
+      setReadingBookId(book.id)
+      setReadingBookUrl(null)
+      setReadingBookBytes(null)
+
+      const { bytes } = await loadMediaBytes(book.id, book.type || 'application/pdf', book)
+      setReadingBookBytes(bytes)
+      setReadingBookUrl(null)
+    } catch (bookError) {
+      console.error(bookError)
+      setReadingBookId(null)
+      setReadingBookUrl(null)
+      setReadingBookBytes(null)
+      setError(getFirebaseErrorMessage(bookError) || '本を開けませんでした。')
+    } finally {
+      setReadingBookBusy(false)
+    }
+  }, [items])
+
+  const closeBook = useCallback(() => {
+    setReadingBookBusy(false)
+    setReadingBookId(null)
+    setReadingBookUrl(null)
+    setReadingBookBytes(null)
+    setReadingBookStartPage(1)
+    try {
+      setBookBookmarks(getAllBookBookmarks())
+    } catch {
+      setBookBookmarks({})
+    }
+  }, [])
+
+  const handleBookProgress = useCallback(() => {
+    setBookBookmarks(getAllBookBookmarks())
+  }, [])
+
+  const skipTodayHero = useCallback(() => {
+    markTodayRecordShown()
+    setTodayOpen(false)
+    setTodayJacketUrl(null)
+    setTodayOverrideId(null)
+    setTodayPickedIds([])
+    setTodayShuffleRemaining(getTodayShuffleRemaining())
+  }, [])
+
+  const playTodayRecord = useCallback(() => {
+    if (!todayItem) return
+    setListeningSpaceId(todaySpaceId)
+    saveListeningSpaceId(todaySpaceId)
+    setListeningSpaceOpen(true)
+    setFocusMode(true)
+    setPlayerExpanded(false)
+    setSpaceSettingsOpen(false)
+    resetPlayerPanelPosition()
+    skipTodayHero()
+    setPlaylistMode(true)
+    selectItem(todayItem.id, true)
+  }, [todayItem, todaySpaceId, skipTodayHero, selectItem, resetPlayerPanelPosition])
+
+  const resumePlaybackSoon = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      window.setTimeout(() => {
+        const media = mediaRef.current
+        if (!media || !media.paused) return
+        media.play().catch(() => {})
+      }, 40)
+    })
+  }, [])
+
+  const openListeningSpace = useCallback(
+    (spaceIdOverride = null) => {
+      // Keep the user's last choice when reopening; only fall back to suggestion
+      // when there is no valid saved space (e.g. deleted custom space).
+      const nextId =
+        spaceIdOverride
+        || (isKnownSpaceId(listeningSpaceId, customSpaces) ? listeningSpaceId : suggestedListeningSpaceId)
+      const shouldResume = Boolean(mediaRef.current && !mediaRef.current.paused)
+      setListeningSpaceId(nextId)
+      saveListeningSpaceId(nextId, customSpaces)
+      setListeningSpaceOpen(true)
+      setFocusMode(true)
+      setPlayerExpanded(false)
+      setSpaceSettingsOpen(false)
+      resetPlayerPanelPosition()
+      if (shouldResume) resumePlaybackSoon()
+    },
+    [listeningSpaceId, suggestedListeningSpaceId, resetPlayerPanelPosition, resumePlaybackSoon, customSpaces],
+  )
+
+  const closeListeningSpace = useCallback(() => {
+    const shouldResume = Boolean(mediaRef.current && !mediaRef.current.paused)
+    setListeningSpaceOpen(false)
+    setPlayerExpanded(true)
+    setSpaceSettingsOpen(false)
+    resetPlayerPanelPosition()
+    if (shouldResume) resumePlaybackSoon()
+  }, [resetPlayerPanelPosition, resumePlaybackSoon])
+
+  useEffect(() => {
+    document.body.classList.toggle('is-focus-mode-off', listeningSpaceOpen && !focusMode)
+    return () => {
+      document.body.classList.remove('is-focus-mode-off')
+    }
+  }, [listeningSpaceOpen, focusMode])
+
+  const togglePlayerExpanded = useCallback(() => {
+    setPlayerExpanded((current) => !current)
+  }, [])
+
+  const handleFocusModeChange = useCallback((next) => {
+    setFocusMode(next)
+    // Focus OFF = normal full layout: the card joins the grid, so show
+    // the full player and forget any dragged position.
+    if (!next) {
+      setPlayerExpanded(true)
+      resetPlayerPanelPosition()
+    }
+  }, [resetPlayerPanelPosition])
+
+  const handleListeningSpaceChange = useCallback((nextId) => {
+    setListeningSpaceId(nextId)
+    saveListeningSpaceId(nextId, customSpaces)
+  }, [customSpaces])
+
+  const uploadSpaceBackgroundImage = useCallback(async (file) => {
+    const jpegFile = await compressImageFileToJpegFile(file)
+    const metadata = createMediaMetadata(jpegFile, { inLibrary: false, usage: 'space-background' })
+    return uploadMediaFile(jpegFile, metadata)
+  }, [])
+
+  const createCustomListeningSpace = useCallback(async ({
+    label,
+    particle,
+    ambient,
+    backgroundItemId = null,
+  }) => {
+    if (customSpaces.length >= MAX_CUSTOM_SPACES) {
+      throw new Error(`場所は最大${MAX_CUSTOM_SPACES}個までです。`)
+    }
+    const draft = createCustomSpaceDraft({
+      label,
+      particle,
+      ambient,
+      backgroundItemId,
+    })
+    setCustomSpaces((current) => [...current, draft])
+    return draft
+  }, [customSpaces.length])
+
+  const updateCustomListeningSpace = useCallback(async (spaceId, patch = {}) => {
+    setCustomSpaces((current) =>
+      current.map((space) => {
+        if (space.id !== spaceId) return space
+        return hydrateCustomSpace({
+          ...toSharedSpaceRecord(space),
+          ...patch,
+          id: spaceId,
+        })
+      }),
+    )
+  }, [])
+
+  const deleteCustomListeningSpace = useCallback(async (spaceId) => {
+    setCustomSpaces((current) => current.filter((space) => space.id !== spaceId))
+    setListeningSpaceId((current) => {
+      if (current !== spaceId) return current
+      const fallback = LISTENING_SPACES[0].id
+      saveListeningSpaceId(fallback)
+      return fallback
+    })
+  }, [])
+
+  const shuffleTodayRecord = useCallback(() => {
+    if (!todayItem || todayShuffleRemaining <= 0) return
+    const excludeIds = Array.from(new Set([...todayPickedIds, todayItem.id]))
+    const next = pickTodayAudioItem(playableItems, customPlaylists, { excludeIds })
+    if (!next || next.id === todayItem.id) return
+    if (!useTodayShuffle()) return
+    setTodayShuffleRemaining(getTodayShuffleRemaining())
+    setTodayOverrideId(next.id)
+    setTodayPickedIds((current) => Array.from(new Set([...current, next.id])))
+  }, [todayItem, todayShuffleRemaining, todayPickedIds, playableItems, customPlaylists])
+
+  const pickFromTodayHistory = useCallback(
+    (itemId) => {
+      if (!itemId) return
+      const item = playableItems.find((entry) => entry.id === itemId)
+      if (!item || item.kind !== 'audio') return
+      skipTodayHero()
+      setPlaylistMode(true)
+      selectItem(item.id, true)
+    },
+    [playableItems, skipTodayHero, selectItem],
+  )
+
+  useEffect(() => {
+    recordAccessVisit().catch((accessError) => {
+      console.warn('Access log skipped:', accessError)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (urlTrackAppliedRef.current || playableItems.length === 0) return
+    urlTrackAppliedRef.current = true
+    try {
+      const trackId = new URLSearchParams(window.location.search).get(TRACK_QUERY_KEY)
+      if (trackId && playableItems.some((item) => item.id === trackId)) {
+        skipTodayFromDeepLinkRef.current = true
+        setTodayOpen(false)
+        selectItem(trackId, false)
+        const item = playableItems.find((entry) => entry.id === trackId)
+        if (item?.kind === 'audio') {
+          const seenKey = `hana-postcard-welcome-${trackId}`
+          let alreadySeen = false
+          try {
+            alreadySeen = sessionStorage.getItem(seenKey) === '1'
+            if (!alreadySeen) sessionStorage.setItem(seenKey, '1')
+          } catch {
+            /* ignore */
+          }
+          if (!alreadySeen) {
+            setPostcardMode('welcome')
+            setPostcardItemId(trackId)
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [playableItems, selectItem])
+
+  const advancePlaylistToItem = useCallback((nextItem, playImmediately = false) => {
+    if (!nextItem || nextItem.kind === 'image') return false
+
+    const nextUrl = mediaUrlCacheRef.current.get(nextItem.id)
+    const media = mediaRef.current
+
+    if (!playImmediately || !nextUrl || !media) {
+      selectItem(nextItem.id, playlistMode)
+      return false
+    }
+
+    isPlaylistAdvancingRef.current = true
+    shouldAutoPlayRef.current = true
+    mediaReadyRef.current = false
+    playRequestRef.current++
+
+    setSelectedItemId(nextItem.id)
+    syncTrackQuery(nextItem.id)
+    setPlaybackTime(0)
+    setPlaybackDuration(0)
+    setPreviewUrl(nextUrl)
+    setLoadingPreview(false)
+
+    media.src = nextUrl
+    media.load()
+
+    const playPromise = media.play()
+    if (playPromise) {
+      playPromise
+        .then(() => {
+          shouldAutoPlayRef.current = false
+        })
+        .catch(() => {
+          // Mobile có thể chặn — handleMediaCanPlay sẽ thử lại
+        })
+        .finally(() => {
+          isPlaylistAdvancingRef.current = false
+        })
+    } else {
+      isPlaylistAdvancingRef.current = false
+    }
+
+    return true
+  }, [playlistMode, selectItem])
+
+const playNext = useCallback(() => {
+
+  const nextId = getItemIdAtOffset(1)
+
+  if (!nextId) return
+
+  selectItem(
+      nextId,
+      playlistMode
+  )
+
+}, [
+  getItemIdAtOffset,
+  playlistMode,
+  selectItem
+])
+
+const playPrevious = useCallback(() => {
+
+  const prevId = getItemIdAtOffset(-1)
+
+  if (!prevId) return
+
+  selectItem(
+      prevId,
+      playlistMode
+  )
+
+}, [
+  getItemIdAtOffset,
+  playlistMode,
+  selectItem
+])
+
+  const autoPlayCurrentMedia = useCallback(async () => {
+    if (!shouldAutoPlayRef.current) return
+  
+    const media = mediaRef.current
+  
+    if (!media) return
+  
+    try {
+      await media.play()
+      shouldAutoPlayRef.current = false
+    } catch (err) {
+      console.log('Autoplay blocked:', err.name, err.message)
+    }
+  }, [])
+
+  const handleMediaCanPlay = useCallback(() => {
+    mediaReadyRef.current = true
+  
+    autoPlayCurrentMedia()
+  }, [autoPlayCurrentMedia])
+
+  const handleMediaPlay = useCallback(() => {
+    setIsMediaPlaying(true)
+  }, [])
+
+  const handleMediaPause = useCallback(() => {
+    setIsMediaPlaying(false)
+  }, [])
+
+  const handleMediaTimeUpdate = useCallback((event) => {
+    setPlaybackTime(event.currentTarget.currentTime || 0)
+    const nextDuration = event.currentTarget.duration
+    if (Number.isFinite(nextDuration) && nextDuration > 0) {
+      setPlaybackDuration(nextDuration)
+    }
+  }, [])
+
+  const handleMediaDuration = useCallback((event) => {
+    const nextDuration = event.currentTarget.duration
+    setPlaybackDuration(Number.isFinite(nextDuration) && nextDuration > 0 ? nextDuration : 0)
+  }, [])
+
+  const handleSeekAudio = useCallback((time) => {
+    const media = mediaRef.current
+    if (!media || !Number.isFinite(time)) return
+    media.currentTime = Math.max(0, time)
+    setPlaybackTime(media.currentTime || time)
+  }, [])
+
+  const handleSaveLyrics = async (lyrics) => {
+    if (!selectedItem || selectedItem.kind !== 'audio') return
+    setLyricsBusy(true)
+    setError('')
+    try {
+      await updateMediaLyrics(selectedItem.id, lyrics)
+    } catch (lyricsError) {
+      console.error(lyricsError)
+      setError(lyricsError?.message || getFirebaseErrorMessage(lyricsError) || '歌詞の保存に失敗しました。')
+      throw lyricsError
+    } finally {
+      setLyricsBusy(false)
+    }
+  }
+
+  const handleClearLyrics = async () => {
+    if (!selectedItem || selectedItem.kind !== 'audio') return
+    setLyricsBusy(true)
+    setError('')
+    try {
+      await updateMediaLyrics(selectedItem.id, null)
+    } catch (lyricsError) {
+      console.error(lyricsError)
+      setError(lyricsError?.message || getFirebaseErrorMessage(lyricsError) || '歌詞の削除に失敗しました。')
+      throw lyricsError
+    } finally {
+      setLyricsBusy(false)
+    }
+  }
+
+  const handleTogglePlayback = useCallback(async () => {
+    const media = mediaRef.current
+    if (!media) return
+
+    try {
+      if (media.paused) {
+        await media.play()
+      } else {
+        media.pause()
+      }
+    } catch (err) {
+      console.log('Toggle playback failed:', err.name, err.message)
+    }
+  }, [])
+
+  const handleSeekToLyric = useCallback(async (time) => {
+    const media = mediaRef.current
+    if (!media || !Number.isFinite(time)) return
+
+    try {
+      media.currentTime = Math.max(0, time)
+      setPlaybackTime(media.currentTime || time)
+      await media.play()
+    } catch (err) {
+      console.log('Seek lyric failed:', err.name, err.message)
+    }
+  }, [])
+
+  const uploadPrivateImage = async (file, usage) => {
+    const kind = getMediaKind(file.type, file.name)
+    if (kind !== 'image') {
+      throw new Error('画像ファイルを選択してください。')
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      throw new Error(`ファイルは${formatSize(MAX_FILE_SIZE)}以下にしてください。`)
+    }
+
+    const metadata = createMediaMetadata(file, {
+      inLibrary: false,
+      usage,
+    })
+    return uploadMediaFile(file, metadata)
+  }
+
+  const cleanupPrivateImage = async (imageId) => {
+    if (!imageId) return
+    const previous = items.find((item) => item.id === imageId)
+    const stillUsed = items.some(
+      (item) =>
+        item.id !== selectedItem?.id &&
+        item.kind === 'audio' &&
+        (item.coverId === imageId || item.jacketId === imageId),
+    )
+    if (previous?.inLibrary === false && !stillUsed) {
+      await deleteMediaItem(imageId)
+      mediaUrlCacheRef.current.delete(imageId)
+    }
+  }
+
+  const handleCoverPick = async (file) => {
+    if (!selectedItem || selectedItem.kind !== 'audio') return
+
+    setCoverBusy(true)
+    setError('')
+    const previousCoverId = selectedItem.coverId || null
+
+    try {
+      const coverId = await uploadPrivateImage(file, 'cover')
+      await updateMediaCover(selectedItem.id, coverId)
+      await cleanupPrivateImage(previousCoverId === coverId ? null : previousCoverId)
+    } catch (coverError) {
+      console.error(coverError)
+      setError(coverError?.message || getFirebaseErrorMessage(coverError) || 'カバー画像の設定に失敗しました。')
+    } finally {
+      setCoverBusy(false)
+    }
+  }
+
+  const handleCoverClear = async () => {
+    if (!selectedItem || selectedItem.kind !== 'audio') return
+
+    setCoverBusy(true)
+    setError('')
+    const previousCoverId = selectedItem.coverId || null
+
+    try {
+      await updateMediaCover(selectedItem.id, null)
+      setCoverPreviewUrl(null)
+      await cleanupPrivateImage(previousCoverId)
+    } catch (coverError) {
+      console.error(coverError)
+      setError('カバー画像の削除に失敗しました。')
+    } finally {
+      setCoverBusy(false)
+    }
+  }
+
+  const handleJacketPick = async (file) => {
+    if (!selectedItem || selectedItem.kind !== 'audio') return
+
+    setJacketBusy(true)
+    setError('')
+    const previousJacketId = selectedItem.jacketId || null
+
+    try {
+      const jacketId = await uploadPrivateImage(file, 'jacket')
+      await updateMediaJacket(selectedItem.id, jacketId)
+      await cleanupPrivateImage(previousJacketId === jacketId ? null : previousJacketId)
+    } catch (jacketError) {
+      console.error(jacketError)
+      setError(jacketError?.message || getFirebaseErrorMessage(jacketError) || 'ジャケット画像の設定に失敗しました。')
+    } finally {
+      setJacketBusy(false)
+    }
+  }
+
+  const handleJacketClear = async () => {
+    if (!selectedItem || selectedItem.kind !== 'audio') return
+
+    setJacketBusy(true)
+    setError('')
+    const previousJacketId = selectedItem.jacketId || null
+
+    try {
+      await updateMediaJacket(selectedItem.id, null)
+      setJacketPreviewUrl(null)
+      await cleanupPrivateImage(previousJacketId)
+    } catch (jacketError) {
+      console.error(jacketError)
+      setError('ジャケット画像の削除に失敗しました。')
+    } finally {
+      setJacketBusy(false)
+    }
+  }
+
+  const handleJacketStyleChange = async (styleId) => {
+    if (!selectedItem || selectedItem.kind !== 'audio') return
+
+    setJacketBusy(true)
+    setError('')
+
+    try {
+      await updateMediaJacketStyle(selectedItem.id, styleId)
+    } catch (jacketError) {
+      console.error(jacketError)
+      setError(jacketError?.message || getFirebaseErrorMessage(jacketError) || 'ジャケットスタイルの保存に失敗しました。')
+    } finally {
+      setJacketBusy(false)
+    }
+  }
+
+  const handleAssignCoverFromLibrary = async (coverId) => {
+    if (!selectedItem || selectedItem.kind !== 'audio') {
+      setError('先に音声トラックを選択してください。')
+      return
+    }
+
+    setCoverBusy(true)
+    setError('')
+
+    try {
+      await updateMediaCover(selectedItem.id, coverId)
+    } catch (coverError) {
+      console.error(coverError)
+      setError('カバー画像の設定に失敗しました。')
+    } finally {
+      setCoverBusy(false)
+    }
+  }
+
+  const startPlaylist = useCallback(() => {
+    const queue = visiblePlayableItems.length > 0 ? visiblePlayableItems : playableItems
+    if (queue.length === 0) return
+
+    setPlaylistMode(true)
+
+    const inQueue =
+      selectedItem &&
+      selectedItem.kind !== 'image' &&
+      queue.some((item) => item.id === selectedItem.id)
+    const startItem = inQueue ? selectedItem : queue[0]
+    if (!startItem) return
+
+    // Cùng bài đang chọn: selectItem không đổi state → effect không chạy → phải play() ngay trong click
+    if (selectedItem?.id === startItem.id) {
+      shouldAutoPlayRef.current = true
+      const media = mediaRef.current
+      if (media && previewUrl && !loadingPreview) {
+        if (media.ended) {
+          media.currentTime = 0
+        }
+        const playPromise = media.play()
+        if (playPromise) {
+          playPromise
+            .then(() => {
+              shouldAutoPlayRef.current = false
+            })
+            .catch(() => {
+              // Mobile có thể chờ canplay — giữ shouldAutoPlayRef
+            })
+        }
+        return
+      }
+      selectItem(startItem.id, true)
+      return
+    }
+
+    selectItem(startItem.id, true)
+  }, [
+    visiblePlayableItems,
+    playableItems,
+    selectedItem,
+    selectItem,
+    previewUrl,
+    loadingPreview,
+  ])
+
+  const handleMediaEnded = useCallback(() => {
+    if (!playlistMode) return
+    if (visiblePlayableItems.length <= 1) return
+
+    const nextId = getItemIdAtOffset(1)
+    if (!nextId) return
+
+    const nextItem = visiblePlayableItems.find((item) => item.id === nextId)
+    if (!nextItem) return
+
+    // Gọi play() đồng bộ trong ended — mobile chỉ cho phép trong chuỗi sự kiện này
+    if (!advancePlaylistToItem(nextItem, true)) {
+      playNext()
+    }
+  }, [
+    playlistMode,
+    visiblePlayableItems,
+    getItemIdAtOffset,
+    advancePlaylistToItem,
+    playNext,
+  ])
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setSessionAvatarUrl('')
+      setSessionStatus('auto')
+      return undefined
+    }
+    setSessionAvatarUrl('')
+    return subscribeChatProfile(
+      sessionProfile.id,
+      (profile) => {
+        setSessionAvatarUrl(profile?.avatarUrl || '')
+        setSessionStatus(normalizeChatPresenceMode(profile?.status))
+      },
+      () => {},
+    )
+  }, [isLoggedIn, sessionProfile.id])
+
+  useEffect(() => {
+    if (!statusMenuOpen) return undefined
+    const onPointerDown = (event) => {
+      if (!statusChipRef.current?.contains(event.target)) setStatusMenuOpen(false)
+    }
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setStatusMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [statusMenuOpen])
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setItems([])
+      setSelectedItemId(null)
+      setLoadingItems(false)
+      setPlaylistSyncReady(false)
+      return undefined
+    }
+
+    setLoadingItems(true)
+
+    const unsubscribe = subscribeToMediaItems(
+      (nextItems) => {
+        setItems(nextItems.map(normalizeMediaItem))
+        setSelectedItemId((currentId) => {
+          if (currentId && nextItems.some((item) => item.id === currentId)) {
+            return currentId
+          }
+          const normalized = nextItems.map(normalizeMediaItem)
+          const firstPlayable = normalized.find(
+            (item) => item.kind === 'audio' || item.kind === 'video',
+          )
+          return firstPlayable?.id || null
+        })
+        setLoadingItems(false)
+      },
+      (loadError) => {
+        console.error(loadError)
+        setError(getFirebaseErrorMessage(loadError))
+        setLoadingItems(false)
+      },
+    )
+
+    return unsubscribe
+  }, [isLoggedIn])
+
+  useEffect(() => {
+    if (!isLoggedIn) return undefined
+
+    const unsubscribe = subscribeToSharedPlaylists(
+      async (remotePlaylists, exists) => {
+        if (!exists && initialLocalPlaylistsRef.current.length > 0) {
+          const localPlaylists = initialLocalPlaylistsRef.current
+          const localHash = JSON.stringify(localPlaylists)
+          remotePlaylistsHashRef.current = localHash
+          setCustomPlaylists(localPlaylists)
+          setPlaylistSyncReady(true)
+          try {
+            await saveSharedPlaylists(localPlaylists)
+          } catch (syncError) {
+            console.error(syncError)
+            setError(getFirebaseErrorMessage(syncError))
+          }
+          return
+        }
+
+        const remoteHash = JSON.stringify(remotePlaylists)
+        remotePlaylistsHashRef.current = remoteHash
+        setCustomPlaylists(remotePlaylists)
+        setPlaylistSyncReady(true)
+      },
+      (loadError) => {
+        console.error(loadError)
+        setError(getFirebaseErrorMessage(loadError))
+      },
+    )
+
+    return unsubscribe
+  }, [isLoggedIn])
+
+  useEffect(() => {
+    if (!isLoggedIn || !playlistSyncReady) return
+    const localHash = JSON.stringify(customPlaylists)
+    if (localHash === remotePlaylistsHashRef.current) return
+
+    saveSharedPlaylists(customPlaylists)
+      .then(() => {
+        remotePlaylistsHashRef.current = localHash
+      })
+      .catch((syncError) => {
+        console.error(syncError)
+        setError(getFirebaseErrorMessage(syncError))
+      })
+  }, [customPlaylists, isLoggedIn, playlistSyncReady])
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setCustomSpaces([])
+      setSpacesSyncReady(false)
+      remoteSpacesHashRef.current = ''
+      return undefined
+    }
+
+    const unsubscribe = subscribeToSharedSpaces(
+      (remoteSpaces) => {
+        const hydrated = remoteSpaces.map((space) => hydrateCustomSpace(space))
+        const remoteHash = JSON.stringify(hydrated.map(toSharedSpaceRecord))
+        remoteSpacesHashRef.current = remoteHash
+        setCustomSpaces(hydrated)
+        setSpacesSyncReady(true)
+      },
+      (loadError) => {
+        console.error(loadError)
+        setError(getFirebaseErrorMessage(loadError))
+        setSpacesSyncReady(true)
+      },
+    )
+
+    return unsubscribe
+  }, [isLoggedIn])
+
+  useEffect(() => {
+    if (!isLoggedIn || !spacesSyncReady) return
+    const records = customSpaces.map(toSharedSpaceRecord)
+    const localHash = JSON.stringify(records)
+    if (localHash === remoteSpacesHashRef.current) return
+
+    saveSharedSpaces(records)
+      .then(() => {
+        remoteSpacesHashRef.current = localHash
+      })
+      .catch((syncError) => {
+        console.error(syncError)
+        setError(getFirebaseErrorMessage(syncError))
+      })
+  }, [customSpaces, isLoggedIn, spacesSyncReady])
+
+  useEffect(() => {
+    if (!spacesSyncReady) return
+    if (isKnownSpaceId(listeningSpaceId, customSpaces)) return
+    const fallback = LISTENING_SPACES[0].id
+    setListeningSpaceId(fallback)
+    saveListeningSpaceId(fallback)
+  }, [spacesSyncReady, customSpaces, listeningSpaceId])
+
+  useEffect(() => {
+    const currentUrls = new Set([
+      ...(previewUrl?.startsWith('blob:') ? [previewUrl] : []),
+      ...mediaUrlCacheRef.current.values(),
+      ...thumbUrlCacheRef.current.values(),
+    ])
+
+    blobUrlsRef.current.forEach((url) => {
+      if (!currentUrls.has(url)) {
+        URL.revokeObjectURL(url)
+      }
+    })
+
+    blobUrlsRef.current = currentUrls
+  }, [previewUrl])
+
+  useEffect(() => {
+    setIsMediaPlaying(false)
+    setPlaybackTime(0)
+    setPlaybackDuration(0)
+  }, [selectedItem?.id])
+
+  useEffect(() => {
+    if (selectedItem?.kind !== 'audio' || !selectedItem.coverId) {
+      setCoverPreviewUrl(null)
+      return undefined
+    }
+
+    const coverItem = items.find((item) => item.id === selectedItem.coverId)
+    if (!coverItem) {
+      setCoverPreviewUrl(null)
+      return undefined
+    }
+
+    let cancelled = false
+
+    ensureMediaUrl(coverItem.id, coverItem.type)
+      .then((url) => {
+        if (!cancelled) {
+          setCoverPreviewUrl(url)
+        }
+      })
+      .catch((err) => {
+        console.error(err)
+        if (!cancelled) {
+          setCoverPreviewUrl(null)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedItem?.id, selectedItem?.kind, selectedItem?.coverId, items, ensureMediaUrl])
+
+  useEffect(() => {
+    if (selectedItem?.kind !== 'audio' || !selectedItem.jacketId) {
+      setJacketPreviewUrl(null)
+      return undefined
+    }
+
+    const jacketItem = items.find((item) => item.id === selectedItem.jacketId)
+    if (!jacketItem) {
+      setJacketPreviewUrl(null)
+      return undefined
+    }
+
+    let cancelled = false
+
+    ensureMediaUrl(jacketItem.id, jacketItem.type)
+      .then((url) => {
+        if (!cancelled) {
+          setJacketPreviewUrl(url)
+        }
+      })
+      .catch((err) => {
+        console.error(err)
+        if (!cancelled) {
+          setJacketPreviewUrl(null)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedItem?.id, selectedItem?.kind, selectedItem?.jacketId, items, ensureMediaUrl])
+
+  useEffect(() => {
+
+    if (!selectedItem) {
+      mediaReadyRef.current = false
+      playRequestRef.current++
+        setPreviewUrl(null)
+        setLoadingPreview(false)
+        return
+    }
+
+    const cachedUrl = mediaUrlCacheRef.current.get(selectedItem.id)
+    if (cachedUrl) {
+      setPreviewUrl(cachedUrl)
+      setLoadingPreview(false)
+      return
+    }
+
+    const requestId = ++previewRequestRef.current
+
+    setLoadingPreview(true)
+    setPreviewUrl(null)
+
+    ensureMediaUrl(
+        selectedItem.id,
+        selectedItem.type
+    )
+        .then((url) => {
+
+            // Nếu trong lúc đang tải người dùng đã chuyển bài,
+            // bỏ luôn kết quả cũ.
+
+            if (requestId !== previewRequestRef.current) {
+                return
+            }
+
+            setPreviewUrl(url)
+            setLoadingPreview(false)
+
+        })
+        .catch((err) => {
+
+            if (requestId !== previewRequestRef.current)
+                return
+
+            console.error(err)
+
+            setError(
+                getFirebaseErrorMessage(err)
+            )
+
+            setLoadingPreview(false)
+
+        })
+
+}, [
+    selectedItem?.id,
+    selectedItem?.type,
+    ensureMediaUrl,
+])
+
+  useEffect(() => {
+    if (!playlistMode || !selectedItem || selectedItem.kind === 'image') return
+
+    const nextId = getItemIdAtOffset(1)
+    if (!nextId) return
+
+    const nextItem = visiblePlayableItems.find((item) => item.id === nextId)
+    prefetchMediaUrl(nextItem)
+  }, [
+    playlistMode,
+    selectedItem?.id,
+    selectedItem?.kind,
+    visiblePlayableItems,
+    getItemIdAtOffset,
+    prefetchMediaUrl,
+  ])
+
+    useEffect(() => {
+
+      if (!playlistMode) return
+
+      if (!previewUrl) return
+
+      if (loadingPreview) return
+
+      if (!shouldAutoPlayRef.current) return
+
+      if (selectedItem?.kind === 'image') return
+
+      if (!mediaReadyRef.current) return
+
+      autoPlayCurrentMedia()
+
+  }, [
+      previewUrl,
+      loadingPreview,
+      playlistMode,
+      selectedItem?.id,
+      selectedItem?.kind,
+      autoPlayCurrentMedia
+  ])
+
+    useEffect(() => {
+
+      if (isPlaylistAdvancingRef.current || shouldAutoPlayRef.current) return
+
+      const media = mediaRef.current
+
+      if (!media) return
+
+      media.pause()
+
+      media.currentTime = 0
+
+  }, [
+      selectedItem?.id
+  ])
+
+  useEffect(() => {
+    return () => {
+      blobUrlsRef.current.forEach((url) => {
+        if (url?.startsWith('blob:')) {
+          URL.revokeObjectURL(url)
+        }
+      })
+    }
+  }, [])
+
+  const handleLogin = (event) => {
+    event.preventDefault()
+    const nickname = String(nicknameDraft || '').trim()
+    if (!nickname) {
+      setError('ニックネームを入力してください。')
+      return
+    }
+    const normalized = normalizeLoginPassword(password)
+    const account = findChatAccountByPassKey(normalized)
+
+    if (account) {
+      const role = account.role === 'owner' ? 'owner' : 'guest'
+      const nextGuestKey = account.passKey || account.key
+      const profile = saveProfile({ nickname, onboarded: true })
+      setUserNickname(profile.nickname)
+      try {
+        window.localStorage.setItem(AUTH_KEY, 'true')
+        window.localStorage.setItem(AUTH_ROLE_KEY, role)
+        window.localStorage.setItem(AUTH_GUEST_KEY, nextGuestKey)
+      } catch {
+        // Ignore storage errors and keep the app working.
+      }
+      setAuthRole(role)
+      setGuestKey(nextGuestKey)
+      setIsLoggedIn(true)
+      setError('')
+      return
+    }
+
+    setError('パスワードが違います。')
+  }
+
+  const handleLogout = () => {
+    try {
+      window.localStorage.removeItem(AUTH_KEY)
+      window.localStorage.removeItem(AUTH_ROLE_KEY)
+      window.localStorage.removeItem(AUTH_GUEST_KEY)
+    } catch {
+      // Ignore storage errors and keep the app working.
+    }
+    setIsLoggedIn(false)
+    setAuthRole('guest')
+    setGuestKey('')
+    setSessionAvatarUrl('')
+    setPassword('')
+    setError('')
+  }
+
+  const handleAvatarPick = async (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !isLoggedIn) return
+    setAvatarUploading(true)
+    setError('')
+    try {
+      const url = await uploadUserAvatar(sessionProfile.id, file, {
+        displayName: sessionProfile.displayName,
+      })
+      setSessionAvatarUrl(url)
+    } catch (avatarError) {
+      setError(getFirebaseErrorMessage(avatarError) || avatarError?.message || 'アバターの更新に失敗しました。')
+    } finally {
+      setAvatarUploading(false)
+    }
+  }
+
+  const applySessionStatus = async (mode) => {
+    const next = normalizeChatPresenceMode(mode)
+    setSessionStatus(next)
+    setStatusMenuOpen(false)
+    try {
+      await setChatProfileStatus(sessionProfile.id, next)
+    } catch (statusError) {
+      setError(getFirebaseErrorMessage(statusError) || statusError?.message || 'ステータスの更新に失敗しました。')
+    }
+  }
+
+  const handleUpload = async (event) => {
+    const files = Array.from(event.target.files || [])
+    if (files.length === 0) return
+
+    const validFiles = []
+    const skipped = []
+
+    for (const file of files) {
+      const kind = getMediaKind(file.type, file.name)
+      if (kind === 'file') {
+        skipped.push(`${file.name}（形式非対応）`)
+        continue
+      }
+      if (file.size > getMaxUploadBytes(kind)) {
+        const limit = formatSize(getMaxUploadBytes(kind))
+        skipped.push(`${file.name}（${limit}超）`)
+        continue
+      }
+      validFiles.push(file)
+    }
+
+    if (validFiles.length === 0) {
+      setError(
+        skipped.length > 0
+          ? `アップロードできませんでした: ${skipped.join('、')}`
+          : '動画・音声・画像・PDFファイルのみ対応しています。',
+      )
+      event.target.value = ''
+      return
+    }
+
+    const targetPlaylistId = uploadTargetPlaylistId
+    const targetExists =
+      targetPlaylistId === 'all' ||
+      customPlaylists.some((playlist) => playlist.id === targetPlaylistId)
+    const playlistForUpload = targetExists ? targetPlaylistId : 'all'
+
+    setUploading(true)
+    setUploadProgress(0)
+    setUploadingFileIndex(0)
+    setUploadingFileTotal(validFiles.length)
+    setError(skipped.length > 0 ? `一部スキップ: ${skipped.join('、')}` : '')
+
+    const uploadedPlayableIds = []
+    let nextOrder =
+      playableItems.reduce(
+        (max, item) => Math.max(max, typeof item.order === 'number' ? item.order : -1),
+        -1,
+      ) + 1
+    let lastPlayableId = null
+    let lastBookId = null
+
+    try {
+      for (let index = 0; index < validFiles.length; index += 1) {
+        const file = validFiles[index]
+        const kind = getMediaKind(file.type, file.name)
+        setUploadingFileIndex(index + 1)
+        setUploadingFileName(file.name)
+        setUploadProgress(0)
+
+        const isShelfAsset = kind === 'image' || kind === 'book'
+        const metadata = createMediaMetadata(file, {
+          inLibrary: kind === 'image',
+          ...(isShelfAsset
+            ? {}
+            : {
+                order: nextOrder,
+              }),
+        })
+        if (!isShelfAsset) {
+          nextOrder += 1
+        }
+
+        const id = await uploadMediaFile(file, metadata, setUploadProgress)
+        if (kind === 'audio' || kind === 'video') {
+          uploadedPlayableIds.push(id)
+          lastPlayableId = id
+        }
+        if (kind === 'book') {
+          lastBookId = id
+        }
+      }
+
+      if (playlistForUpload !== 'all' && uploadedPlayableIds.length > 0) {
+        addTracksToPlaylist(playlistForUpload, uploadedPlayableIds)
+        setListFilter(playlistForUpload)
+      }
+
+      if (lastPlayableId) {
+        setSelectedItemId(lastPlayableId)
+      } else if (lastBookId) {
+        void openBook(lastBookId)
+      }
+      setLoadingItems(false)
+    } catch (uploadError) {
+      console.error(uploadError)
+      setError(getFirebaseErrorMessage(uploadError))
+    } finally {
+      setUploading(false)
+      setUploadProgress(0)
+      setUploadingFileName('')
+      setUploadingFileIndex(0)
+      setUploadingFileTotal(0)
+      event.target.value = ''
+    }
+  }
+
+  const startRename = (item, event) => {
+    event?.stopPropagation()
+    setEditingItemId(item.id)
+    setEditingName(getDisplayName(item.name || ''))
+  }
+
+  const cancelRename = () => {
+    setEditingItemId(null)
+    setEditingName('')
+  }
+
+  const saveRename = async (itemId) => {
+    const current = items.find((item) => item.id === itemId)
+    const nextName = withOriginalExtension(
+      editingName,
+      current?.originalName || current?.name || '',
+    )
+
+    if (!nextName) {
+      setError('名前を入力してください。')
+      return
+    }
+
+    if (current?.name === nextName) {
+      cancelRename()
+      return
+    }
+
+    try {
+      await updateMediaName(itemId, nextName)
+      cancelRename()
+      setError('')
+    } catch (renameError) {
+      console.error(renameError)
+      setError(renameError?.message || '名前の変更に失敗しました。')
+    }
+  }
+
+  const reorderPlayableItems = async (fromId, toId) => {
+    if (!fromId || !toId || fromId === toId) return
+
+    // Custom playlist order stays on this device only
+    if (listFilter !== 'all' && listFilter !== 'favorites') {
+      setCustomPlaylists((current) =>
+        current.map((playlist) => {
+          if (playlist.id !== listFilter) return playlist
+          const ids = [...playlist.trackIds]
+          const fromIndex = ids.indexOf(fromId)
+          const toIndex = ids.indexOf(toId)
+          if (fromIndex < 0 || toIndex < 0) return playlist
+          const [moved] = ids.splice(fromIndex, 1)
+          ids.splice(toIndex, 0, moved)
+          return { ...playlist, trackIds: ids }
+        }),
+      )
+      return
+    }
+
+    if (listFilter !== 'all') return
+
+    const currentIds = playableItems.map((item) => item.id)
+    const fromIndex = currentIds.indexOf(fromId)
+    const toIndex = currentIds.indexOf(toId)
+    if (fromIndex < 0 || toIndex < 0) return
+
+    const nextIds = [...currentIds]
+    const [moved] = nextIds.splice(fromIndex, 1)
+    nextIds.splice(toIndex, 0, moved)
+
+    // Optimistic local update while Firestore catches up
+    setItems((prev) => {
+      const orderMap = new Map(nextIds.map((id, index) => [id, index]))
+      return sortMediaItems(
+        prev.map((item) =>
+          orderMap.has(item.id) ? { ...item, order: orderMap.get(item.id) } : item,
+        ),
+      )
+    })
+
+    try {
+      await updatePlaylistOrder(nextIds)
+      setError('')
+    } catch (reorderError) {
+      console.error(reorderError)
+      setError('並び替えに失敗しました。')
+    }
+  }
+
+  const canReorderList = listFilter === 'all' || (listFilter !== 'favorites' && customPlaylists.some((p) => p.id === listFilter))
+
+  const submitCreatePlaylist = () => {
+    const id = createCustomPlaylist(playlistNameDraft, pendingPlaylistTrackId)
+    if (!id) return
+    setPlaylistNameDraft('')
+    setCreatingPlaylist(false)
+    setPendingPlaylistTrackId(null)
+    setListFilter(id)
+  }
+
+  const copyTrackLink = async (itemId) => {
+    try {
+      await navigator.clipboard.writeText(getTrackShareUrl(itemId))
+      setCopiedItemId(itemId)
+      window.setTimeout(() => {
+        setCopiedItemId((current) => (current === itemId ? null : current))
+      }, 1600)
+    } catch (copyError) {
+      console.error(copyError)
+      setError('リンクのコピーに失敗しました。')
+    }
+  }
+
+  const closeListeningPostcard = useCallback(() => {
+    setPostcardItemId(null)
+    setPostcardMode('share')
+    setPostcardJacketUrl(null)
+    setPostcardCoverUrl(null)
+  }, [])
+
+  const handleWelcomeListen = useCallback((spaceId = null) => {
+    const itemId = postcardItemId
+    closeListeningPostcard()
+    if (!itemId) return
+
+    if (spaceId && isKnownSpaceId(spaceId, customSpaces)) {
+      openListeningSpace(spaceId)
+    }
+
+    // Same track is often already selected from the deep link without autoplay.
+    if (selectedItemId === itemId) {
+      shouldAutoPlayRef.current = true
+      const media = mediaRef.current
+      if (media && previewUrl && !loadingPreview) {
+        if (media.ended) media.currentTime = 0
+        const playPromise = media.play()
+        if (playPromise) {
+          playPromise
+            .then(() => {
+              shouldAutoPlayRef.current = false
+            })
+            .catch(() => {
+              /* browser may still block; canPlay handler may retry */
+            })
+        }
+        return
+      }
+    }
+
+    selectItem(itemId, true)
+  }, [
+    postcardItemId,
+    closeListeningPostcard,
+    customSpaces,
+    openListeningSpace,
+    selectedItemId,
+    previewUrl,
+    loadingPreview,
+    selectItem,
+  ])
+
+  const openListeningPostcard = useCallback((item, mode = 'share') => {
+    if (!item || item.kind !== 'audio') return
+    setPostcardMode(mode)
+    setPostcardItemId(item.id)
+  }, [])
+
+  const postcardItem = useMemo(
+    () => (postcardItemId ? items.find((item) => item.id === postcardItemId) : null),
+    [items, postcardItemId],
+  )
+
+  const postcardLyric = useMemo(() => {
+    if (!postcardItem) return { ja: '', en: '' }
+    const fromLyrics = pickPostcardLyric(
+      postcardItem.lyrics,
+      postcardItem.id === selectedItem?.id ? playbackTime : 0,
+    )
+    if (fromLyrics.ja || fromLyrics.en) return fromLyrics
+    return { ja: '', en: '' }
+  }, [postcardItem, selectedItem?.id, playbackTime])
+
+  useEffect(() => {
+    if (!postcardItem) {
+      setPostcardJacketUrl(null)
+      setPostcardCoverUrl(null)
+      return undefined
+    }
+
+    let cancelled = false
+
+    const loadSideImages = async () => {
+      if (
+        postcardItem.id === selectedItem?.id &&
+        (jacketPreviewUrl || coverPreviewUrl)
+      ) {
+        if (!cancelled) {
+          setPostcardJacketUrl(jacketPreviewUrl)
+          setPostcardCoverUrl(coverPreviewUrl)
+        }
+      }
+
+      try {
+        if (postcardItem.jacketId) {
+          const jacketItem = items.find((entry) => entry.id === postcardItem.jacketId)
+          if (jacketItem) {
+            const url = await ensureMediaUrl(jacketItem.id, jacketItem.type)
+            if (!cancelled) setPostcardJacketUrl(url)
+          } else if (!cancelled) {
+            setPostcardJacketUrl(null)
+          }
+        } else if (!cancelled) {
+          setPostcardJacketUrl(null)
+        }
+
+        if (postcardItem.coverId) {
+          const coverItem = items.find((entry) => entry.id === postcardItem.coverId)
+          if (coverItem) {
+            const url = await ensureMediaUrl(coverItem.id, coverItem.type)
+            if (!cancelled) setPostcardCoverUrl(url)
+          } else if (!cancelled) {
+            setPostcardCoverUrl(null)
+          }
+        } else if (!cancelled) {
+          setPostcardCoverUrl(null)
+        }
+      } catch (loadError) {
+        console.error(loadError)
+      }
+    }
+
+    loadSideImages()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    postcardItem,
+    selectedItem?.id,
+    jacketPreviewUrl,
+    coverPreviewUrl,
+    items,
+    ensureMediaUrl,
+  ])
+
+  const shareTrack = async (item) => {
+    if (!item || (item.kind !== 'audio' && item.kind !== 'video')) return
+    if (sharingItemId) return
+
+    const fileName = item.name || 'media'
+    const displayName = getDisplayName(fileName)
+
+    setSharingItemId(item.id)
+    setError('')
+
+    let createdObjectUrl = null
+    try {
+      const url = await ensureMediaUrl(item.id, item.type)
+      const response = await fetch(url)
+      if (!response.ok) {
+        throw new Error('ファイルの取得に失敗しました。')
+      }
+      const blob = await response.blob()
+      const file = new File([blob], fileName, {
+        type: item.type || blob.type || 'application/octet-stream',
+      })
+
+      const canShareFiles =
+        typeof navigator.canShare === 'function' &&
+        typeof navigator.share === 'function' &&
+        navigator.canShare({ files: [file] })
+
+      if (canShareFiles) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: fileName,
+            text: fileName,
+          })
+          setSharedItemId(item.id)
+          window.setTimeout(() => {
+            setSharedItemId((current) => (current === item.id ? null : current))
+          }, 1600)
+          return
+        } catch (shareError) {
+          if (shareError?.name === 'AbortError') return
+          // Fall through to anchor download
+        }
+      }
+
+      createdObjectUrl = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = createdObjectUrl
+      anchor.download = fileName
+      anchor.rel = 'noopener'
+      anchor.setAttribute('download', fileName)
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+
+      setSharedItemId(item.id)
+      window.setTimeout(() => {
+        setSharedItemId((current) => (current === item.id ? null : current))
+      }, 1600)
+    } catch (shareError) {
+      console.error(shareError)
+      setError(shareError?.message || `「${displayName}」の共有に失敗しました。`)
+    } finally {
+      if (createdObjectUrl) {
+        window.setTimeout(() => URL.revokeObjectURL(createdObjectUrl), 30_000)
+      }
+      setSharingItemId(null)
+    }
+  }
+
+  const requestDelete = (itemId) => {
+    setPendingDeleteId(itemId)
+    setSwipeReveal(null)
+  }
+
+  const cancelDelete = () => {
+    setPendingDeleteId(null)
+  }
+
+  const confirmDelete = async () => {
+    if (!pendingDeleteId) return
+    const itemId = pendingDeleteId
+    setPendingDeleteId(null)
+    await handleDelete(itemId)
+  }
+
+  useEffect(() => {
+    if (!pendingDeleteId) return undefined
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') cancelDelete()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [pendingDeleteId])
+
+  const handleDelete = async (itemId) => {
+    const target = items.find((item) => item.id === itemId)
+    if (!target) return
+
+    try {
+      if (target.kind === 'image') {
+        const linkedAudios = items.filter(
+          (item) =>
+            item.kind === 'audio' &&
+            (item.coverId === itemId || item.jacketId === itemId),
+        )
+        await Promise.all(
+          linkedAudios.map(async (item) => {
+            if (item.coverId === itemId) {
+              await updateMediaCover(item.id, null)
+            }
+            if (item.jacketId === itemId) {
+              await updateMediaJacket(item.id, null)
+            }
+          }),
+        )
+        if (selectedItem?.coverId === itemId) {
+          setCoverPreviewUrl(null)
+        }
+        if (selectedItem?.jacketId === itemId) {
+          setJacketPreviewUrl(null)
+        }
+      }
+
+      await deleteMediaItem(itemId)
+      clearBookBookmark(itemId)
+      setBookBookmarks(getAllBookBookmarks())
+      if (readingBookId === itemId) {
+        setReadingBookId(null)
+        setReadingBookUrl(null)
+        setReadingBookBytes(null)
+        setReadingBookStartPage(1)
+      }
+      if (editingItemId === itemId) {
+        setEditingItemId(null)
+        setEditingName('')
+      }
+      if (selectedItemId === itemId) {
+
+        if (mediaRef.current) {
+            mediaRef.current.pause()
+        }
+    
+        if (previewUrl?.startsWith('blob:')) {
+            URL.revokeObjectURL(previewUrl)
+        }
+    
+        setPreviewUrl(null)
+    
+    }
+    } catch (deleteError) {
+      console.error(deleteError)
+      setError('削除に失敗しました。')
+    }
+  }
+
+  return (
+    <div
+      className={`app-shell${!isLoggedIn ? ' app-shell--gate' : ''}${showTodayHero ? ' app-shell--today' : ''}${listeningSpaceOpen ? ' app-shell--listening-space' : ''}${listeningSpaceOpen && !playerExpanded ? ' is-player-compact-view' : ''}`}
+      style={shellSpaceStyle}
+    >
+      {!isLoggedIn ? (
+        <section className="login-card" aria-labelledby="login-brand-title">
+          <div className="login-hero" aria-hidden="true">
+            <img className="login-hero-art" src={hanachanArt} alt="" />
+            <span className="login-hero-petal" />
+            <span className="login-hero-petal is-2" />
+          </div>
+          <p className="login-kicker">じぶんのメディアボックス</p>
+          <h1 id="login-brand-title">{brandTitle(nicknameDraft)}</h1>
+          <p className="lead">
+            あなたの小さな箱。音楽、本、写真、好きなリスト——入れて、味わって、分かちあう。
+          </p>
+
+          <form className="login-form" onSubmit={handleLogin}>
+            <label className="sr-only" htmlFor="nickname">
+              ニックネーム
+            </label>
+            <input
+              id="nickname"
+              type="text"
+              value={nicknameDraft}
+              placeholder="ニックネーム（X）"
+              autoCapitalize="off"
+              autoCorrect="off"
+              autoComplete="nickname"
+              spellCheck={false}
+              maxLength={24}
+              onChange={(event) => setNicknameDraft(event.target.value)}
+            />
+            <label className="sr-only" htmlFor="password">
+              パスワード
+            </label>
+            <input
+              id="password"
+              type="password"
+              value={password}
+              placeholder="パスワードを入力"
+              autoCapitalize="off"
+              autoCorrect="off"
+              autoComplete="current-password"
+              spellCheck={false}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+            <button type="submit">はいる</button>
+          </form>
+
+          {error ? <p className="message error">{error}</p> : null}
+        </section>
+      ) : showTodayHero ? (
+        <TodayRecord
+          dateLabel={formatTodayDateLabel()}
+          title={getDisplayName(todayItem.name)}
+          quoteLines={todayReveal.quote}
+          jacketUrl={todayJacketUrl || resolveJacketUrl(null, todayItem.jacketStyle || resolveTodayJacketStyleId(todayItem) || null)}
+          spaceId={todaySpaceId}
+          backgroundUrl={todaySpaceBackgroundUrl}
+          customSpaces={customSpaces}
+          onPlay={playTodayRecord}
+          onShuffle={shuffleTodayRecord}
+          shuffleRemaining={todayShuffleRemaining}
+          onSkip={skipTodayHero}
+          history={todayHistoryView}
+          onPickFromHistory={pickFromTodayHistory}
+        />
+      ) : (
+        <>
+          <header className={`topbar${listeningSpaceOpen && focusMode ? ' is-space-hidden' : ''}`}>
+            <div>
+              <p className="eyebrow">メディアスペース</p>
+              {nicknameEditing ? (
+                <form className="brand-rename" onSubmit={handleNicknameSubmit}>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={nicknameDraft}
+                    placeholder="ニックネーム"
+                    maxLength={24}
+                    onChange={(event) => setNicknameDraft(event.target.value)}
+                    onBlur={handleNicknameSubmit}
+                  />
+                  <button type="submit">保存</button>
+                </form>
+              ) : (
+                <h2>
+                  <button
+                    type="button"
+                    className="brand-rename-btn"
+                    title="ニックネームを変更"
+                    onClick={() => {
+                      setNicknameDraft(userNickname)
+                      setNicknameEditing(true)
+                    }}
+                  >
+                    {brandTitle(userNickname)}
+                  </button>
+                </h2>
+              )}
+            </div>
+            <div className="topbar-stats">
+              <span className="stat-badge stat-badge--audio" title="音声ファイル数">音声 {mediaCounts.audio}</span>
+              <span className="stat-badge stat-badge--video" title="動画ファイル数">動画 {mediaCounts.video}</span>
+              <span className="stat-badge stat-badge--image" title="画像ファイル数">画像 {mediaCounts.image}</span>
+              <span className="stat-badge stat-badge--book" title="本（PDF）数">本 {mediaCounts.book}</span>
+              <span className="stat-badge" title="全メディアの合計サイズ">
+                {mediaCounts.totalSize ? formatSize(mediaCounts.totalSize) : '0 MB'}
+              </span>
+              <div
+                className="session-user-chip"
+                ref={statusChipRef}
+                title={`${sessionProfile.displayName}（アバターをタップで変更）`}
+              >
+                <div className="session-user-avatar-wrap">
+                  <button
+                    type="button"
+                    className="session-user-avatar-btn"
+                    onClick={() => avatarInputRef.current?.click()}
+                    disabled={avatarUploading}
+                    aria-label="アバターを変更"
+                  >
+                    <img src={sessionAvatarSrc} alt="" className="session-user-avatar" />
+                  </button>
+                  <button
+                    type="button"
+                    className={`session-status-dot ${sessionStatusClass}${statusMenuOpen ? ' is-open' : ''}`}
+                    aria-expanded={statusMenuOpen}
+                    aria-haspopup="listbox"
+                    aria-label={`ステータス: ${sessionStatusMode.label}`}
+                    title={`ステータス: ${sessionStatusMode.label}`}
+                    onClick={() => setStatusMenuOpen((value) => !value)}
+                  />
+                  {statusMenuOpen ? (
+                    <div className="session-status-menu" role="listbox" aria-label="自分のステータス">
+                      {CHAT_PRESENCE_MODES.map((mode) => {
+                        const selected = mode.id === sessionStatus
+                        return (
+                          <button
+                            key={mode.id}
+                            type="button"
+                            role="option"
+                            aria-selected={selected}
+                            className={`session-status-option${selected ? ' is-active' : ''}`}
+                            onClick={() => { void applySessionStatus(mode.id) }}
+                          >
+                            <span
+                              className={`session-status-swatch ${mode.id === 'auto' ? 'is-online' : `is-${mode.id}`}`}
+                              aria-hidden="true"
+                            />
+                            <span className="session-status-copy">
+                              <strong>{mode.label}</strong>
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="session-user-meta">
+                  <strong>{sessionProfile.displayName}</strong>
+                </div>
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={handleAvatarPick}
+                />
+              </div>
+              {listeningSpaceOpen && !focusMode ? (
+                <button
+                  type="button"
+                  className="secondary-button space-home-btn is-active"
+                  onClick={() => handleFocusModeChange(true)}
+                  title="景色だけに集中する"
+                >
+                  景色に集中
+                </button>
+              ) : null}
+              <button type="button" className="secondary-button" onClick={handleLogout}>
+                ログアウト
+              </button>
+            </div>
+          </header>
+
+          <div className={listeningSpaceOpen && focusMode ? 'is-space-hidden' : ''}>
+            <DailyKotoba />
+          </div>
+
+          <section className={`upload-card${listeningSpaceOpen && focusMode ? ' is-space-hidden' : ''}`}>
+            <div>
+              <p className="eyebrow">すぐアップロード</p>
+              <h3>メディアを共有ボックスへ追加</h3>
+              <p className="hint">
+                複数選択可・音声/動画/画像は最大 {formatSize(MAX_FILE_SIZE)}、PDFは最大 {formatSize(MAX_BOOK_FILE_SIZE)}。
+                画像はフォトライブラリ、PDFは本棚へ。
+                プレイリスト未選択時は再生リスト（すべて）へ入ります。
+              </p>
+              {uploading ? (
+                <div className="upload-progress-wrap">
+                  <p className="upload-progress-label">
+                    {uploadingFileTotal > 1
+                      ? `${uploadingFileIndex}/${uploadingFileTotal} — ${uploadingFileName} — ${uploadProgress}%`
+                      : `${uploadingFileName} — ${uploadProgress}%`}
+                  </p>
+                  <div className="upload-progress-track" aria-hidden="true">
+                    <div className="upload-progress-bar" style={{ width: `${uploadProgress}%` }} />
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            <div className="upload-actions">
+              <label className="upload-playlist-label" htmlFor="upload-playlist-target">
+                <span className="upload-playlist-caption">追加先</span>
+                <select
+                  id="upload-playlist-target"
+                  className="upload-playlist-select"
+                  value={
+                    uploadCreatingPlaylist
+                      ? '__new__'
+                      : (
+                    uploadTargetPlaylistId === 'all' ||
+                    customPlaylists.some((playlist) => playlist.id === uploadTargetPlaylistId)
+                      ? uploadTargetPlaylistId
+                      : 'all'
+                      )
+                  }
+                  disabled={uploading}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    if (value === '__new__') {
+                      setUploadCreatingPlaylist(true)
+                      setUploadPlaylistNameDraft('')
+                      return
+                    }
+                    setUploadCreatingPlaylist(false)
+                    setUploadPlaylistNameDraft('')
+                    setUploadTargetPlaylistId(value)
+                  }}
+                >
+                  <option value="all">すべて（再生リスト）</option>
+                  {customPlaylists.map((playlist) => (
+                    <option key={playlist.id} value={playlist.id}>
+                      {playlist.name}
+                    </option>
+                  ))}
+                  <option value="__new__">新しいプレイリスト…</option>
+                </select>
+              </label>
+              {uploadCreatingPlaylist ? (
+                <form
+                  className="upload-playlist-new-form"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    submitCreatePlaylistForUpload()
+                  }}
+                >
+                  <input
+                    autoFocus
+                    value={uploadPlaylistNameDraft}
+                    placeholder="プレイリスト名（例: 英語学習）"
+                    maxLength={40}
+                    onChange={(event) => setUploadPlaylistNameDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') {
+                        event.preventDefault()
+                        setUploadCreatingPlaylist(false)
+                        setUploadPlaylistNameDraft('')
+                        setUploadTargetPlaylistId('all')
+                      }
+                    }}
+                    aria-label="新しいプレイリスト名"
+                  />
+                  <button type="submit" className="icon-button" title="作成">✓</button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    title="キャンセル"
+                    onClick={() => {
+                      setUploadCreatingPlaylist(false)
+                      setUploadPlaylistNameDraft('')
+                      setUploadTargetPlaylistId('all')
+                    }}
+                  >
+                    ✕
+                  </button>
+                </form>
+              ) : null}
+              <label className={`upload-button ${(uploading || uploadCreatingPlaylist) ? 'disabled' : ''}`} htmlFor="video-upload">
+                {uploading
+                  ? uploadingFileTotal > 1
+                    ? `アップロード中... (${uploadingFileIndex}/${uploadingFileTotal})`
+                    : 'アップロード中...'
+                  : 'ファイルを追加'}
+              </label>
+              <input
+                id="video-upload"
+                type="file"
+                accept="video/*,audio/*,image/*,application/pdf,.pdf"
+                multiple
+                disabled={uploading || uploadCreatingPlaylist}
+                onChange={handleUpload}
+              />
+            </div>
+          </section>
+
+          {error ? <p className="message error">{error}</p> : null}
+
+          <main
+            className={`content-grid${listeningSpaceOpen ? ' is-in-space' : ''}${listeningSpaceOpen && focusMode ? ' is-focus-mode' : ''}${listeningSpaceOpen && focusMode && !playerExpanded ? ' is-player-compact' : ''}`}
+          >
+            {(() => {
+              // Focus ON: card floats over the scenery. Focus OFF: card sits
+              // inline in the normal grid layout together with the list.
+              const floatingInSpace = listeningSpaceOpen && focusMode
+              const floatingCompact = floatingInSpace && !playerExpanded
+              const playerCard = (
+            <section
+              ref={floatingInSpace ? playerPanelRef : undefined}
+              className={`player-card${listeningSpaceOpen ? ' is-in-space' : ''}${floatingInSpace && playerExpanded ? ' is-expanded' : ''}${floatingCompact ? ' is-compact' : ''}${floatingInSpace && playerPanelClassName ? ` ${playerPanelClassName}` : ''}`}
+              style={floatingInSpace ? playerPanelStyle : undefined}
+              onPointerDown={floatingInSpace ? onPlayerPanelPointerDown : undefined}
+            >
+              {loadingItems ? (
+                <div className="empty-state">
+                  <h3>読み込み中...</h3>
+                  <p>クラウドからメディア一覧を取得しています。</p>
+                </div>
+              ) : selectedItem ? (
+                <>
+                  {listeningSpaceOpen ? (
+                    <div className="player-compact-bar">
+                      {focusMode ? (
+                        <button
+                          type="button"
+                          className="floating-drag-handle"
+                          data-drag-handle
+                          aria-label="ドラッグして移動"
+                          title="ドラッグして移動"
+                        >
+                          ⋮⋮
+                        </button>
+                      ) : null}
+                      <p className="player-compact-title">{getDisplayName(selectedItem.name)}</p>
+                      <div className="player-compact-actions">
+                        {focusMode ? (
+                          <button
+                            type="button"
+                            className="secondary-button player-expand-btn"
+                            onClick={togglePlayerExpanded}
+                            title={playerExpanded ? '景色を広く見る' : 'プレイヤーを開く'}
+                          >
+                            {playerExpanded ? '景色を見る' : 'プレイヤーを開く'}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className={`secondary-button space-home-btn${focusMode ? '' : ' is-active'}`}
+                          onClick={() => {
+                            handleFocusModeChange(!focusMode)
+                            if (focusMode) setSpaceSettingsOpen(false)
+                          }}
+                          title={
+                            focusMode
+                              ? 'メディボの画面に戻って操作する'
+                              : '景色だけに集中する'
+                          }
+                        >
+                          {focusMode ? 'メディボに入る' : '景色に集中'}
+                        </button>
+                        <button
+                          type="button"
+                          className={`secondary-button space-settings-btn${spaceSettingsOpen ? ' is-active' : ''}`}
+                          onClick={() => setSpaceSettingsOpen((current) => !current)}
+                          title={spaceSettingsOpen ? '場所の設定を閉じる' : '場所の設定を開く'}
+                        >
+                          {spaceSettingsOpen ? '設定を閉じる' : '場所設定'}
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button listening-space-close"
+                          onClick={closeListeningSpace}
+                          aria-label="場所を閉じる"
+                          title="場所を閉じる"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {listeningSpaceOpen && spaceSettingsOpen && selectedItem.kind === 'audio' ? (
+                    <ListeningSpaceSettings
+                      spaceId={listeningSpaceId}
+                      onSpaceChange={handleListeningSpaceChange}
+                      ambientEnabled={ambientEnabled}
+                      ambientVolume={ambientVolume}
+                      onAmbientEnabledChange={setAmbientEnabled}
+                      onAmbientVolumeChange={setAmbientVolume}
+                      focusMode={focusMode}
+                      onFocusModeChange={handleFocusModeChange}
+                      suggestedSpaceId={suggestedListeningSpaceId}
+                      backgrounds={spaceBackgrounds}
+                      onBackgroundsChange={setSpaceBackgrounds}
+                      customSpaces={customSpaces}
+                      onCreateCustomSpace={createCustomListeningSpace}
+                      onUpdateCustomSpace={updateCustomListeningSpace}
+                      onDeleteCustomSpace={deleteCustomListeningSpace}
+                      onUploadSpaceBackground={uploadSpaceBackgroundImage}
+                      libraryImages={imageItems}
+                      loadLibraryImageUrl={ensureMediaUrl}
+                    />
+                  ) : null}
+
+                  {!listeningSpaceOpen && selectedItem.kind === 'audio' ? (
+                    <div className="player-space-access">
+                      <button
+                        type="button"
+                        className="secondary-button listening-space-open-btn"
+                        onClick={() => openListeningSpace()}
+                        title="リスニングスペースを開く"
+                      >
+                        聴く場所
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {listeningSpaceOpen && !focusMode && selectedItem.kind === 'audio' ? (
+                    <div className="player-space-access">
+                      <button
+                        type="button"
+                        className="secondary-button space-home-btn is-active"
+                        onClick={() => handleFocusModeChange(true)}
+                        title="景色だけに集中する"
+                      >
+                        景色に集中
+                      </button>
+                      <p className="player-space-hint">聴く場所は開いたままです。景色だけ見たいときはここから戻れます。</p>
+                    </div>
+                  ) : null}
+
+                  <div className={`player-header${listeningSpaceOpen && focusMode && !playerExpanded ? ' is-space-hidden' : ''}`}>
+                    <div>
+                      <p className="eyebrow">プレビュー</p>
+                      <h3>{getDisplayName(selectedItem.name)}</h3>
+                    </div>
+                    <div className="player-actions">
+                      <button type="button" className="secondary-button" onClick={playPrevious} disabled={visiblePlayableItems.length < 2}>
+                        前へ
+                      </button>
+                      <button type="button" className="secondary-button" onClick={playNext} disabled={visiblePlayableItems.length < 2}>
+                        次へ
+                      </button>
+                      <button
+                        type="button"
+                        className={`playlist-toggle ${playlistMode ? 'is-on' : 'is-off'}`}
+                        onClick={() => setPlaylistMode((current) => !current)}
+                        aria-pressed={playlistMode}
+                        title={playlistMode ? '連続再生をオフにする' : '連続再生をオンにする'}
+                      >
+                        <span className="playlist-toggle-label">連続再生</span>
+                        <span className="playlist-toggle-track" aria-hidden="true">
+                          <span className="playlist-toggle-knob" />
+                          <span className="playlist-toggle-state">
+                            {playlistMode ? 'ON' : 'OFF'}
+                          </span>
+                        </span>
+                      </button>
+                      <button type="button" className="primary-button" onClick={startPlaylist} disabled={visiblePlayableItems.length === 0 && playableItems.length === 0}>
+                        リスト再生
+                      </button>
+                      {selectedItem.kind === 'audio' ? (
+                        <>
+                        <button
+                          type="button"
+                          className="secondary-button postcard-open-btn"
+                          onClick={() => openListeningPostcard(selectedItem, 'share')}
+                          title="この曲をカード画像で送る"
+                        >
+                          カードで送る
+                        </button>
+                        </>
+                      ) : null}
+                      <button type="button" className="danger-button" onClick={() => requestDelete(selectedItem.id)}>
+                        削除
+                      </button>
+                    </div>
+                  </div>
+
+                  {loadingPreview ? (
+                    <div className="empty-state">
+                      <h3>プレビュー読み込み中...</h3>
+                    </div>
+                  ) : previewUrl ? (
+                    <>
+                      {selectedItem.kind === 'image' ? (
+                        <img
+                          key={selectedItem.id}
+                          className="media-preview"
+                          src={previewUrl}
+                          alt={selectedItem.name}
+                        />
+                      ) : selectedItem.kind === 'audio' ? (
+                        <>
+                        <VinylPlayer
+                          title={getDisplayName(selectedItem.name)}
+                          coverSrc={coverPreviewUrl}
+                          jacketSrc={jacketPreviewUrl}
+                          jacketStyleId={selectedItem.jacketStyle || null}
+                          trackId={selectedItem.id}
+                          isPlaying={isMediaPlaying}
+                          currentTime={playbackTime}
+                          duration={playbackDuration}
+                          coverBusy={coverBusy}
+                          jacketBusy={jacketBusy}
+                          onCoverPick={handleCoverPick}
+                          onCoverClear={handleCoverClear}
+                          onJacketPick={handleJacketPick}
+                          onJacketClear={handleJacketClear}
+                          onJacketStyleChange={handleJacketStyleChange}
+                          onTogglePlayback={handleTogglePlayback}
+                          onSeek={handleSeekAudio}
+                          compact={listeningSpaceOpen && focusMode && !playerExpanded}
+                        />
+                        <div className={listeningSpaceOpen && focusMode && !playerExpanded ? 'is-space-hidden' : ''}>
+                        <LyricsPanel
+                          key={selectedItem.id}
+                          trackId={selectedItem.id}
+                          lyrics={selectedItem.lyrics}
+                          currentTime={playbackTime}
+                          isPlaying={isMediaPlaying}
+                          busy={lyricsBusy}
+                          onSave={handleSaveLyrics}
+                          onClear={handleClearLyrics}
+                          onSeek={handleSeekToLyric}
+                        />
+                        </div>
+                        </>
+                      ) : (
+                        <video
+                          ref={mediaRef}
+                          className="video-player"
+                          controls
+                          playsInline
+                          preload="auto"
+                          src={previewUrl}
+                          onCanPlayThrough={handleMediaCanPlay}
+                          onEnded={handleMediaEnded}
+                          onPlay={handleMediaPlay}
+                          onPause={handleMediaPause}
+                          onTimeUpdate={handleMediaTimeUpdate}
+                          onSeeked={handleMediaTimeUpdate}
+                        />
+                      )}
+                    </>
+                  ) : (
+                    <div className="empty-state">
+                      <h3>プレビューを読み込めませんでした。</h3>
+                    </div>
+                  )}
+
+                  <div className={`video-meta${listeningSpaceOpen && focusMode && !playerExpanded ? ' is-space-hidden' : ''}`}>
+                    <span className={`kind-badge kind-${selectedItem.kind}`}>
+                      {getKindLabel(selectedItem.kind)}
+                    </span>
+                    <span>{formatSize(selectedItem.size)}</span>
+                    <span>{new Date(selectedItem.createdAt).toLocaleString('ja-JP')}</span>
+                  </div>
+                </>
+              ) : (
+                <div className="empty-state">
+                  <h3>まだメディアがありません。</h3>
+                  <p>最初のファイルを追加して共有を始めましょう。</p>
+                </div>
+              )}
+            </section>
+              )
+              // Keep player portaled for the whole Listening Space session so expand/collapse
+              // does not remount <audio> (which would stop playback) or hide under the backdrop.
+              return floatingInSpace ? createPortal(playerCard, document.body) : playerCard
+            })()}
+
+            <aside className="list-card">
+              <div className="list-header">
+                <h3>再生リスト</h3>
+                <span>{visiblePlayableItems.length} 件</span>
+              </div>
+
+              <div className="list-filter-tabs" role="tablist" aria-label="リストフィルター">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={listFilter === 'all'}
+                  className={`list-filter-tab${listFilter === 'all' ? ' is-active' : ''}`}
+                  onClick={() => setListFilter('all')}
+                >
+                  すべて
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={listFilter === 'favorites'}
+                  className={`list-filter-tab${listFilter === 'favorites' ? ' is-active' : ''}`}
+                  onClick={() => setListFilter('favorites')}
+                >
+                  お気に入り
+                  {favoriteLiveCount > 0 ? (
+                    <span className="list-filter-count">{favoriteLiveCount}</span>
+                  ) : null}
+                </button>
+                {customPlaylists.map((playlist) => (
+                  <button
+                    key={playlist.id}
+                    type="button"
+                    role="tab"
+                    draggable
+                    aria-selected={listFilter === playlist.id}
+                    className={[
+                      'list-filter-tab',
+                      listFilter === playlist.id ? ' is-active' : '',
+                      dragPlaylistId === playlist.id ? ' is-dragging' : '',
+                      dragOverPlaylistId === playlist.id ? ' is-drag-over' : '',
+                    ].join('')}
+                    onClick={() => setListFilter(playlist.id)}
+                    onDoubleClick={() => {
+                      setRenamingPlaylistId(playlist.id)
+                      setPlaylistNameDraft(playlist.name)
+                    }}
+                    onDragStart={(event) => {
+                      setDragPlaylistId(playlist.id)
+                      setDragOverPlaylistId(playlist.id)
+                      event.dataTransfer.effectAllowed = 'move'
+                      event.dataTransfer.setData('text/plain', playlist.id)
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault()
+                      event.dataTransfer.dropEffect = 'move'
+                      if (dragOverPlaylistId !== playlist.id) {
+                        setDragOverPlaylistId(playlist.id)
+                      }
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault()
+                      const fromId = event.dataTransfer.getData('text/plain') || dragPlaylistId
+                      reorderCustomPlaylists(fromId, playlist.id)
+                      setDragPlaylistId(null)
+                      setDragOverPlaylistId(null)
+                    }}
+                    onDragEnd={() => {
+                      setDragPlaylistId(null)
+                      setDragOverPlaylistId(null)
+                    }}
+                    title="ダブルクリックで名前変更"
+                  >
+                    {playlist.name}
+                    {(playlistLiveCounts[playlist.id] || 0) > 0 ? (
+                      <span className="list-filter-count">{playlistLiveCounts[playlist.id]}</span>
+                    ) : null}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="list-filter-tab list-filter-tab--add"
+                  onClick={() => {
+                    setCreatingPlaylist(true)
+                    setRenamingPlaylistId(null)
+                    setPendingPlaylistTrackId(null)
+                    setPlaylistNameDraft('')
+                  }}
+                  title="プレイリストを作成"
+                  aria-label="プレイリストを作成"
+                >
+                  ＋
+                </button>
+              </div>
+
+              {creatingPlaylist || renamingPlaylistId ? (
+                <form
+                  className="playlist-name-form"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    if (renamingPlaylistId) {
+                      renameCustomPlaylist(renamingPlaylistId, playlistNameDraft)
+                      setRenamingPlaylistId(null)
+                      setPlaylistNameDraft('')
+                    } else {
+                      submitCreatePlaylist()
+                    }
+                  }}
+                >
+                  <input
+                    autoFocus
+                    value={playlistNameDraft}
+                    placeholder="例: 英語学習"
+                    maxLength={40}
+                    onChange={(event) => setPlaylistNameDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') {
+                        event.preventDefault()
+                        setCreatingPlaylist(false)
+                        setRenamingPlaylistId(null)
+                        setPlaylistNameDraft('')
+                        setPendingPlaylistTrackId(null)
+                      }
+                    }}
+                    aria-label="プレイリスト名"
+                  />
+                  <button type="submit" className="icon-button" title="保存">✓</button>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    title="キャンセル"
+                    onClick={() => {
+                      setCreatingPlaylist(false)
+                      setRenamingPlaylistId(null)
+                      setPlaylistNameDraft('')
+                      setPendingPlaylistTrackId(null)
+                    }}
+                  >
+                    ×
+                  </button>
+                  {renamingPlaylistId ? (
+                    <button
+                      type="button"
+                      className="icon-button danger"
+                      title="このプレイリストを削除"
+                      onClick={() => {
+                        deleteCustomPlaylist(renamingPlaylistId)
+                        setRenamingPlaylistId(null)
+                        setPlaylistNameDraft('')
+                      }}
+                    >
+                      削除
+                    </button>
+                  ) : null}
+                </form>
+              ) : null}
+
+              {listFilter === 'favorites' ? (
+                <p className="playlist-hint">この端末のお気に入りです。ハートで追加・解除できます。</p>
+              ) : listFilter !== 'all' ? (
+                <p className="playlist-hint">
+                  この端末だけのプレイリストです。＋で曲を追加、ドラッグで並び替え。
+                  {listFilter !== 'favorites' ? (
+                    <>
+                      {' '}
+                      <button
+                        type="button"
+                        className="playlist-inline-action"
+                        onClick={() => {
+                          const playlist = customPlaylists.find((entry) => entry.id === listFilter)
+                          if (!playlist) return
+                          setRenamingPlaylistId(playlist.id)
+                          setPlaylistNameDraft(playlist.name)
+                        }}
+                      >
+                        名前変更 / 削除
+                      </button>
+                    </>
+                  ) : null}
+                </p>
+              ) : playableItems.length > 1 ? (
+                <p className="playlist-hint">
+                  ドラッグで並び替え、リンク共有・ファイル共有
+                  <span className="playlist-hint-desktop">
+                    ・
+                    <span className="hint-rename-icon" aria-hidden="true">
+                      <RenameIcon />
+                    </span>
+                    {' '}で編集
+                  </span>
+                  <span className="playlist-hint-mobile"> · 右スワイプで編集 / 左スワイプで削除</span>
+                </p>
+              ) : null}
+              {sharingItemId ? (
+                <p className="share-status" role="status" aria-live="polite">
+                  「{items.find((entry) => entry.id === sharingItemId)?.name || 'media'}」を準備中...
+                </p>
+              ) : null}
+
+              {loadingItems ? (
+                <div className="empty-list">
+                  <p>読み込み中...</p>
+                </div>
+              ) : playableItems.length === 0 ? (
+                <div className="empty-list">
+                  <p>音声・動画を追加するとここに表示されます。</p>
+                </div>
+              ) : visiblePlayableItems.length === 0 ? (
+                <div className="empty-list">
+                  <p>
+                    {listFilter === 'favorites'
+                      ? 'お気に入りはまだありません。ハートを押して追加できます。'
+                      : 'このプレイリストは空です。曲の＋から追加してください。'}
+                  </p>
+                </div>
+              ) : (
+                <ul className="video-list">
+                  {visiblePlayableItems.map((item) => {
+                    const swipeMode = swipeReveal?.id === item.id ? swipeReveal.mode : null
+                    const baseOffset = swipeMode === 'delete' ? -72 : swipeMode === 'rename' ? 72 : 0
+                    const isFavorite = favoriteIdSet.has(item.id)
+                    const allowDrag = canReorderList && editingItemId !== item.id && !swipeMode
+                    return (
+                    <li
+                      key={item.id}
+                      className={[
+                        'video-item',
+                        selectedItem?.id === item.id ? 'active' : '',
+                        dragItemId === item.id ? 'is-dragging' : '',
+                        dragOverItemId === item.id ? 'is-drag-over' : '',
+                        swipeMode === 'delete' ? 'is-swiped-delete' : '',
+                        swipeMode === 'rename' ? 'is-swiped-rename' : '',
+                      ].filter(Boolean).join(' ')}
+                      draggable={allowDrag}
+                      onDragStart={(event) => {
+                        if (!allowDrag) {
+                          event.preventDefault()
+                          return
+                        }
+                        if (swipeReveal) setSwipeReveal(null)
+                        setDragItemId(item.id)
+                        event.dataTransfer.effectAllowed = 'move'
+                        event.dataTransfer.setData('text/plain', item.id)
+                      }}
+                      onDragOver={(event) => {
+                        if (!canReorderList) return
+                        event.preventDefault()
+                        event.dataTransfer.dropEffect = 'move'
+                        if (dragOverItemId !== item.id) {
+                          setDragOverItemId(item.id)
+                        }
+                      }}
+                      onDragLeave={() => {
+                        if (dragOverItemId === item.id) {
+                          setDragOverItemId(null)
+                        }
+                      }}
+                      onDrop={(event) => {
+                        if (!canReorderList) return
+                        event.preventDefault()
+                        const fromId = event.dataTransfer.getData('text/plain') || dragItemId
+                        setDragItemId(null)
+                        setDragOverItemId(null)
+                        reorderPlayableItems(fromId, item.id)
+                      }}
+                      onDragEnd={() => {
+                        setDragItemId(null)
+                        setDragOverItemId(null)
+                      }}
+                    >
+                      <div
+                        className="video-item-swipe-action video-item-swipe-action--rename"
+                        aria-hidden={swipeMode !== 'rename'}
+                      >
+                        <button
+                          type="button"
+                          className="swipe-rename-btn"
+                          tabIndex={swipeMode === 'rename' ? 0 : -1}
+                          title="名前を変更"
+                          aria-label="名前を変更"
+                          onClick={(event) => {
+                            setSwipeReveal(null)
+                            startRename(item, event)
+                          }}
+                        >
+                          <span className="swipe-rename-icon" aria-hidden="true">
+                            <RenameIcon />
+                          </span>
+                        </button>
+                      </div>
+
+                      <div
+                        className="video-item-swipe-action video-item-swipe-action--delete"
+                        aria-hidden={swipeMode !== 'delete'}
+                      >
+                        <button
+                          type="button"
+                          className="swipe-delete-btn"
+                          tabIndex={swipeMode === 'delete' ? 0 : -1}
+                          onClick={() => requestDelete(item.id)}
+                        >
+                          削除
+                        </button>
+                      </div>
+
+                      <div
+                        className="video-item-body"
+                        onTouchStart={(event) => {
+                          const touch = event.touches[0]
+                          if (!touch) return
+                          swipeStartRef.current = {
+                            x: touch.clientX,
+                            y: touch.clientY,
+                            id: item.id,
+                            ignoring: false,
+                          }
+                          swipeOffsetRef.current = baseOffset
+                        }}
+                        onTouchMove={(event) => {
+                          const touch = event.touches[0]
+                          const start = swipeStartRef.current
+                          if (!touch || start.id !== item.id) return
+                          const dx = touch.clientX - start.x
+                          const dy = touch.clientY - start.y
+                          if (!start.ignoring && Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 8) {
+                            swipeStartRef.current.ignoring = true
+                            return
+                          }
+                          if (start.ignoring) return
+                          if (Math.abs(dx) > 8) {
+                            event.preventDefault()
+                          }
+                          const next = Math.min(72, Math.max(-72, baseOffset + dx))
+                          swipeOffsetRef.current = next
+                          event.currentTarget.style.transform = `translateX(${next}px)`
+                        }}
+                        onTouchEnd={(event) => {
+                          const start = swipeStartRef.current
+                          if (start.id !== item.id) return
+                          const offset = swipeOffsetRef.current
+                          event.currentTarget.style.transform = ''
+                          if (offset <= -40) {
+                            setSwipeReveal({ id: item.id, mode: 'delete' })
+                          } else if (offset >= 40) {
+                            setSwipeReveal({ id: item.id, mode: 'rename' })
+                          } else {
+                            setSwipeReveal(null)
+                          }
+                          swipeStartRef.current = { x: 0, y: 0, id: null, ignoring: false }
+                          swipeOffsetRef.current = 0
+                        }}
+                        onTouchCancel={(event) => {
+                          event.currentTarget.style.transform = ''
+                          swipeStartRef.current = { x: 0, y: 0, id: null, ignoring: false }
+                          swipeOffsetRef.current = 0
+                        }}
+                      >
+                      {canReorderList ? (
+                        <span className="drag-handle" title="ドラッグで並び替え" aria-hidden="true">
+                          ⠿
+                        </span>
+                      ) : (
+                        <span className="drag-handle drag-handle--disabled" aria-hidden="true" />
+                      )}
+
+                      {editingItemId === item.id ? (
+                        <form
+                          className="rename-form"
+                          onSubmit={(event) => {
+                            event.preventDefault()
+                            saveRename(item.id)
+                          }}
+                        >
+                          <input
+                            autoFocus
+                            value={editingName}
+                            placeholder="曲名"
+                            onChange={(event) => setEditingName(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Escape') {
+                                event.preventDefault()
+                                cancelRename()
+                              }
+                            }}
+                            aria-label="曲名"
+                          />
+                          <button type="submit" className="icon-button" title="保存">
+                            ✓
+                          </button>
+                          <button type="button" className="icon-button" title="キャンセル" onClick={cancelRename}>
+                            ×
+                          </button>
+                        </form>
+                      ) : (
+                        <button
+                          type="button"
+                          className="video-title"
+                          onClick={() => {
+                            if (swipeMode) {
+                              setSwipeReveal(null)
+                              return
+                            }
+                            selectItem(item.id, true)
+                          }}
+                        >
+                          <strong>
+                            <span className={`kind-chip kind-${item.kind}`} aria-hidden="true">
+                              {item.kind === 'audio' ? '♪' : '▶'}
+                            </span>
+                            <span className="track-name">{getDisplayName(item.name)}</span>
+                          </strong>
+                          <span>{formatSize(item.size)}</span>
+                        </button>
+                      )}
+
+                      <div className="item-actions">
+                        {editingItemId !== item.id ? (
+                          <>
+                            <button
+                              type="button"
+                              className={`icon-button icon-button--favorite${isFavorite ? ' is-favorite' : ''}`}
+                              title={isFavorite ? 'お気に入り解除' : 'お気に入りに追加'}
+                              aria-label={isFavorite ? 'お気に入り解除' : 'お気に入りに追加'}
+                              aria-pressed={isFavorite}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                toggleFavorite(item.id)
+                              }}
+                            >
+                              <HeartIcon filled={isFavorite} />
+                            </button>
+                            <div className="playlist-add-wrap">
+                              <button
+                                type="button"
+                                className={`icon-button icon-button--playlist${playlistMenuItemId === item.id ? ' is-open' : ''}`}
+                                title="プレイリストに追加"
+                                aria-label="プレイリストに追加"
+                                aria-expanded={playlistMenuItemId === item.id}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  if (playlistMenuItemId === item.id) {
+                                    setPlaylistMenuItemId(null)
+                                    setPlaylistMenuPos(null)
+                                    return
+                                  }
+                                  const rect = event.currentTarget.getBoundingClientRect()
+                                  const menuWidth = 200
+                                  const left = Math.min(
+                                    Math.max(8, rect.right - menuWidth),
+                                    window.innerWidth - menuWidth - 8,
+                                  )
+                                  const spaceBelow = window.innerHeight - rect.bottom
+                                  const openUp = spaceBelow < 180 && rect.top > spaceBelow
+                                  setPlaylistMenuPos({
+                                    left,
+                                    top: openUp ? undefined : rect.bottom + 6,
+                                    bottom: openUp ? window.innerHeight - rect.top + 6 : undefined,
+                                  })
+                                  setPlaylistMenuItemId(item.id)
+                                }}
+                              >
+                                <PlaylistAddIcon />
+                              </button>
+                            </div>
+                            <button
+                              type="button"
+                              className={`icon-button icon-button--link${copiedItemId === item.id ? ' is-copied' : ''}`}
+                              title={copiedItemId === item.id ? 'コピーしました' : 'リンクをコピー'}
+                              aria-label="リンクをコピー"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                copyTrackLink(item.id)
+                              }}
+                            >
+                              {copiedItemId === item.id ? <CheckIcon /> : <LinkIcon />}
+                            </button>
+                            <button
+                              type="button"
+                              className={`icon-button icon-button--share${
+                                sharingItemId === item.id ? ' is-busy' : ''
+                              }${sharedItemId === item.id ? ' is-done' : ''}`}
+                              title={
+                                sharingItemId === item.id
+                                  ? `「${item.name || getDisplayName(item.name)}」を準備中...`
+                                  : sharedItemId === item.id
+                                    ? '共有しました'
+                                    : item.kind === 'audio'
+                                      ? 'この曲をカードで送る'
+                                      : `「${item.name || 'media'}」を共有`
+                              }
+                              aria-label={
+                                item.kind === 'audio'
+                                  ? 'この曲をカードで送る'
+                                  : `「${item.name || 'media'}」を共有`
+                              }
+                              aria-busy={sharingItemId === item.id}
+                              disabled={sharingItemId === item.id}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                if (item.kind === 'audio') {
+                                  openListeningPostcard(item, 'share')
+                                  return
+                                }
+                                shareTrack(item)
+                              }}
+                            >
+                              {sharingItemId === item.id ? (
+                                <SpinnerIcon />
+                              ) : sharedItemId === item.id ? (
+                                <CheckIcon />
+                              ) : (
+                                <ShareIcon />
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-button icon-button--rename item-rename-btn"
+                              title="名前を変更"
+                              onClick={(event) => startRename(item, event)}
+                            >
+                              <RenameIcon />
+                            </button>
+                          </>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="icon-button danger item-delete-btn"
+                          title="削除"
+                          aria-label="削除"
+                          onClick={() => requestDelete(item.id)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                      </div>
+                    </li>
+                    )
+                  })}
+                </ul>
+              )}
+
+              {bookItems.length > 0 ? (
+                <div className="bookshelf">
+                  <div className="list-header image-library-header">
+                    <h3>本棚</h3>
+                    <span className="image-library-count">{bookItems.length}冊</span>
+                  </div>
+                  <p className="bookshelf-hint">PDFを開いて、しおりの頁から続きが読めます。名前変更もできます。</p>
+                  {editingItemId && bookItems.some((book) => book.id === editingItemId) ? (
+                    <form
+                      className="bookshelf-rename-form"
+                      onSubmit={(event) => {
+                        event.preventDefault()
+                        void saveRename(editingItemId)
+                      }}
+                    >
+                      <label className="bookshelf-rename-label" htmlFor="bookshelf-rename-input">
+                        書名
+                      </label>
+                      <input
+                        id="bookshelf-rename-input"
+                        autoFocus
+                        value={editingName}
+                        placeholder="書名を入力"
+                        onChange={(event) => setEditingName(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape') {
+                            event.preventDefault()
+                            cancelRename()
+                          }
+                        }}
+                        aria-label="書名"
+                      />
+                      <button type="submit" className="icon-button" title="保存" aria-label="保存">
+                        ✓
+                      </button>
+                      <button type="button" className="icon-button" title="キャンセル" aria-label="キャンセル" onClick={cancelRename}>
+                        ×
+                      </button>
+                    </form>
+                  ) : null}
+                  <ul className="bookshelf-grid">
+                    {bookItems.map((item, index) => {
+                      const bookmark = bookBookmarks[item.id]
+                      const hasShiori = bookmark?.page > 1
+                      const isEditing = editingItemId === item.id
+                      return (
+                      <li
+                        key={item.id}
+                        className={`bookshelf-spine${isEditing ? ' is-editing' : ''}`}
+                        style={{ '--spine-hue': `${(index * 47) % 360}` }}
+                      >
+                        <button
+                          type="button"
+                          className={`bookshelf-book${hasShiori ? ' has-shiori' : ''}`}
+                          onClick={() => void openBook(item.id)}
+                          disabled={readingBookBusy || isEditing}
+                          title={
+                            hasShiori
+                              ? `${getDisplayName(item.name)} · しおり ${bookmark.page}頁`
+                              : getDisplayName(item.name)
+                          }
+                        >
+                          {hasShiori ? <span className="bookshelf-shiori" aria-hidden="true" /> : null}
+                          <span className="bookshelf-book-title">{getDisplayName(item.name)}</span>
+                          <span className="bookshelf-book-meta">
+                            {hasShiori ? `続き ${bookmark.page}頁` : formatSize(item.size)}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button icon-button--rename bookshelf-rename"
+                          title="名前を変更"
+                          aria-label="名前を変更"
+                          onClick={(event) => startRename(item, event)}
+                        >
+                          <RenameIcon />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button danger bookshelf-delete"
+                          title="削除"
+                          aria-label="削除"
+                          onClick={() => requestDelete(item.id)}
+                        >
+                          ×
+                        </button>
+                      </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              ) : null}
+
+              {imageItems.length > 0 ? (
+                <div className="cover-library">
+                  <div className="list-header image-library-header">
+                    <h3>フォトライブラリ</h3>
+                    <span className="image-library-count">{imageItems.length}枚の思い出</span>
+                  </div>
+
+                  {librarySlideshowItem ? (
+                    <div
+                      className="photo-showroom"
+                      onMouseEnter={() => setLibrarySlideshowPaused(true)}
+                      onMouseLeave={() => setLibrarySlideshowPaused(false)}
+                    >
+                      <button
+                        type="button"
+                        className="photo-showroom-stage"
+                        onClick={() => setLibraryViewerItemId(librarySlideshowItem.id)}
+                        title="クリックで拡大"
+                      >
+                        {libraryThumbUrls[librarySlideshowItem.id] ? (
+                          <img
+                            key={librarySlideshowItem.id}
+                            className="photo-showroom-image"
+                            src={libraryThumbUrls[librarySlideshowItem.id]}
+                            alt={getDisplayName(librarySlideshowItem.name)}
+                          />
+                        ) : (
+                          <span className="image-library-loading" aria-hidden="true" />
+                        )}
+                        <span className="photo-showroom-veil" aria-hidden="true" />
+                        <span className="photo-showroom-kicker">SHOWROOM</span>
+                        <span className="photo-showroom-counter">
+                          {librarySlideshowIndex % imageItems.length + 1} / {imageItems.length}
+                        </span>
+                        {selectedItem?.coverId === librarySlideshowItem.id ? (
+                          <span className="image-library-badge photo-showroom-badge">使用中</span>
+                        ) : null}
+                      </button>
+
+                      {imageItems.length > 1 ? (
+                        <>
+                          <button
+                            type="button"
+                            className="photo-showroom-nav photo-showroom-nav--prev"
+                            onClick={() => stepLibrarySlideshow(-1)}
+                            aria-label="前の画像"
+                          >
+                            ‹
+                          </button>
+                          <button
+                            type="button"
+                            className="photo-showroom-nav photo-showroom-nav--next"
+                            onClick={() => stepLibrarySlideshow(1)}
+                            aria-label="次の画像"
+                          >
+                            ›
+                          </button>
+                          <div className="photo-showroom-dots" role="tablist" aria-label="スライド">
+                            {imageItems.length <= 12
+                              ? imageItems.map((item, index) => (
+                                <button
+                                  key={item.id}
+                                  type="button"
+                                  role="tab"
+                                  aria-selected={index === librarySlideshowIndex % imageItems.length}
+                                  className={`photo-showroom-dot${index === librarySlideshowIndex % imageItems.length ? ' is-active' : ''}`}
+                                  onClick={() => setLibrarySlideshowIndex(index)}
+                                />
+                              ))
+                              : null}
+                          </div>
+                          <div
+                            key={librarySlideshowIndex}
+                            className={`photo-showroom-progress${librarySlideshowPaused ? ' is-paused' : ''}`}
+                            aria-hidden="true"
+                          />
+                        </>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  <ul className="image-library-grid">
+                    {imageItems.map((item, index) => {
+                      const inUse = selectedItem?.coverId === item.id
+                      const thumbUrl = libraryThumbUrls[item.id] || null
+                      const shape = getLibraryTileShape(index)
+                      return (
+                        <li
+                          key={item.id}
+                          className={`image-library-card tile-${shape}${inUse ? ' is-active' : ''}${librarySlideshowItem?.id === item.id ? ' is-showing' : ''}`}
+                          style={{ '--library-delay': `${Math.min(index, 12) * 45}ms` }}
+                        >
+                          <button
+                            type="button"
+                            className="image-library-thumb"
+                            onClick={() => {
+                              setLibrarySlideshowIndex(index)
+                              setLibraryViewerItemId(item.id)
+                            }}
+                            title={getDisplayName(item.name)}
+                          >
+                            {thumbUrl ? (
+                              <img src={thumbUrl} alt={getDisplayName(item.name)} loading="lazy" />
+                            ) : (
+                              <span className="image-library-loading" aria-hidden="true" />
+                            )}
+                            {inUse ? <span className="image-library-badge">使用中</span> : null}
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              ) : null}
+            </aside>
+          </main>
+
+          <TodayShelf hidden={listeningSpaceOpen && focusMode} />
+        </>
+      )}
+
+      {/* The audio element lives outside the player card so the card can
+          switch between floating / inline layouts without interrupting playback. */}
+      {isLoggedIn && selectedItem?.kind === 'audio' && !loadingPreview && previewUrl ? (
+        <audio
+          ref={mediaRef}
+          className="sr-only"
+          preload="auto"
+          src={previewUrl}
+          onCanPlayThrough={handleMediaCanPlay}
+          onLoadedMetadata={handleMediaDuration}
+          onDurationChange={handleMediaDuration}
+          onEnded={handleMediaEnded}
+          onPlay={handleMediaPlay}
+          onPause={handleMediaPause}
+          onTimeUpdate={handleMediaTimeUpdate}
+          onSeeked={handleMediaTimeUpdate}
+        />
+      ) : null}
+
+      {isLoggedIn && listeningSpaceOpen && selectedItem?.kind === 'audio' ? (
+        <ListeningSpace
+          open={listeningSpaceOpen}
+          spaceId={listeningSpaceId}
+          onClose={closeListeningSpace}
+          ambientEnabled={ambientEnabled}
+          ambientVolume={ambientVolume}
+          backgrounds={spaceBackgrounds}
+          customSpaces={customSpaces}
+          loadLibraryImageUrl={ensureMediaUrl}
+          reducedMotion={reducedMotion}
+        />
+      ) : null}
+
+      {postcardItem ? (
+        <ListeningPostcard
+          open
+          mode={postcardMode}
+          title={getDisplayName(postcardItem.name)}
+          shareUrl={getTrackShareUrl(postcardItem.id)}
+          lyricJa={postcardLyric.ja}
+          lyricEn={postcardLyric.en}
+          jacketSrc={postcardJacketUrl}
+          jacketStyleId={postcardItem.jacketStyle || null}
+          coverSrc={postcardCoverUrl}
+          initialSpaceId={postcardSpaceId}
+          customSpaces={customSpaces}
+          onClose={closeListeningPostcard}
+          onListen={postcardMode === 'welcome' ? handleWelcomeListen : null}
+          onShareFile={
+            postcardMode === 'share'
+              ? () => {
+                  closeListeningPostcard()
+                  shareTrack(postcardItem)
+                }
+              : null
+          }
+        />
+      ) : null}
+
+      {readingBookId ? (
+        <Suspense fallback={null}>
+          <BookReader
+            open
+            bookId={readingBookId}
+            title={getDisplayName(items.find((item) => item.id === readingBookId)?.name || '無題の本')}
+            pdfUrl={readingBookUrl}
+            pdfData={readingBookBytes}
+            initialPage={readingBookStartPage}
+            onClose={closeBook}
+            onProgressChange={handleBookProgress}
+          />
+        </Suspense>
+      ) : null}
+
+      {libraryViewerItem ? (
+        <div
+          className="image-viewer-overlay"
+          role="presentation"
+          onClick={() => setLibraryViewerItemId(null)}
+        >
+          <div
+            className="image-viewer"
+            role="dialog"
+            aria-modal="true"
+            aria-label={getDisplayName(libraryViewerItem.name)}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="icon-button image-viewer-close"
+              onClick={() => setLibraryViewerItemId(null)}
+              aria-label="閉じる"
+              title="閉じる"
+            >
+              ×
+            </button>
+
+            {imageItems.length > 1 ? (
+              <>
+                <button
+                  type="button"
+                  className="image-viewer-nav image-viewer-nav--prev"
+                  onClick={() => stepLibraryViewer(-1)}
+                  aria-label="前の画像"
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  className="image-viewer-nav image-viewer-nav--next"
+                  onClick={() => stepLibraryViewer(1)}
+                  aria-label="次の画像"
+                >
+                  ›
+                </button>
+              </>
+            ) : null}
+
+            <div className="image-viewer-stage">
+              {libraryThumbUrls[libraryViewerItem.id] ? (
+                <img
+                  key={libraryViewerItem.id}
+                  src={libraryThumbUrls[libraryViewerItem.id]}
+                  alt={getDisplayName(libraryViewerItem.name)}
+                />
+              ) : (
+                <span className="image-library-loading" aria-hidden="true" />
+              )}
+            </div>
+
+            <div className="image-viewer-footer">
+              <div className="image-viewer-info">
+                <strong>{getDisplayName(libraryViewerItem.name)}</strong>
+                <span>
+                  {libraryViewerIndex + 1} / {imageItems.length} · {formatSize(libraryViewerItem.size)}
+                </span>
+              </div>
+              <div className="image-viewer-actions">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={coverBusy || selectedItem?.kind !== 'audio' || selectedItem?.coverId === libraryViewerItem.id}
+                  onClick={() => void handleAssignCoverFromLibrary(libraryViewerItem.id)}
+                >
+                  {selectedItem?.coverId === libraryViewerItem.id ? 'ラベル使用中' : 'ラベルに設定'}
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button image-viewer-delete"
+                  onClick={() => {
+                    setLibraryViewerItemId(null)
+                    requestDelete(libraryViewerItem.id)
+                  }}
+                >
+                  削除
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {pendingDeleteId ? (
+        <div className="confirm-overlay" role="presentation" onClick={cancelDelete}>
+          <div
+            className="confirm-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-confirm-title"
+            aria-describedby="delete-confirm-desc"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 id="delete-confirm-title">削除の確認</h3>
+            <p id="delete-confirm-desc">
+              「{getDisplayName(items.find((item) => item.id === pendingDeleteId)?.name || '')}」を削除しますか？
+              <br />
+              この操作は取り消せません。
+            </p>
+            <div className="confirm-actions">
+              <button type="button" className="secondary-button" onClick={cancelDelete}>
+                キャンセル
+              </button>
+              <button type="button" className="danger-button" onClick={confirmDelete}>
+                削除する
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {playlistMenuItemId && playlistMenuPos
+        ? createPortal(
+            <div
+              className="playlist-add-menu playlist-add-menu--portal"
+              role="menu"
+              style={{
+                left: playlistMenuPos.left,
+                top: playlistMenuPos.top,
+                bottom: playlistMenuPos.bottom,
+              }}
+            >
+              {customPlaylists.length === 0 ? (
+                <p className="playlist-add-empty">まだプレイリストがありません</p>
+              ) : (
+                customPlaylists.map((playlist) => {
+                  const inPlaylist = playlist.trackIds.includes(playlistMenuItemId)
+                  return (
+                    <button
+                      key={playlist.id}
+                      type="button"
+                      role="menuitemcheckbox"
+                      aria-checked={inPlaylist}
+                      className={`playlist-add-option${inPlaylist ? ' is-in' : ''}`}
+                      onClick={() => {
+                        toggleTrackInPlaylist(playlist.id, playlistMenuItemId)
+                      }}
+                    >
+                      <span>{playlist.name}</span>
+                      <span aria-hidden="true">{inPlaylist ? '✓' : '+'}</span>
+                    </button>
+                  )
+                })
+              )}
+              <button
+                type="button"
+                className="playlist-add-option playlist-add-option--new"
+                onClick={() => {
+                  setPendingPlaylistTrackId(playlistMenuItemId)
+                  setPlaylistMenuItemId(null)
+                  setPlaylistMenuPos(null)
+                  setCreatingPlaylist(true)
+                  setRenamingPlaylistId(null)
+                  setPlaylistNameDraft('')
+                }}
+              >
+                新しいプレイリスト…
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
+      {isLoggedIn ? <HanaChat appRole={authRole} guestKey={guestKey} /> : null}
+    </div>
+  )
+}
+
+export default App

@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img" aria-label="Jacket style petal">
+  <defs>
+    <linearGradient id="dusk" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a1020"/>
+      <stop offset="42%" stop-color="#141f35"/>
+      <stop offset="100%" stop-color="#2a1f3a"/>
+    </linearGradient>
+    <radialGradient id="roseGlow" cx="22%" cy="78%" r="48%">
+      <stop offset="0%" stop-color="rgba(251,113,133,0.28)"/>
+      <stop offset="45%" stop-color="rgba(244,114,182,0.12)"/>
+      <stop offset="100%" stop-color="rgba(244,114,182,0)"/>
+    </radialGradient>
+    <linearGradient id="petalFill" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fda4af"/>
+      <stop offset="55%" stop-color="#f9a8d4"/>
+      <stop offset="100%" stop-color="#fbcfe8"/>
+    </linearGradient>
+    <linearGradient id="petalSoft" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="rgba(251,207,232,0.55)"/>
+      <stop offset="100%" stop-color="rgba(251,113,133,0.2)"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="400" height="400" fill="url(#dusk)"/>
+  <rect width="400" height="400" fill="url(#roseGlow)"/>
+  <rect x="0" y="0" width="14" height="400" fill="rgba(0,0,0,0.4)"/>
+  <rect x="26" y="26" width="348" height="348" fill="none" stroke="rgba(251,207,232,0.12)" stroke-width="1"/>
+
+  <!-- large petal, bottom-left visible band -->
+  <g transform="translate(78 292) rotate(-28)" opacity="0.78">
+    <path d="M0 0
+      C12 -38 28 -72 18 -108
+      C8 -138 -18 -148 -38 -128
+      C-58 -108 -42 -58 -28 -28
+      C-18 -10 -8 -2 0 0Z" fill="url(#petalFill)"/>
+    <path d="M-6 -8 C0 -42 8 -78 2 -104" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="1.2" stroke-linecap="round"/>
+  </g>
+
+  <!-- soft secondary petal -->
+  <g transform="translate(148 338) rotate(8)" opacity="0.38">
+    <path d="M0 0
+      C8 -24 18 -46 10 -70
+      C2 -90 -14 -94 -26 -78
+      C-36 -64 -24 -34 -14 -16
+      C-8 -6 -3 -1 0 0Z" fill="url(#petalSoft)"/>
+  </g>
+
+  <!-- tiny drifting accents (left/mid bottom, not bottom-right) -->
+  <g fill="#fbcfe8" opacity="0.28">
+    <ellipse cx="44" cy="246" rx="5" ry="9" transform="rotate(-30 44 246)"/>
+    <ellipse cx="196" cy="356" rx="4" ry="7" transform="rotate(18 196 356)"/>
+    <ellipse cx="168" cy="312" rx="3" ry="5.5" transform="rotate(-12 168 312)"/>
+  </g>
+
+  <line x1="40" y1="358" x2="168" y2="358" stroke="rgba(251,207,232,0.22)" stroke-width="1"/>
+  <text x="40" y="378" fill="rgba(255,255,255,0.92)" font-size="22" font-family="'Hiragino Mincho ProN','Yu Mincho',Georgia,serif" letter-spacing="0.16em">&#12399;&#12394;</text>
+</svg>

@@ -10,5 +10,14 @@ service firebase.storage {
     match /chat-images/{allPaths=**} {
       allow read, write: if true;
     }
+    match /x-uploads/{allPaths=**} {
+      allow read, write: if true;
+    }
+    match /x-avatars/{allPaths=**} {
+      allow read, write: if true;
+    }
+    match /x-chat-images/{allPaths=**} {
+      allow read, write: if true;
+    }
   }
 }

@@ -619,8 +619,9 @@ export function resolveGuestDisplayName({ threadId, guestKey, guestLabel } = {})
   const fromKey = getGuestProfile(guestKey)
   if (fromKey) return fromKey.displayName
   const id = String(threadId || '')
-  const known = id.match(/^guest-(hiro|zen|gabusan)$/i)
-  if (known) return GUEST_PROFILES[known[1].toLowerCase()]?.displayName || id
+  const keyFromId = (id.match(/^guest-([a-z0-9_-]+)$/i) || [])[1] || ''
+  const fromThreadId = getGuestProfile(keyFromId)
+  if (fromThreadId) return fromThreadId.displayName
   const label = String(guestLabel || '').trim()
   if (label && !/^ゲスト/.test(label)) return label
   return label || guestLabelFromUid(id || 'guest')
@@ -806,9 +807,10 @@ export function ensureGuestChatId(guestKey = 'guest') {
 
 export function guestLabelFromUid(uid) {
   const raw = String(uid || 'guest')
-  const known = raw.match(/^guest-(hiro|zen|gabusan)$/i)
+  const known = raw.match(/^guest-([a-z0-9_-]+)$/i)
   if (known) {
-    return GUEST_PROFILES[known[1].toLowerCase()]?.displayName || raw
+    const profile = getGuestProfile(known[1])
+    if (profile) return profile.displayName
   }
   let hash = 0
   for (let i = 0; i < raw.length; i += 1) {
@@ -948,6 +950,7 @@ function serializeChatMessage(id, data) {
 
 function serializeChatThread(id, data) {
   const guestKey = data?.guestKey || (String(id).match(/^guest-(.+)$/) || [])[1] || ''
+  const lastText = String(data?.lastText || '')
   return {
     id,
     guestKey,
@@ -956,7 +959,7 @@ function serializeChatThread(id, data) {
       guestKey,
       guestLabel: data?.guestLabel,
     }),
-    lastText: String(data?.lastText || ''),
+    lastText: lastText === '（削除されたメッセージ）' ? '' : lastText,
     updatedAt: data?.updatedAt?.toDate?.()?.toISOString?.() || data?.updatedAtIso || null,
     unreadByHana: Boolean(data?.unreadByHana),
     unreadByGuest: Boolean(data?.unreadByGuest),
@@ -1195,8 +1198,115 @@ export function subscribeChatMessages(threadId, onData, onError) {
     (snap) => {
       const rows = snap.docs
         .map((document) => serializeChatMessage(document.id, document.data()))
+        .filter((message) => !message.deleted)
         .sort((a, b) => String(a.createdAt || a.id || '').localeCompare(String(b.createdAt || b.id || '')))
       onData?.(rows)
+    },
+    (error) => onError?.(error),
+  )
+}
+
+const CHAT_CALLS_SUBCOLLECTION = 'calls'
+
+function chatCallRef(threadId, callId) {
+  return doc(db, CHAT_THREADS_COLLECTION, threadId, CHAT_CALLS_SUBCOLLECTION, callId)
+}
+
+/**
+ * Create a WebRTC signaling record. Media never passes through Firebase;
+ * only the offer/answer and ICE candidates are stored here.
+ */
+export async function createChatCall({ threadId, callerRole, type }) {
+  if (!threadId || !['guest', 'hana'].includes(callerRole)) {
+    throw new Error('Invalid call target.')
+  }
+  const now = new Date().toISOString()
+  const ref = await addDoc(
+    collection(db, CHAT_THREADS_COLLECTION, threadId, CHAT_CALLS_SUBCOLLECTION),
+    {
+      callerRole,
+      calleeRole: callerRole === 'hana' ? 'guest' : 'hana',
+      type: type === 'video' ? 'video' : 'voice',
+      status: 'preparing',
+      offer: null,
+      answer: null,
+      createdAt: serverTimestamp(),
+      createdAtIso: now,
+      updatedAt: serverTimestamp(),
+      updatedAtIso: now,
+    },
+  )
+  return ref.id
+}
+
+export async function updateChatCall(threadId, callId, patch) {
+  if (!threadId || !callId) return
+  await setDoc(
+    chatCallRef(threadId, callId),
+    {
+      ...patch,
+      updatedAt: serverTimestamp(),
+      updatedAtIso: new Date().toISOString(),
+    },
+    { merge: true },
+  )
+}
+
+export function subscribeChatCalls(threadId, onData, onError) {
+  if (!threadId) {
+    onData?.([])
+    return () => {}
+  }
+  return onSnapshot(
+    query(
+      collection(db, CHAT_THREADS_COLLECTION, threadId, CHAT_CALLS_SUBCOLLECTION),
+      orderBy('createdAtIso', 'desc'),
+      limit(12),
+    ),
+    (snap) => {
+      const calls = snap.docs
+        .map((item) => ({ id: item.id, ...item.data() }))
+        .sort((a, b) => String(b.createdAtIso || '').localeCompare(String(a.createdAtIso || '')))
+      onData?.(calls)
+    },
+    (error) => onError?.(error),
+  )
+}
+
+export async function addChatCallCandidate(threadId, callId, role, candidate) {
+  if (!threadId || !callId || !candidate || !['guest', 'hana'].includes(role)) return
+  await addDoc(
+    collection(
+      db,
+      CHAT_THREADS_COLLECTION,
+      threadId,
+      CHAT_CALLS_SUBCOLLECTION,
+      callId,
+      `${role}Candidates`,
+    ),
+    {
+      candidate,
+      createdAt: serverTimestamp(),
+      createdAtIso: new Date().toISOString(),
+    },
+  )
+}
+
+export function subscribeChatCallCandidates(threadId, callId, role, onCandidate, onError) {
+  if (!threadId || !callId || !['guest', 'hana'].includes(role)) return () => {}
+  return onSnapshot(
+    collection(
+      db,
+      CHAT_THREADS_COLLECTION,
+      threadId,
+      CHAT_CALLS_SUBCOLLECTION,
+      callId,
+      `${role}Candidates`,
+    ),
+    (snap) => {
+      snap.docChanges().forEach((change) => {
+        if (change.type === 'added') onCandidate?.(change.doc.data()?.candidate)
+      })
     },
     (error) => onError?.(error),
   )
@@ -1432,22 +1542,37 @@ export async function updateChatMessage({ threadId, messageId, text }) {
   )
 }
 
-export async function softDeleteChatMessage({ threadId, messageId }) {
+export async function deleteChatMessage({ threadId, messageId }) {
   if (!threadId || !messageId) return
-  const nowIso = new Date().toISOString()
-  await updateDoc(doc(db, CHAT_THREADS_COLLECTION, threadId, 'messages', messageId), {
-    text: '（削除されたメッセージ）',
-    deleted: true,
-    editedAt: serverTimestamp(),
-    editedAtIso: nowIso,
-    deletedAtIso: nowIso,
-  })
+
+  const messageRef = doc(db, CHAT_THREADS_COLLECTION, threadId, 'messages', messageId)
+  const messageSnap = await getDoc(messageRef)
+  const imageUrl = String(messageSnap.data()?.imageUrl || '').trim()
+
+  await deleteDoc(messageRef)
+
+  // Remove an uploaded image as well, so deleting an image message leaves no
+  // orphaned file behind. A missing/legacy object must not block deletion.
+  if (imageUrl) {
+    try {
+      await deleteObject(storageRef(storage, imageUrl))
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const remainingSnap = await getDocs(
+    query(collection(db, CHAT_THREADS_COLLECTION, threadId, 'messages'), limit(200)),
+  )
+  const latest = remainingSnap.docs
+    .map((item) => serializeChatMessage(item.id, item.data()))
+    .filter((item) => !item.deleted)
+    .sort((a, b) => String(b.createdAt || b.id || '').localeCompare(String(a.createdAt || a.id || '')))[0]
+
   await setDoc(
     doc(db, CHAT_THREADS_COLLECTION, threadId),
     {
-      lastText: '（削除されたメッセージ）',
-      updatedAt: serverTimestamp(),
-      updatedAtIso: nowIso,
+      lastText: String(latest?.text || '').slice(0, 160),
     },
     { merge: true },
   )

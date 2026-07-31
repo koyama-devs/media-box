@@ -1,0 +1,343 @@
+import { useEffect, useMemo, useState } from 'react'
+import {
+    countMusicLibraryByKind,
+    FAVORITE_KIND_FILTERS,
+    fetchJapanMusicChart,
+    listMusicLibrary,
+    loadMusicLibrary,
+    MUSIC_GENRES,
+    MUSIC_KIND_LABEL,
+    SEARCH_ENTITIES,
+    searchJapanMusic,
+    toggleMusicFavorite,
+} from './japaneseMusic'
+
+const SEARCH_DEBOUNCE_MS = 320
+
+/**
+ * Music charts (iTunes) + favorites list split by kind.
+ */
+export default function JapaneseMusic({ hidden = false }) {
+  const [genreId, setGenreId] = useState('all')
+  const [view, setView] = useState('chart') // chart | favorites
+  const [searchEntity, setSearchEntity] = useState('song')
+  const [favoriteKind, setFavoriteKind] = useState('song')
+  const [query, setQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
+  const [chartItems, setChartItems] = useState([])
+  const [searchItems, setSearchItems] = useState([])
+  const [favorites, setFavorites] = useState(() => listMusicLibrary('song'))
+  const [favoriteCounts, setFavoriteCounts] = useState(() => countMusicLibraryByKind())
+  const [favoriteIds, setFavoriteIds] = useState(() => new Set(Object.keys(loadMusicLibrary())))
+  const [loading, setLoading] = useState(true)
+  const [searching, setSearching] = useState(false)
+  const [error, setError] = useState('')
+  const [entered, setEntered] = useState(false)
+
+  const activeGenre = useMemo(
+    () => MUSIC_GENRES.find((g) => g.id === genreId) || MUSIC_GENRES[0],
+    [genreId],
+  )
+  const activeEntity = useMemo(
+    () => SEARCH_ENTITIES.find((e) => e.id === searchEntity) || SEARCH_ENTITIES[0],
+    [searchEntity],
+  )
+  const isSearching = Boolean(debouncedQuery.trim())
+  const showingFavorites = view === 'favorites' && !isSearching
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setEntered(true))
+    return () => window.cancelAnimationFrame(frame)
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedQuery(query.trim())
+    }, SEARCH_DEBOUNCE_MS)
+    return () => window.clearTimeout(timer)
+  }, [query])
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError('')
+
+    fetchJapanMusicChart(activeGenre, { feed: activeEntity.chartFeed })
+      .then((list) => {
+        if (!cancelled) setChartItems(list)
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setChartItems([])
+          setError(err?.message || 'チャートの読み込みに失敗しました。')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeGenre, activeEntity.chartFeed])
+
+  useEffect(() => {
+    const q = debouncedQuery.trim()
+    if (!q) {
+      setSearchItems([])
+      setSearching(false)
+      return undefined
+    }
+
+    let cancelled = false
+    setSearching(true)
+    setError('')
+
+    searchJapanMusic(q, { entity: activeEntity.itunes, media: activeEntity.media })
+      .then((list) => {
+        if (!cancelled) setSearchItems(list)
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setSearchItems([])
+          setError(err?.message || '検索に失敗しました。')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSearching(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [debouncedQuery, activeEntity])
+
+  useEffect(() => {
+    if (!showingFavorites) return
+    setFavorites(listMusicLibrary(favoriteKind))
+  }, [showingFavorites, favoriteKind])
+
+  if (hidden) return null
+
+  const visible = showingFavorites
+    ? favorites
+    : (isSearching ? searchItems : chartItems)
+
+  const chartHeading = `${activeGenre.label}${activeEntity.label}トップ`
+
+  const syncFavorites = (library, preferKind) => {
+    const counts = { all: 0, song: 0, artist: 0, album: 0, mv: 0 }
+    const values = Object.values(library).filter((item) => item?.id)
+    for (const item of values) {
+      counts.all += 1
+      if (item.kind && counts[item.kind] != null) counts[item.kind] += 1
+    }
+    setFavoriteCounts(counts)
+    setFavoriteIds(new Set(Object.keys(library)))
+    const kind = preferKind || favoriteKind
+    setFavorites(
+      values
+        .filter((item) => kind === 'all' || item.kind === kind)
+        .sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0)),
+    )
+  }
+
+  const handleToggleFavorite = (item) => {
+    const { library, favorited } = toggleMusicFavorite(item)
+    const nextKind = item.kind || 'song'
+    if (favorited) {
+      setFavoriteKind(nextKind)
+      syncFavorites(library, nextKind)
+      if (isSearching) {
+        setQuery('')
+        setDebouncedQuery('')
+        setSearchItems([])
+        setView('favorites')
+      }
+      return
+    }
+    syncFavorites(library, favoriteKind)
+  }
+
+  const busy = isSearching ? searching : (!showingFavorites && loading)
+  const favoriteTotal = favoriteCounts.all || 0
+
+  return (
+    <section
+      className={`jp-music${entered ? ' is-visible' : ''}`}
+      aria-label="ミュージック"
+    >
+      <header className="jp-music-header">
+        <div className="jp-music-seal" aria-hidden="true">音</div>
+        <div className="jp-music-titles">
+          <p className="jp-music-kicker">ミュージック · チャート</p>
+          <h3 className="jp-music-heading">
+            {isSearching
+              ? `${activeEntity.label}の検索結果`
+              : showingFavorites
+                ? `お気に入り · ${FAVORITE_KIND_FILTERS.find((k) => k.id === favoriteKind)?.label || '曲'}`
+                : chartHeading}
+          </h3>
+        </div>
+      </header>
+
+      <div className="jp-music-filters" role="group" aria-label="表示切替">
+        <button
+          type="button"
+          className={!showingFavorites ? 'is-active' : ''}
+          onClick={() => setView('chart')}
+        >
+          チャート
+        </button>
+        <button
+          type="button"
+          className={showingFavorites ? 'is-active' : ''}
+          onClick={() => {
+            setQuery('')
+            setDebouncedQuery('')
+            setSearchItems([])
+            setView('favorites')
+            setFavorites(listMusicLibrary(favoriteKind))
+            setFavoriteCounts(countMusicLibraryByKind())
+          }}
+        >
+          お気に入り ({favoriteTotal})
+        </button>
+      </div>
+
+      {showingFavorites ? (
+        <div className="jp-music-entities" role="group" aria-label="お気に入りの種類">
+          {FAVORITE_KIND_FILTERS.map((kind) => (
+            <button
+              key={kind.id}
+              type="button"
+              className={favoriteKind === kind.id ? 'is-active' : ''}
+              onClick={() => setFavoriteKind(kind.id)}
+            >
+              {kind.label}
+              {kind.id === 'all'
+                ? ` (${favoriteCounts.all || 0})`
+                : ` (${favoriteCounts[kind.id] || 0})`}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <>
+          <div className="jp-music-entities" role="group" aria-label="表示対象">
+            {SEARCH_ENTITIES.map((entity) => (
+              <button
+                key={entity.id}
+                type="button"
+                className={searchEntity === entity.id ? 'is-active' : ''}
+                onClick={() => setSearchEntity(entity.id)}
+              >
+                {entity.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="jp-music-tabs" role="tablist" aria-label="ジャンル">
+            {MUSIC_GENRES.map((genre) => (
+              <button
+                key={genre.id}
+                type="button"
+                role="tab"
+                aria-selected={genreId === genre.id}
+                className={genreId === genre.id ? 'is-active' : ''}
+                onClick={() => setGenreId(genre.id)}
+                disabled={isSearching}
+              >
+                {genre.label}
+              </button>
+            ))}
+          </div>
+
+          <label className="jp-music-search">
+            <span className="sr-only">{activeEntity.label}を検索</span>
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={`${activeEntity.label}を検索…`}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </label>
+        </>
+      )}
+
+      {busy ? (
+        <p className="jp-music-status">{isSearching ? '検索中…' : '読み込み中…'}</p>
+      ) : null}
+      {error ? <p className="jp-music-error">{error}</p> : null}
+      {!busy && !error && visible.length === 0 ? (
+        <p className="jp-music-status">
+          {showingFavorites
+            ? 'このお気に入りはまだありません。'
+            : '該当する作品がありません。'}
+        </p>
+      ) : null}
+
+      <ul className="jp-music-list">
+        {visible.map((item) => {
+          const favorited = favoriteIds.has(item.id)
+          return (
+            <li
+              key={item.id}
+              className={`jp-music-item${favorited ? ' is-favorite' : ''}`}
+            >
+              <span className="jp-music-rank" aria-hidden="true">
+                {item.rank != null ? String(item.rank).padStart(2, '0') : '・'}
+              </span>
+              <a
+                className="jp-music-cover"
+                href={item.url || '#'}
+                target="_blank"
+                rel="noreferrer"
+                title="Apple Musicで開く"
+                onClick={(event) => {
+                  if (!item.url) event.preventDefault()
+                }}
+              >
+                {item.artwork ? (
+                  <img src={item.artwork} alt="" loading="lazy" decoding="async" />
+                ) : (
+                  <span className="jp-music-cover-fallback">
+                    {MUSIC_KIND_LABEL[item.kind] || '♪'}
+                  </span>
+                )}
+              </a>
+              <div className="jp-music-meta">
+                <a
+                  className="jp-music-title"
+                  href={item.url || '#'}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(event) => {
+                    if (!item.url) event.preventDefault()
+                  }}
+                >
+                  {item.title}
+                </a>
+                <p className="jp-music-artist">
+                  <span className="jp-music-kind">{MUSIC_KIND_LABEL[item.kind] || item.kind}</span>
+                  {item.kind === 'artist'
+                    ? (item.genre ? ` · ${item.genre}` : '')
+                    : (item.artist ? ` · ${item.artist}` : '')}
+                </p>
+              </div>
+              <button
+                type="button"
+                className={`jp-music-status-btn${favorited ? ' is-favorite' : ''}`}
+                onClick={() => handleToggleFavorite(item)}
+                title={favorited ? 'お気に入りから外す' : 'お気に入りに追加'}
+              >
+                {favorited ? '♥ 済み' : '＋お気に入り'}
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
+}

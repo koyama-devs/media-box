@@ -91,6 +91,91 @@ service cloud.firestore {
         allow update: if isValidChatMessageUpdate() || isReactionsOnlyUpdate();
         allow delete: if true;
       }
+
+      // WebRTC signaling only. Audio/video streams travel peer-to-peer and are
+      // never written to Firestore.
+      match /calls/{callId} {
+        allow read, create, update, delete: if true;
+
+        match /{candidateCollection}/{candidateId} {
+          allow read, create, delete: if candidateCollection in [
+            'guestCandidates',
+            'hanaCandidates'
+          ];
+          allow update: if false;
+        }
+      }
+    }
+
+    // Xmediabox (public shell) — same shape, separate collections, starts empty.
+    match /x-media-items/{itemId} {
+      allow read, write: if true;
+
+      match /chunks/{chunkId} {
+        allow read, write: if true;
+      }
+    }
+
+    match /x-access-logs/{logId} {
+      allow create: if true
+        && request.resource.data.keys().hasAll([
+          'visitedAt',
+          'userAgent',
+          'deviceType',
+          'browser',
+          'os'
+        ])
+        && request.resource.data.visitedAt is string
+        && request.resource.data.userAgent is string
+        && request.resource.data.userAgent.size() <= 500
+        && request.resource.data.deviceType in ['mobile', 'tablet', 'desktop']
+        && request.resource.data.browser is string
+        && request.resource.data.os is string;
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /x-shared-state/{docId} {
+      allow read, write: if true;
+    }
+
+    match /x-chatProfiles/{profileId} {
+      allow read, write: if true;
+    }
+
+    match /x-pushTokens/{tokenId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['userKey', 'token'])
+        && request.resource.data.userKey is string
+        && request.resource.data.userKey.size() > 0
+        && request.resource.data.userKey.size() <= 40
+        && request.resource.data.token is string
+        && request.resource.data.token.size() > 10
+        && request.resource.data.token.size() <= 4096;
+      allow delete: if true;
+    }
+
+    match /x-chatThreads/{threadId} {
+      allow read, create, update: if true;
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if true;
+        allow create: if isValidChatMessage();
+        allow update: if isValidChatMessageUpdate() || isReactionsOnlyUpdate();
+        allow delete: if true;
+      }
+
+      match /calls/{callId} {
+        allow read, create, update, delete: if true;
+
+        match /{candidateCollection}/{candidateId} {
+          allow read, create, delete: if candidateCollection in [
+            'guestCandidates',
+            'hanaCandidates'
+          ];
+          allow update: if false;
+        }
+      }
     }
 
     match /{document=**} {

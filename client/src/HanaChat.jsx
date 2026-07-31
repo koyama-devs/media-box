@@ -30,6 +30,7 @@ import {
   CHAT_PRESENCE_MODES,
   CHAT_REACTION_EMOJIS,
   chatWithHanachan,
+  deleteChatMessage,
   deliveryStatusLabel,
   ensureChatThread,
   ensureDefaultChatAccounts,
@@ -53,7 +54,6 @@ import {
   setChatPresenceStatus,
   setChatProfileStatus,
   setChatTyping,
-  softDeleteChatMessage,
   subscribeChatAccounts,
   subscribeChatMessages,
   subscribeChatProfiles,
@@ -73,8 +73,16 @@ import FlowerRainLayer, {
   triggerPartyBurst,
 } from './FlowerRain'
 import './hana-chat.css'
-import HanaSticker, { HANA_STICKER_SETS, isHanaSticker } from './HanaStickers'
-import OwnerMessageAssist from './OwnerMessageAssist'
+import HanaCall from './HanaCall'
+import HanaSticker, {
+  HANA_STICKER_SETS,
+  isHanaSticker,
+  suggestHanaStickers,
+} from './HanaStickers'
+import OwnerMessageAssist, {
+  collectUnansweredOwnerAssistMessages,
+  ownerAssistShouldCollapse,
+} from './OwnerMessageAssist'
 
 const AI_HISTORY_PREFIX = 'hana-chat-ai-history-'
 const CHANNEL_PREFIX = 'hana-chat-channel-'
@@ -229,7 +237,7 @@ function loadAiMessages(guestId) {
     if (!raw) return null
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed) || parsed.length === 0) return null
-    return parsed.filter((m) => m && typeof m.text === 'string' && m.id)
+    return parsed.filter((m) => m && !m.deleted && typeof m.text === 'string' && m.id)
   } catch {
     return null
   }
@@ -305,7 +313,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [ownThread, setOwnThread] = useState(null)
   const [activeThreadId, setActiveThreadId] = useState(null)
   const [speaking, setSpeaking] = useState(false)
-  const [showHumanSuggest, setShowHumanSuggest] = useState(false)
   const [storageReady, setStorageReady] = useState(false)
   const [replyTo, setReplyTo] = useState(null)
   const [editingId, setEditingId] = useState(null)
@@ -320,6 +327,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [stickerOpen, setStickerOpen] = useState(false)
   const [stickerSetId, setStickerSetId] = useState(() => readStickerSet({ asOwner: appRole === 'owner' }))
   const activeStickerSet = HANA_STICKER_SETS.find((set) => set.id === stickerSetId) || HANA_STICKER_SETS[0]
+  const stickerSuggestions = useMemo(() => suggestHanaStickers(draft, 12), [draft])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [defaultReaction, setDefaultReaction] = useState(() => readDefaultReaction())
   const [enterToSend, setEnterToSend] = useState(() => readEnterToSend())
@@ -355,7 +363,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const effectBaselineRef = useRef('')
   const ownerAssistBaselineRef = useRef('')
   const ownerAssistSeenRef = useRef(new Set())
-  const ownerAssistSeededRef = useRef(false)
+  const ownerAssistOpenedAtRef = useRef(0)
+  const ownerAssistSeedRef = useRef('')
   const ownerAssistReqRef = useRef(0)
   const suggestReqRef = useRef(0)
   const typingStateRef = useRef({ threadId: '', role: '', lastPulseAt: 0 })
@@ -375,7 +384,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     window.setTimeout(run, 220)
   }
 
-  const guestProfile = useMemo(() => getGuestProfile(guestKey), [guestKey])
+  // chatAccounts is a dep so the name re-resolves once the live list loads.
+  const guestProfile = useMemo(() => getGuestProfile(guestKey), [guestKey, chatAccounts])
   const guestDisplayName = guestProfile?.displayName || 'ゲスト'
   const guestAddressAs = guestProfile?.addressAs || guestDisplayName
   const guestThreadLabel = guestProfile?.displayName || guestDisplayName
@@ -384,7 +394,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const actingAsOwner = appRole === 'owner' || isAdmin
   const sessionProfile = useMemo(
     () => resolveSessionProfile(actingAsOwner ? 'owner' : 'guest', guestKey),
-    [actingAsOwner, guestKey],
+    [actingAsOwner, guestKey, chatAccounts],
   )
   const extrasProfileId = sessionProfile?.id || 'guest'
 
@@ -409,16 +419,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     const timer = window.setTimeout(() => setCopyNote(''), 1800)
     return () => window.clearTimeout(timer)
   }, [copyNote, open])
-
-  const ownerActiveGuestLabel = useMemo(() => {
-    if (!actingAsOwner || !activeThreadId) return 'ゲスト'
-    const thread = threads.find((entry) => entry.id === activeThreadId)
-    return resolveGuestDisplayName({
-      threadId: activeThreadId,
-      guestKey: thread?.guestKey,
-      guestLabel: thread?.guestLabel,
-    })
-  }, [actingAsOwner, activeThreadId, threads])
 
   const ownerGuestRoster = useMemo(() => {
     if (!actingAsOwner) return []
@@ -465,6 +465,24 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       .filter((entry) => !/^ゲスト/.test(String(entry.label || '').trim()))
     return [...known, ...extras]
   }, [actingAsOwner, threads, chatAccounts])
+
+  const ownerActiveGuestLabel = useMemo(() => {
+    if (!actingAsOwner || !activeThreadId) return 'ゲスト'
+    // The roster is built from the live account list, so it wins over a thread
+    // label that may have been serialized before accounts finished loading.
+    const entry = ownerGuestRoster.find((item) => (
+      item.threadId === activeThreadId
+      || item.canonicalId === activeThreadId
+      || item.thread?.id === activeThreadId
+    ))
+    if (entry?.known && entry.label) return entry.label
+    const thread = threads.find((item) => item.id === activeThreadId)
+    return resolveGuestDisplayName({
+      threadId: activeThreadId,
+      guestKey: thread?.guestKey,
+      guestLabel: thread?.guestLabel,
+    })
+  }, [actingAsOwner, activeThreadId, threads, ownerGuestRoster])
 
   const ownerActiveGuestKey = useMemo(() => {
     if (!actingAsOwner || !activeThreadId) return ''
@@ -833,13 +851,18 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     }
   }, [actingAsOwner, hanaMessages, ownerActiveGuestLabel])
 
-  // Seed existing messages as "seen" when opening a thread; only analyze newcomers.
+  // Analyze the unanswered guest streak when Hana opens the thread, then keep
+  // analyzing newcomers that arrive afterward. A time baseline (instead of
+  // seeding "seen" from the first snapshot) matters because the snapshot can
+  // land after the seed step and make the whole history look new, which fired
+  // dozens of parallel calls and tripped the API rate limit.
   useEffect(() => {
     if (hidden || !actingAsOwner || !activeThreadId) {
       if (!actingAsOwner) {
         ownerAssistBaselineRef.current = ''
         ownerAssistSeenRef.current = new Set()
-        ownerAssistSeededRef.current = false
+        ownerAssistOpenedAtRef.current = 0
+        ownerAssistSeedRef.current = ''
       }
       return undefined
     }
@@ -847,28 +870,34 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     if (ownerAssistBaselineRef.current !== activeThreadId) {
       ownerAssistBaselineRef.current = activeThreadId
       ownerAssistSeenRef.current = new Set()
-      ownerAssistSeededRef.current = false
+      ownerAssistOpenedAtRef.current = Date.now()
+      ownerAssistSeedRef.current = ''
     }
 
-    if (!ownerAssistSeededRef.current) {
-      if (hanaMessages.length === 0) {
-        const timer = window.setTimeout(() => {
-          if (ownerAssistBaselineRef.current !== activeThreadId) return
-          if (ownerAssistSeededRef.current) return
-          ownerAssistSeenRef.current = new Set()
-          ownerAssistSeededRef.current = true
-        }, 600)
-        return () => window.clearTimeout(timer)
-      }
-      ownerAssistSeenRef.current = new Set(hanaMessages.map((item) => item.id).filter(Boolean))
-      ownerAssistSeededRef.current = true
-      return undefined
+    // Seed every consecutive unanswered guest text (not only the latest), so a
+    // burst of messages waiting for Hana all get translation cards on open.
+    if (ownerAssistSeedRef.current !== activeThreadId && hanaMessages.length) {
+      ownerAssistSeedRef.current = activeThreadId
+      const pending = collectUnansweredOwnerAssistMessages(hanaMessages, {
+        isAssistable: isOwnerAssistableGuestMessage,
+        max: 8,
+      }).filter((item) => !ownerAssistSeenRef.current.has(item.id))
+      pending.forEach((item) => ownerAssistSeenRef.current.add(item.id))
+      void (async () => {
+        for (const item of pending) {
+          await requestOwnerAssist(item)
+        }
+      })()
     }
 
-    const newcomers = hanaMessages.filter((item) => (
-      isOwnerAssistableGuestMessage(item)
-      && !ownerAssistSeenRef.current.has(item.id)
-    ))
+    const openedAt = ownerAssistOpenedAtRef.current
+    const newcomers = hanaMessages.filter((item) => {
+      if (!isOwnerAssistableGuestMessage(item)) return false
+      if (ownerAssistSeenRef.current.has(item.id)) return false
+      // Missing createdAt = server timestamp still resolving; wait for the next snapshot.
+      const createdAt = Date.parse(item.createdAt || '')
+      return Number.isFinite(createdAt) && createdAt >= openedAt
+    })
     newcomers.forEach((item) => {
       ownerAssistSeenRef.current.add(item.id)
       void requestOwnerAssist(item)
@@ -925,15 +954,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     scrollToLatestRef.current()
     return undefined
   }, [messagesScrollKey, open])
-
-  useEffect(() => {
-    if (actingAsOwner || channel !== 'ai') {
-      setShowHumanSuggest(false)
-      return
-    }
-    const guestTurns = aiMessages.filter((m) => m.role === 'guest').length
-    setShowHumanSuggest(guestTurns >= 1)
-  }, [aiMessages, channel, actingAsOwner])
 
   const activeThreadMeta = useMemo(() => {
     if (actingAsOwner) {
@@ -1324,7 +1344,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   const switchToHuman = (noticeText) => {
     setChannel('human')
-    setShowHumanSuggest(false)
     if (noticeText) {
       setAiMessages((prev) => {
         if (prev.some((m) => m.id === HUMAN_SWITCH_NOTICE_ID || m.kind === 'human-switch')) {
@@ -1721,13 +1740,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     try {
       if (actingAsOwner || guestOnHuman) {
         const threadId = actingAsOwner ? activeThreadId : guestChatId
-        await softDeleteChatMessage({ threadId, messageId: message.id })
+        await deleteChatMessage({ threadId, messageId: message.id })
       } else {
-        setAiMessages((prev) => prev.map((m) => (
-          m.id === message.id
-            ? { ...m, text: '（削除されたメッセージ）', deleted: true, editedAt: new Date().toISOString() }
-            : m
-        )))
+        setAiMessages((prev) => prev.filter((m) => m.id !== message.id))
       }
       if (editingId === message.id) {
         setEditingId(null)
@@ -2059,7 +2074,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
     if (actionId === 'translate') {
       const text = String(message.rawText || message.text || '').trim()
-      if (!text) return true
+      if (!text) {
+        notifyAction('翻訳できるテキストがありません')
+        return true
+      }
       const targetLang = actingAsOwner ? 'vi' : 'ja'
       const langLabel = actingAsOwner ? 'ベトナム語' : '日本語'
       notifyAction(`${langLabel}に翻訳中…`)
@@ -2476,6 +2494,15 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               )}
             </div>
             <div className="hana-chat-header-actions">
+              {(actingAsOwner ? activeThreadId : guestOnHuman) ? (
+                <HanaCall
+                  key={actingAsOwner ? activeThreadId : guestChatId}
+                  threadId={actingAsOwner ? activeThreadId : guestChatId}
+                  role={actingAsOwner ? 'hana' : 'guest'}
+                  partnerName={actingAsOwner ? ownerActiveGuestLabel : 'はな'}
+                  compact
+                />
+              ) : null}
               {!actingAsOwner && channel === 'human' ? (
                 <button
                   type="button"
@@ -2712,104 +2739,107 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   {!isOwn ? (
                     <img className="hana-chat-msg-avatar" src={avatarSrc} alt="" />
                   ) : null}
-                  <div className="hana-chat-msg-main">
-                    {isOwn && (timeLabel || !message.deleted || (message.editedAt && !message.deleted)) ? (
-                      <div className="hana-chat-msg-aside">
-                        {isOwn && !message.deleted ? (
-                          <span className={`hana-chat-delivery is-${delivery || 'sent'}`}>
-                            {delivery ? deliveryStatusLabel(delivery) : '送信済'}
-                          </span>
-                        ) : null}
-                        {timeLabel ? (
-                          <time dateTime={message.createdAt || undefined}>{timeLabel}</time>
-                        ) : null}
-                        {message.editedAt && !message.deleted ? <span className="hana-chat-msg-edited">編集済</span> : null}
-                      </div>
-                    ) : null}
-                    <ChatSwipeBubble
-                      className={`${sideClass} is-${message.role}`}
-                      canReply={!message.deleted}
-                      canEdit={mutable && !showsSticker && !showsEffect && !showsImage}
-                      canDelete={mutable}
-                      canReact={!message.deleted}
-                      showFlowerReact={!message.deleted && !isOwn}
-                      defaultReaction={defaultReaction}
-                      reactions={message.reactions || {}}
-                      reactorId={reactorId}
-                      copyText={message.deleted || showsImage ? '' : (message.rawText || message.text || '')}
-                      onCopy={notifyCopied}
-                      onReply={() => startReply(message)}
-                      onEdit={() => startEdit(message)}
-                      onDelete={() => handleDelete(message)}
-                      onReact={(emoji, options) => { void handleReact(message, emoji, options) }}
-                      onMenuAction={(actionId) => handleMenuAction(actionId, message)}
-                      onEffect={handleLocalEffect}
-                    >
-                      <div
-                        className={`hana-chat-bubble ${sideClass} is-${message.role}${message.kind === 'human-switch' || message.kind === 'intro' ? ' is-notice' : ''}${message.deleted ? ' is-deleted' : ''}${showsSticker ? ' is-sticker' : ''}${showsEffect ? ' is-effect' : ''}${showsImage ? ' is-image' : ''}${message.uploading ? ' is-uploading' : ''}`}
+                  <div className="hana-chat-msg-column">
+                    <div className="hana-chat-msg-main">
+                      {isOwn && (timeLabel || !message.deleted || (message.editedAt && !message.deleted)) ? (
+                        <div className="hana-chat-msg-aside">
+                          {isOwn && !message.deleted ? (
+                            <span className={`hana-chat-delivery is-${delivery || 'sent'}`}>
+                              {delivery ? deliveryStatusLabel(delivery) : '送信済'}
+                            </span>
+                          ) : null}
+                          {timeLabel ? (
+                            <time dateTime={message.createdAt || undefined}>{timeLabel}</time>
+                          ) : null}
+                          {message.editedAt && !message.deleted ? <span className="hana-chat-msg-edited">編集済</span> : null}
+                        </div>
+                      ) : null}
+                      <ChatSwipeBubble
+                        className={`${sideClass} is-${message.role}`}
+                        canReply={!message.deleted}
+                        canEdit={mutable && !showsSticker && !showsEffect && !showsImage}
+                        canDelete={mutable}
+                        canReact={!message.deleted}
+                        showFlowerReact={!message.deleted && !isOwn}
+                        defaultReaction={defaultReaction}
+                        reactions={message.reactions || {}}
+                        reactorId={reactorId}
+                        copyText={message.deleted || showsImage ? '' : (message.rawText || message.text || '')}
+                        onCopy={notifyCopied}
+                        onReply={() => startReply(message)}
+                        onEdit={() => startEdit(message)}
+                        onDelete={() => handleDelete(message)}
+                        onReact={(emoji, options) => { void handleReact(message, emoji, options) }}
+                        onMenuAction={(actionId) => handleMenuAction(actionId, message)}
+                        onEffect={handleLocalEffect}
                       >
-                        {message.replyTo ? (
-                          <div className="hana-chat-quote">
-                            <strong>{labelForRole(message.replyTo.sender || message.replyTo.role)}</strong>
-                            <span>{message.replyTo.text}</span>
-                          </div>
-                        ) : null}
-                        {showsSticker ? (
-                          <HanaSticker id={message.sticker} size={104} title={message.text} />
-                        ) : showsImage ? (
-                          <button
-                            type="button"
-                            className="hana-chat-image-link"
-                            data-no-bubble-press="true"
-                            disabled={Boolean(message.uploading)}
-                            aria-label="画像を拡大表示"
-                            onClick={(event) => {
-                              event.preventDefault()
-                              event.stopPropagation()
-                              if (message.uploading) return
-                              setPreviewImage({
-                                src: message.imageUrl,
-                                alt: message.text || '写真',
-                              })
-                            }}
-                          >
-                            <img
-                              className="hana-chat-image"
-                              src={message.imageUrl}
-                              alt={message.text || '写真'}
-                              loading="lazy"
-                            />
-                            {message.uploading ? (
-                              <span className="hana-chat-image-status">送信中…</span>
-                            ) : null}
-                          </button>
-                        ) : showsEffect ? (
-                          <div className="hana-chat-effect-msg">
-                            <span className="hana-chat-effect-msg-emoji" aria-hidden="true">{effectEmoji}</span>
-                            <p className="hana-chat-effect-msg-caption">{message.text}</p>
-                          </div>
-                        ) : (
-                          <p>{message.text}</p>
-                        )}
-                        {translations[message.id] ? (
-                          <p className="hana-chat-translation">{translations[message.id]}</p>
-                        ) : null}
-                      </div>
-                    </ChatSwipeBubble>
+                        <div
+                          className={`hana-chat-bubble ${sideClass} is-${message.role}${message.kind === 'human-switch' || message.kind === 'intro' ? ' is-notice' : ''}${message.deleted ? ' is-deleted' : ''}${showsSticker ? ' is-sticker' : ''}${showsEffect ? ' is-effect' : ''}${showsImage ? ' is-image' : ''}${message.uploading ? ' is-uploading' : ''}`}
+                        >
+                          {message.replyTo ? (
+                            <div className="hana-chat-quote">
+                              <strong>{labelForRole(message.replyTo.sender || message.replyTo.role)}</strong>
+                              <span>{message.replyTo.text}</span>
+                            </div>
+                          ) : null}
+                          {showsSticker ? (
+                            <HanaSticker id={message.sticker} size={104} title={message.text} />
+                          ) : showsImage ? (
+                            <button
+                              type="button"
+                              className="hana-chat-image-link"
+                              data-no-bubble-press="true"
+                              disabled={Boolean(message.uploading)}
+                              aria-label="画像を拡大表示"
+                              onClick={(event) => {
+                                event.preventDefault()
+                                event.stopPropagation()
+                                if (message.uploading) return
+                                setPreviewImage({
+                                  src: message.imageUrl,
+                                  alt: message.text || '写真',
+                                })
+                              }}
+                            >
+                              <img
+                                className="hana-chat-image"
+                                src={message.imageUrl}
+                                alt={message.text || '写真'}
+                                loading="lazy"
+                              />
+                              {message.uploading ? (
+                                <span className="hana-chat-image-status">送信中…</span>
+                              ) : null}
+                            </button>
+                          ) : showsEffect ? (
+                            <div className="hana-chat-effect-msg">
+                              <span className="hana-chat-effect-msg-emoji" aria-hidden="true">{effectEmoji}</span>
+                              <p className="hana-chat-effect-msg-caption">{message.text}</p>
+                            </div>
+                          ) : (
+                            <p>{message.text}</p>
+                          )}
+                          {translations[message.id] ? (
+                            <p className="hana-chat-translation">{translations[message.id]}</p>
+                          ) : null}
+                        </div>
+                      </ChatSwipeBubble>
+                      {!isOwn && (timeLabel || (message.editedAt && !message.deleted)) ? (
+                        <div className="hana-chat-msg-aside">
+                          {timeLabel ? (
+                            <time dateTime={message.createdAt || undefined}>{timeLabel}</time>
+                          ) : null}
+                          {message.editedAt && !message.deleted ? <span className="hana-chat-msg-edited">編集済</span> : null}
+                        </div>
+                      ) : null}
+                    </div>
                     {actingAsOwner && !isOwn && ownerAssist[message.id] ? (
                       <OwnerMessageAssist
                         assist={ownerAssist[message.id]}
+                        collapsed={ownerAssistShouldCollapse(message.id, visibleMessages)}
                         onRetry={() => { void requestOwnerAssist(message, { force: true }) }}
                         onUseReply={applyOwnerSuggest}
                       />
-                    ) : null}
-                    {!isOwn && (timeLabel || (message.editedAt && !message.deleted)) ? (
-                      <div className="hana-chat-msg-aside">
-                        {timeLabel ? (
-                          <time dateTime={message.createdAt || undefined}>{timeLabel}</time>
-                        ) : null}
-                        {message.editedAt && !message.deleted ? <span className="hana-chat-msg-edited">編集済</span> : null}
-                      </div>
                     ) : null}
                   </div>
                 </div>
@@ -2830,7 +2860,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             <span>{partnerTyping ? partnerTypingLabel : ''}</span>
           </div>
 
-          {!actingAsOwner && channel === 'ai' && showHumanSuggest ? (
+          {!actingAsOwner && channel === 'ai' ? (
             <div className="hana-chat-suggest">
               <button
                 type="button"
@@ -2998,6 +3028,35 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 <button type="button" onClick={() => confirmReminder('tomorrow')}>明日の朝</button>
               </div>
               <button type="button" className="is-cancel" onClick={() => setRemindMessage(null)}>キャンセル</button>
+            </div>
+          ) : null}
+
+          {canUseReactions && stickerSuggestions.length > 0 && !editingId ? (
+            <div className="hana-chat-sticker-suggestions" aria-label="入力に合うスタンプ">
+              <div className="hana-chat-sticker-suggestions-head">
+                <span>おすすめスタンプ</span>
+                <span>{stickerSuggestions.length}件</span>
+              </div>
+              <div className="hana-chat-sticker-suggestions-list" role="list">
+                {stickerSuggestions.map((sticker) => (
+                  <button
+                    key={`suggested-${sticker.id}`}
+                    type="button"
+                    role="listitem"
+                    title={sticker.label}
+                    disabled={busy}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      setDraft('')
+                      void handleSendSticker(sticker)
+                    }}
+                  >
+                    <HanaSticker id={sticker.id} size={76} title="" />
+                    <span>{sticker.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           ) : null}
 
