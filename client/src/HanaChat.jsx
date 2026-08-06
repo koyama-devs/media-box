@@ -407,6 +407,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const callButtonsHostRef = useRef(null)
   const [callButtonsHost, setCallButtonsHost] = useState(null)
   const syncPanelViewportRef = useRef(() => {})
+  const resetPanelViewportInlineRef = useRef(() => {})
   const scrollToLatestRef = useRef(() => {})
   const viewportApplyRef = useRef({ top: 0, height: 0, width: 0, keyboard: false })
   const viewportDebounceRef = useRef(null)
@@ -1463,6 +1464,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       keyboardPinnedRef.current = false
       viewportApplyRef.current = { top: 0, height: 0, width: 0, keyboard: false }
     }
+    resetPanelViewportInlineRef.current = clearInline
 
     const lockPageScroll = (locked) => {
       const root = document.documentElement
@@ -1759,6 +1761,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     window.addEventListener('resize', syncMobileViewport)
     window.addEventListener('orientationchange', syncMobileViewport)
     return () => {
+      resetPanelViewportInlineRef.current = () => {}
       syncPanelViewportRef.current = () => {}
       if (viewportDebounceRef.current) {
         window.cancelAnimationFrame(viewportDebounceRef.current)
@@ -1791,6 +1794,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   }
 
   const closeChat = () => {
+    // Clear mobile/fullscreen inline viewport styles immediately so the
+    // launcher returns to its anchored floating position on this same tick.
+    resetPanelViewportInlineRef.current()
     setOpen(false)
     setSuggestPickerGroup(null)
     setGuestMenuOpen(false)
