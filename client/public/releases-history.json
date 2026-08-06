@@ -1,0 +1,221 @@
+{
+  "updatedAt": "2026-08-03T10:23:43.809Z",
+  "releases": [
+    {
+      "version": "msd2luto-1pwke7",
+      "notes": "チャットヘッダー修正：夏まつりバナーの重なりを解消、オンライン／オフライン文字を削除（アバターの点のみ）。",
+      "builtAt": "2026-08-03T10:13:27.861Z",
+      "previousVersion": "msd1yskm-020kct",
+      "previousHostingVersionId": "f1a1edc10e9c5204",
+      "hostingVersionId": "69b2d098a546b73f",
+      "recordedAt": "2026-08-03T10:13:33.906Z"
+    },
+    {
+      "version": "msd1yskm-020kct",
+      "notes": "チャットヘッダー修正：夏まつりバナーの重なりを解消、オンライン／オフライン文字を削除（アバターの点のみ）。",
+      "builtAt": "2026-08-03T09:55:00.379Z",
+      "previousVersion": "msd14abm-g7ycmw",
+      "previousHostingVersionId": "7cb3b184327137a5",
+      "hostingVersionId": "f1a1edc10e9c5204",
+      "recordedAt": "2026-08-03T09:55:01.440Z"
+    },
+    {
+      "version": "msd14abm-g7ycmw",
+      "notes": "夏テーマ前面表示・HanaChat夏まつり装飾の本番反映。",
+      "builtAt": "2026-08-03T09:31:13.954Z",
+      "previousVersion": "msd08kgf-1texvf",
+      "previousHostingVersionId": "f314351ce749a051",
+      "hostingVersionId": "7cb3b184327137a5",
+      "recordedAt": "2026-08-03T09:31:15.850Z"
+    },
+    {
+      "version": "msd08kgf-1texvf",
+      "notes": "夏テーマ：花火・金魚・灯籠を前面表示（UIの上）。HanaChat内にも盆・提灯・ほたるを追加。",
+      "builtAt": "2026-08-03T09:06:25.046Z",
+      "previousVersion": "msclni2y-2ni606",
+      "previousHostingVersionId": "17c6117142f6a25b",
+      "hostingVersionId": "f314351ce749a051",
+      "recordedAt": "2026-08-03T09:06:27.042Z"
+    },
+    {
+      "version": "msclni2y-2ni606",
+      "notes": "夏テーマ強化：花火を菊・柳・牡丹風に、盆灯籠・ほたる・提灯・風鈴・金魚・朝顔をサイト全体に。",
+      "builtAt": "2026-08-03T02:18:39.476Z",
+      "previousVersion": "msckm1yd-2j4gtc",
+      "previousHostingVersionId": "7935b80c8a335bbf",
+      "hostingVersionId": "17c6117142f6a25b",
+      "recordedAt": "2026-08-03T02:18:50.562Z"
+    },
+    {
+      "version": "msckm1yd-2j4gtc",
+      "notes": "夏テーマ強化：花火を菊・柳・牡丹風に、盆灯籠・ほたる・提灯・風鈴・金魚・朝顔をサイト全体に。",
+      "builtAt": "2026-08-03T01:49:08.257Z",
+      "previousVersion": "mscilk6c-8s17f8",
+      "previousHostingVersionId": "d801d786b466d8f4",
+      "hostingVersionId": "7935b80c8a335bbf",
+      "recordedAt": "2026-08-03T01:49:14.041Z"
+    },
+    {
+      "version": "mscilk6c-8s17f8",
+      "notes": "読書・チャット修正を本番反映（ページ撮影翻訳、送信順・新着bubble）。",
+      "builtAt": "2026-08-03T00:52:48.642Z",
+      "previousVersion": "msc1x274-fsteo4",
+      "previousHostingVersionId": "114448809fc46f19",
+      "hostingVersionId": "d801d786b466d8f4",
+      "recordedAt": "2026-08-03T00:53:02.876Z"
+    },
+    {
+      "version": "msc1x274-fsteo4",
+      "notes": "読書：ページを画面キャプチャしてOCR翻訳（ベトナム語＋ひらがな）。スキャンPDFでも動くように変更。",
+      "builtAt": "2026-08-02T17:05:57.059Z",
+      "previousVersion": "msc0b1p6-3su6nh",
+      "previousHostingVersionId": "a8778b02a8938831",
+      "hostingVersionId": "114448809fc46f19",
+      "recordedAt": "2026-08-02T17:06:01.040Z"
+    },
+    {
+      "version": "msc0b1p6-3su6nh",
+      "notes": "チャット：送信順の安定化（createdAtIso / clientId）と、新着メッセージが bubble から消える不具合を修正（最新300件を orderBy で取得）。",
+      "builtAt": "2026-08-02T16:20:30.584Z",
+      "previousVersion": "msbyxa2h-o2m5pt",
+      "previousHostingVersionId": "993822213afd8a87",
+      "hostingVersionId": "a8778b02a8938831",
+      "recordedAt": "2026-08-02T16:20:31.167Z"
+    },
+    {
+      "version": "msbyxa2h-o2m5pt",
+      "notes": "読書室の「この頁を解析」が画面外に隠れて見えない問題を修正しました。\n\n- 解析パネルを本の上に重ねて表示\n- 解析中スピナーを追加\n- ページめくり速度の調整も含む",
+      "builtAt": "2026-08-02T15:41:47.594Z",
+      "previousVersion": "msbx4f69-18gnon",
+      "previousHostingVersionId": "9ec0698eb0655955",
+      "hostingVersionId": "993822213afd8a87",
+      "recordedAt": "2026-08-02T15:41:48.324Z"
+    },
+    {
+      "version": "msbx4f69-18gnon",
+      "notes": "読書室のはな専用頁解析（ベトナム語訳＋ひらがな読み）を再ビルドして配信しました。",
+      "builtAt": "2026-08-02T14:52:17.321Z",
+      "previousVersion": "msbw3049-49ruti",
+      "previousHostingVersionId": "37a1049f62148afe",
+      "hostingVersionId": "9ec0698eb0655955",
+      "recordedAt": "2026-08-02T14:52:25.749Z"
+    },
+    {
+      "version": "msbw3049-49ruti",
+      "notes": "読書室にはな専用の頁解析を追加しました。\n\n- オーナーだけ「この頁を解析」が表示されます\n- ページ本文からベトナム語訳＋ひらがな読みを表示\n- スキャンPDFで文字が取れない場合は案内を表示\n- 同じ頁の結果は端末にキャッシュします",
+      "builtAt": "2026-08-02T14:22:16.351Z",
+      "previousVersion": "msbva3ut-id00fb",
+      "previousHostingVersionId": "21a6b338bce28bb1",
+      "hostingVersionId": "37a1049f62148afe",
+      "recordedAt": "2026-08-02T14:22:16.852Z"
+    },
+    {
+      "version": "msbva3ut-id00fb",
+      "notes": "最新版を再ビルドして配信しました（チャット未読バッジ・プッシュ通知修復を含む）。",
+      "builtAt": "2026-08-02T13:59:46.511Z",
+      "previousVersion": "msbv4tpu-lp6x0u",
+      "previousHostingVersionId": "728db4712684a371",
+      "hostingVersionId": "21a6b338bce28bb1",
+      "recordedAt": "2026-08-02T13:59:46.852Z"
+    },
+    {
+      "version": "msbv4tpu-lp6x0u",
+      "notes": "チャット未読バッジ（FABの赤い数字）を修復しました。\n\n- バッジが丸ボタンに欠けて見えない問題を修正\n- 未読数の集計を安定化\n- ホーム画面バッジが一時的に消えるレースを防止",
+      "builtAt": "2026-08-02T13:55:41.213Z",
+      "previousVersion": "msbul3k3-alv7le",
+      "previousHostingVersionId": "a10bbce44b2dcabe",
+      "hostingVersionId": "728db4712684a371",
+      "recordedAt": "2026-08-02T13:55:41.988Z"
+    },
+    {
+      "version": "msbul3k3-alv7le",
+      "notes": "現行の修正を再ビルドして配信しました。\n\n- チャットヘッダーのオンライン／オフライン文字を削除（アバターの点のみ）\n- プッシュ通知のトークン紐付け・許可・バナープレビュー修復を含む最新版",
+      "builtAt": "2026-08-02T13:40:19.381Z",
+      "previousVersion": "msbu9yzi-hu47m9",
+      "previousHostingVersionId": "de2e668c0ce763a7",
+      "hostingVersionId": "a10bbce44b2dcabe",
+      "recordedAt": "2026-08-02T13:40:19.708Z"
+    },
+    {
+      "version": "msbu9yzi-hu47m9",
+      "notes": "チャットのプッシュ通知を修復しました。\n\n- 通知トークンをアカウントキー（hana / ゲストkey）で保存するよう修正（パスワードと不一致だった）\n- ログイン時に通知許可を再リクエスト\n- チャット設定に「プッシュ通知」トグルを追加\n- バナーにメッセージ本文プレビューを確実に表示\n- 未読バッジ（ホーム画面）を再接続",
+      "builtAt": "2026-08-02T13:31:39.894Z",
+      "previousVersion": "msbs2wyp-jzyhll",
+      "previousHostingVersionId": "0da3a13b3c030d5e",
+      "hostingVersionId": "de2e668c0ce763a7",
+      "recordedAt": "2026-08-02T13:31:40.196Z"
+    },
+    {
+      "version": "msbs2wyp-jzyhll",
+      "notes": "チャットヘッダーのレイアウト崩れを修正しました。\n\n- 「オフライン」が縦書きになっていた問題を解消（nowrap）\n- 「はなちゃんに戻る」をタイトル下へ移し、通話ボタンとの圧迫を解消\n- ヘッダー中央カラムが潰れないようグリッドを調整",
+      "builtAt": "2026-08-02T12:30:19.048Z",
+      "previousVersion": "msbrqbde-rkgcct",
+      "previousHostingVersionId": "8ac43ffd03d2ac30",
+      "hostingVersionId": "0da3a13b3c030d5e",
+      "recordedAt": "2026-08-02T12:30:20.957Z"
+    },
+    {
+      "version": "msbrqbde-rkgcct",
+      "notes": "チャットヘッダーのレイアウト崩れを修正しました。\n\n- 「オフライン」が縦書きになっていた問題を解消（nowrap）\n- 「はなちゃんに戻る」をタイトル下へ移し、通話ボタンとの圧迫を解消\n- ヘッダー中央カラムが潰れないようグリッドを調整",
+      "builtAt": "2026-08-02T12:20:27.251Z",
+      "previousVersion": "msbokad4-zauss3",
+      "previousHostingVersionId": "9dfc0caf63b8c0be",
+      "hostingVersionId": "8ac43ffd03d2ac30",
+      "recordedAt": "2026-08-02T12:20:28.786Z"
+    },
+    {
+      "version": "msbokad4-zauss3",
+      "notes": "夏テーマをサイト全体に拡張。\n- ログイン以外のトップバー／カード／リスト／チャットUIも花火カラーに統一\n- 画面全体に花火バーストと提灯のアニメーション雰囲気を追加\n- 文言テキストは変更しない（UIのみ）",
+      "builtAt": "2026-08-02T10:51:46.613Z",
+      "previousVersion": "msbmrzqc-kyi46z",
+      "previousHostingVersionId": "6a6cadbef9bc1898",
+      "hostingVersionId": "9dfc0caf63b8c0be",
+      "recordedAt": "2026-08-02T10:51:47.969Z"
+    },
+    {
+      "version": "msbmrzqc-kyi46z",
+      "notes": "チャット bubble のリンク検出を復元。\r\n- URL をタップで開く\r\n- 長押し / 右クリックでリンクをコピー\r\n- HanaChat 側で renderChatTextWithLinks が外れていた不具合を修正",
+      "builtAt": "2026-08-02T10:01:44.917Z",
+      "previousVersion": "msbmm607-fi85w8",
+      "previousHostingVersionId": "61b3163bc2c899b8",
+      "hostingVersionId": "6a6cadbef9bc1898",
+      "recordedAt": "2026-08-02T10:01:45.458Z"
+    },
+    {
+      "version": "msbmm607-fi85w8",
+      "notes": "release-notes.txt",
+      "builtAt": "2026-08-02T09:57:17.040Z",
+      "previousVersion": "msbmhm2c-r14bpt",
+      "previousHostingVersionId": "a3484a6801c89403",
+      "hostingVersionId": "61b3163bc2c899b8",
+      "recordedAt": "2026-08-02T09:57:18.441Z"
+    },
+    {
+      "version": "msbmhm2c-r14bpt",
+      "notes": "release-notes.txt",
+      "builtAt": "2026-08-02T09:53:46.768Z",
+      "previousVersion": "msbm3m82-3p5h6d",
+      "previousHostingVersionId": "acf0b1253f685d28",
+      "hostingVersionId": "e5c265e448af00b1",
+      "recordedAt": "2026-08-02T09:53:49.614Z"
+    },
+    {
+      "version": "msbm3m82-3p5h6d",
+      "notes": "チャット bubble のリンク検出を復元（タップで開く・長押しでコピー）",
+      "builtAt": "2026-08-02T09:42:51.796Z",
+      "previousVersion": "msbkkyj5-l192dq",
+      "previousHostingVersionId": "ceac000249ad213d",
+      "hostingVersionId": "acf0b1253f685d28",
+      "recordedAt": "2026-08-02T09:42:52.647Z"
+    },
+    {
+      "version": "msbch60d-mle4sf",
+      "notes": "ロールバック手順とAdminリリースノート（履歴・直前版への復帰）を追加",
+      "builtAt": "2026-08-02T05:13:37.219Z",
+      "previousVersion": "msbavj9k-rjzd0s",
+      "previousHostingVersionId": null,
+      "hostingVersionId": null,
+      "recordedAt": "2026-08-02T05:13:42.513Z"
+    }
+  ]
+}

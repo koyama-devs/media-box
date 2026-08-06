@@ -3,12 +3,12 @@ import { useEffect, useState } from 'react'
 /**
  * Owner-only private assist card under a guest bubble.
  * Never synced to Firestore — guests never see this UI.
+ * Shows Vietnamese translation + hiragana reading only (no reply suggestions).
  */
 export default function OwnerMessageAssist({
   assist,
   collapsed = false,
   onRetry,
-  onUseReply,
 }) {
   const [expanded, setExpanded] = useState(false)
 
@@ -42,7 +42,7 @@ export default function OwnerMessageAssist({
   if (status === 'loading') {
     return (
       <div className="hana-owner-assist is-loading" data-no-bubble-press="true">
-        <p className="hana-owner-assist-status">ベトナム語訳・読み・返信案を準備中…</p>
+        <p className="hana-owner-assist-status">ベトナム語訳・読みを準備中…</p>
       </div>
     )
   }
@@ -62,8 +62,6 @@ export default function OwnerMessageAssist({
       </div>
     )
   }
-
-  const replies = Array.isArray(assist.replies) ? assist.replies : []
 
   return (
     <div className="hana-owner-assist" data-no-bubble-press="true" aria-label="はな専用メモ">
@@ -97,35 +95,6 @@ export default function OwnerMessageAssist({
           <p className="hana-owner-assist-text is-reading">{assist.readingHiragana}</p>
         </div>
       ) : null}
-
-      {replies.length ? (
-        <div className="hana-owner-assist-block">
-          <div className="hana-owner-assist-block-head">
-            <strong>返信案</strong>
-          </div>
-          <ul className="hana-owner-assist-replies">
-            {replies.map((reply, index) => (
-              <li key={`assist-reply-${index}`}>
-                <div className="hana-owner-assist-reply-line">
-                  <span className="hana-owner-assist-lang">JP</span>
-                  <p>{reply.ja}</p>
-                  {onUseReply ? (
-                    <div className="hana-owner-assist-actions">
-                      <button type="button" onClick={() => onUseReply(reply.ja)}>使う</button>
-                    </div>
-                  ) : null}
-                </div>
-                {reply.vi ? (
-                  <div className="hana-owner-assist-reply-line is-vi">
-                    <span className="hana-owner-assist-lang">VI</span>
-                    <p>{reply.vi}</p>
-                  </div>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
     </div>
   )
 }
@@ -135,6 +104,17 @@ export default function OwnerMessageAssist({
  * bubble). Stickers / images in between do not break the streak. Caps the
  * batch so opening a long thread cannot flood the Gemini quota.
  */
+/** Debounce while a guest is still sending a burst of bubbles. */
+export const OWNER_ASSIST_BURST_DEBOUNCE_MS = 1500
+
+/** Join consecutive guest texts for one Gemini pass. */
+export function buildOwnerAssistCombinedText(messages) {
+  return (Array.isArray(messages) ? messages : [])
+    .map((item) => String(item?.rawText || item?.text || '').trim())
+    .filter(Boolean)
+    .join('\n')
+}
+
 export function collectUnansweredOwnerAssistMessages(messages, { isAssistable, max = 8 } = {}) {
   const list = Array.isArray(messages) ? messages : []
   const streak = []

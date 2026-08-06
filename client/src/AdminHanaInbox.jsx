@@ -7,9 +7,13 @@ import FlowerRainLayer, { CHAT_PARTY_REACTION } from './FlowerRain'
 import HanaCall from './HanaCall'
 import HanaSticker, { isHanaSticker } from './HanaStickers'
 import OwnerMessageAssist, {
+    buildOwnerAssistCombinedText,
     collectUnansweredOwnerAssistMessages,
+    OWNER_ASSIST_BURST_DEBOUNCE_MS,
     ownerAssistShouldCollapse,
 } from './OwnerMessageAssist'
+import { renderChatTextWithLinks } from './chatLinkify'
+import { getAvatarPresetSrc } from './avatarPresets'
 import hanachanArt from './assets/hanachan.svg'
 import {
     addChatReminder,
@@ -27,6 +31,8 @@ import {
     ensureChatThread,
     ensureDefaultChatAccounts,
     formatChatTimestamp,
+    formatChatFileSize,
+    getChatMessageAttachment,
     getFirebaseErrorMessage,
     getMessageDeliveryStatus,
     listGuestProfiles,
@@ -38,6 +44,9 @@ import {
     resolveChatPresence,
     sendChatMessage,
     subscribeChatAccounts,
+    subscribeChatAppSettings,
+    messageEditWindowMsFromMinutes,
+    DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
     subscribeChatMessages,
     subscribeChatProfiles,
     subscribeChatThreads,
@@ -45,6 +54,12 @@ import {
     translateChatMessage,
     updateChatMessage,
     upsertChatAccount,
+    setGuestPlaylistAccess,
+    setGuestAlbumAccess,
+    setAccountActiveState,
+    isProtectedOwnerAccount,
+    subscribeToSharedPlaylists,
+    subscribeToSharedPhotoAlbums,
 } from './firebase'
 import './hana-chat.css'
 
@@ -54,6 +69,10 @@ const EMPTY_ACCOUNT_FORM = {
   displayName: '',
   addressAs: '',
   role: 'guest',
+  /** null = every playlist; string[] = only those ids */
+  allowedPlaylistIds: null,
+  /** null = every album; string[] = only those ids */
+  allowedAlbumIds: null,
 }
 
 const OWNER_ASSIST_CACHE_LIMIT = 40
@@ -61,7 +80,7 @@ const OWNER_ASSIST_CACHE_LIMIT = 40
 function isOwnerAssistableGuestMessage(message) {
   if (!message || message.deleted) return false
   if (message.sender !== 'guest') return false
-  if (message.sticker || message.imageUrl || message.effect) return false
+  if (message.sticker || message.imageUrl || message.fileUrl || message.effect) return false
   return Boolean(String(message.rawText || message.text || '').trim())
 }
 
@@ -74,6 +93,9 @@ function isOwnerAssistableGuestMessage(message) {
 export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOpenChat }) {
   const [threads, setThreads] = useState([])
   const [chatAccounts, setChatAccounts] = useState([])
+  const [editWindowMs, setEditWindowMs] = useState(
+    () => messageEditWindowMsFromMinutes(DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES),
+  )
   const [activeId, setActiveId] = useState(null)
   const [messages, setMessages] = useState([])
   const [draft, setDraft] = useState('')
@@ -87,6 +109,7 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
   const [chatProfiles, setChatProfiles] = useState({})
   const [translations, setTranslations] = useState({})
   const [ownerAssist, setOwnerAssist] = useState({})
+  const [ownerAssistEnabled, setOwnerAssistEnabled] = useState(true)
   const [remindMessage, setRemindMessage] = useState(null)
   const [previewImage, setPreviewImage] = useState(null)
   const [defaultReaction] = useState(() => readDefaultReaction())
@@ -94,11 +117,18 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
   const [editingAccountKey, setEditingAccountKey] = useState(null)
   const [accountFormOpen, setAccountFormOpen] = useState(false)
   const [accountBusy, setAccountBusy] = useState(false)
+  const [sharedPlaylists, setSharedPlaylists] = useState([])
+  const [playlistAccessBusyKey, setPlaylistAccessBusyKey] = useState('')
+  const [sharedAlbums, setSharedAlbums] = useState([])
+  const [albumAccessBusyKey, setAlbumAccessBusyKey] = useState('')
   const listRef = useRef(null)
   const ownerAssistBaselineRef = useRef('')
   const ownerAssistSeenRef = useRef(new Set())
   const ownerAssistOpenedAtRef = useRef(0)
   const ownerAssistSeedRef = useRef('')
+  const ownerAssistDebounceRef = useRef(0)
+  const ownerAssistReqRef = useRef(0)
+  const messagesRef = useRef([])
 
   useEffect(() => {
     return subscribeChatThreads(
@@ -115,6 +145,20 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
     return subscribeChatAccounts(
       (next) => setChatAccounts(next || []),
       (err) => setError(getFirebaseErrorMessage(err) || 'ユーザー一覧の読み込みに失敗しました。'),
+    )
+  }, [])
+
+  useEffect(() => {
+    return subscribeToSharedPlaylists(
+      (next) => setSharedPlaylists(Array.isArray(next) ? next : []),
+      () => {},
+    )
+  }, [])
+
+  useEffect(() => {
+    return subscribeToSharedPhotoAlbums(
+      (next) => setSharedAlbums(Array.isArray(next) ? next : []),
+      () => {},
     )
   }, [])
 
@@ -219,11 +263,12 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
 
   const startCreateAccount = (role = 'guest') => {
     setEditingAccountKey(null)
-    setAccountForm({ ...EMPTY_ACCOUNT_FORM, role })
+    setAccountForm({ ...EMPTY_ACCOUNT_FORM, role, allowedPlaylistIds: null, allowedAlbumIds: null })
     setAccountFormOpen(true)
   }
 
   const startEditAccount = (profile) => {
+    const live = chatAccounts.find((item) => item.key === profile.key) || profile
     setEditingAccountKey(profile.key)
     setAccountForm({
       key: profile.key,
@@ -231,8 +276,158 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
       displayName: profile.displayName || '',
       addressAs: profile.addressAs || profile.displayName || '',
       role: profile.role === 'owner' ? 'owner' : 'guest',
+      allowedPlaylistIds: live.role === 'guest'
+        ? (Object.prototype.hasOwnProperty.call(live, 'allowedPlaylistIds')
+          ? live.allowedPlaylistIds
+          : null)
+        : null,
+      allowedAlbumIds: live.role === 'guest'
+        ? (Object.prototype.hasOwnProperty.call(live, 'allowedAlbumIds')
+          ? live.allowedAlbumIds
+          : null)
+        : null,
     })
     setAccountFormOpen(true)
+  }
+
+  const formAllowsPlaylist = (playlistId) => {
+    if (accountForm.role !== 'guest') return true
+    if (accountForm.allowedPlaylistIds == null) return true
+    return accountForm.allowedPlaylistIds.includes(playlistId)
+  }
+
+  const toggleFormPlaylist = (playlistId) => {
+    setAccountForm((prev) => {
+      if (prev.role !== 'guest') return prev
+      const allIds = sharedPlaylists.map((item) => item.id)
+      const current = prev.allowedPlaylistIds == null ? allIds : prev.allowedPlaylistIds
+      const nextSet = new Set(current)
+      if (nextSet.has(playlistId)) nextSet.delete(playlistId)
+      else nextSet.add(playlistId)
+      const next = allIds.filter((id) => nextSet.has(id))
+      return {
+        ...prev,
+        allowedPlaylistIds: next.length === allIds.length ? null : next,
+      }
+    })
+  }
+
+  const setFormPlaylistAccessAll = (allowAll) => {
+    setAccountForm((prev) => ({
+      ...prev,
+      allowedPlaylistIds: allowAll ? null : [],
+    }))
+  }
+
+  const guestAllowsPlaylist = (guest, playlistId) => {
+    if (!guest || guest.role !== 'guest') return true
+    if (guest.allowedPlaylistIds == null) return true
+    return guest.allowedPlaylistIds.includes(playlistId)
+  }
+
+  const handleMatrixToggle = async (guest, playlistId) => {
+    if (!guest?.key || playlistAccessBusyKey) return
+    const allIds = sharedPlaylists.map((item) => item.id)
+    const current = guest.allowedPlaylistIds == null ? allIds : [...guest.allowedPlaylistIds]
+    const nextSet = new Set(current)
+    if (nextSet.has(playlistId)) nextSet.delete(playlistId)
+    else nextSet.add(playlistId)
+    const next = allIds.filter((id) => nextSet.has(id))
+    const allowedPlaylistIds = next.length === allIds.length ? null : next
+    setPlaylistAccessBusyKey(`${guest.key}:${playlistId}`)
+    setError('')
+    try {
+      await setGuestPlaylistAccess(guest.key, allowedPlaylistIds)
+      setStatusNote(`${guest.displayName}のプレイリスト権限を更新しました。`)
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || err?.message || '権限の更新に失敗しました。')
+    } finally {
+      setPlaylistAccessBusyKey('')
+    }
+  }
+
+  const handleMatrixSetRow = async (guest, allowAll) => {
+    if (!guest?.key || playlistAccessBusyKey) return
+    setPlaylistAccessBusyKey(`${guest.key}:row`)
+    setError('')
+    try {
+      await setGuestPlaylistAccess(guest.key, allowAll ? null : [])
+      setStatusNote(`${guest.displayName}のプレイリスト権限を更新しました。`)
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || err?.message || '権限の更新に失敗しました。')
+    } finally {
+      setPlaylistAccessBusyKey('')
+    }
+  }
+
+  const formAllowsAlbum = (albumId) => {
+    if (accountForm.role !== 'guest') return true
+    if (accountForm.allowedAlbumIds == null) return true
+    return accountForm.allowedAlbumIds.includes(albumId)
+  }
+
+  const toggleFormAlbum = (albumId) => {
+    setAccountForm((prev) => {
+      if (prev.role !== 'guest') return prev
+      const allIds = sharedAlbums.map((item) => item.id)
+      const current = prev.allowedAlbumIds == null ? allIds : prev.allowedAlbumIds
+      const nextSet = new Set(current)
+      if (nextSet.has(albumId)) nextSet.delete(albumId)
+      else nextSet.add(albumId)
+      const next = allIds.filter((id) => nextSet.has(id))
+      return {
+        ...prev,
+        allowedAlbumIds: next.length === allIds.length ? null : next,
+      }
+    })
+  }
+
+  const setFormAlbumAccessAll = (allowAll) => {
+    setAccountForm((prev) => ({
+      ...prev,
+      allowedAlbumIds: allowAll ? null : [],
+    }))
+  }
+
+  const guestAllowsAlbum = (guest, albumId) => {
+    if (!guest || guest.role !== 'guest') return true
+    if (guest.allowedAlbumIds == null) return true
+    return guest.allowedAlbumIds.includes(albumId)
+  }
+
+  const handleAlbumMatrixToggle = async (guest, albumId) => {
+    if (!guest?.key || albumAccessBusyKey) return
+    const allIds = sharedAlbums.map((item) => item.id)
+    const current = guest.allowedAlbumIds == null ? allIds : [...guest.allowedAlbumIds]
+    const nextSet = new Set(current)
+    if (nextSet.has(albumId)) nextSet.delete(albumId)
+    else nextSet.add(albumId)
+    const next = allIds.filter((id) => nextSet.has(id))
+    const allowedAlbumIds = next.length === allIds.length ? null : next
+    setAlbumAccessBusyKey(`${guest.key}:${albumId}`)
+    setError('')
+    try {
+      await setGuestAlbumAccess(guest.key, allowedAlbumIds)
+      setStatusNote(`${guest.displayName}のフォトアルバム権限を更新しました。`)
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || err?.message || '権限の更新に失敗しました。')
+    } finally {
+      setAlbumAccessBusyKey('')
+    }
+  }
+
+  const handleAlbumMatrixSetRow = async (guest, allowAll) => {
+    if (!guest?.key || albumAccessBusyKey) return
+    setAlbumAccessBusyKey(`${guest.key}:row`)
+    setError('')
+    try {
+      await setGuestAlbumAccess(guest.key, allowAll ? null : [])
+      setStatusNote(`${guest.displayName}のフォトアルバム権限を更新しました。`)
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || err?.message || '権限の更新に失敗しました。')
+    } finally {
+      setAlbumAccessBusyKey('')
+    }
   }
 
   const handleSaveAccount = async (event) => {
@@ -247,6 +442,12 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
         displayName: accountForm.displayName,
         addressAs: accountForm.addressAs,
         role: accountForm.role,
+        ...(accountForm.role === 'guest'
+          ? {
+            allowedPlaylistIds: accountForm.allowedPlaylistIds,
+            allowedAlbumIds: accountForm.allowedAlbumIds,
+          }
+          : {}),
       }, { isNew: !editingAccountKey })
       setStatusNote(`${saved.displayName}を保存しました。`)
       resetAccountForm()
@@ -255,6 +456,51 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
     } finally {
       setAccountBusy(false)
     }
+  }
+
+  const handleToggleAccountActive = async (profile) => {
+    if (!profile?.key || isProtectedOwnerAccount(profile.key)) return
+    const live = chatAccounts.find((item) => item.key === profile.key) || profile
+    const nextActive = live.accountActive === false
+    const label = live.displayName || live.key
+    const ok = window.confirm(
+      nextActive
+        ? `「${label}」を再開しますか？`
+        : `「${label}」を停止しますか？停止中はログインできません。`,
+    )
+    if (!ok) return
+    setAccountBusy(true)
+    setError('')
+    setStatusNote('')
+    try {
+      await setAccountActiveState(live.key, nextActive, { by: 'admin' })
+      setStatusNote(nextActive ? `${label}を再開しました。` : `${label}を停止しました。`)
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || err?.message || '状態の更新に失敗しました。')
+    } finally {
+      setAccountBusy(false)
+    }
+  }
+
+  const resolveLiveAccount = (profile) => (
+    chatAccounts.find((item) => item.key === profile.key) || profile
+  )
+
+  const accountStatusBadge = (profile) => {
+    const live = resolveLiveAccount(profile)
+    if (isProtectedOwnerAccount(live.key)) {
+      return <span className="admin-badge admin-badge--ok">保護</span>
+    }
+    if (live.accountActive === false) {
+      return <span className="admin-badge admin-badge--warn">停止中</span>
+    }
+    return <span className="admin-badge admin-badge--ok">有効</span>
+  }
+
+  const accountLastAccessLabel = (profile) => {
+    const live = resolveLiveAccount(profile)
+    if (!live.lastAccessAt) return '最終アクセス: —'
+    return `最終アクセス: ${formatChatTimestamp(live.lastAccessAt)}`
   }
 
   const handleDeleteAccount = async (profile) => {
@@ -304,27 +550,35 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
     return known?.displayName || activeThread?.guestLabel || 'ゲスト'
   }, [activeId, activeThread, guestRoster])
 
-  const requestOwnerAssist = useCallback(async (message, { force = false } = {}) => {
-    if (!message?.id) return
-    const text = String(message.rawText || message.text || '').trim()
+  messagesRef.current = messages
+
+  const requestOwnerAssist = useCallback(async (message, { force = false, batch = null } = {}) => {
+    if (!ownerAssistEnabled || !message?.id) return
+    const batchMessages = (Array.isArray(batch) && batch.length > 0)
+      ? batch.filter(Boolean)
+      : [message]
+    const target = batchMessages[batchMessages.length - 1] || message
+    if (!target?.id) return
+    const text = buildOwnerAssistCombinedText(batchMessages)
     if (!text) return
 
     let shouldSkip = false
     setOwnerAssist((prev) => {
-      const current = prev[message.id]
+      const current = prev[target.id]
       if (!force && (current?.status === 'loading' || current?.status === 'ready')) {
         shouldSkip = true
         return prev
       }
-      const next = {
-        ...prev,
-        [message.id]: {
-          status: 'loading',
-          translationVi: '',
-          readingHiragana: '',
-          replies: [],
-          reason: null,
-        },
+      const next = { ...prev }
+      for (const item of batchMessages.slice(0, -1)) {
+        if (item?.id) delete next[item.id]
+      }
+      next[target.id] = {
+        status: 'loading',
+        translationVi: '',
+        readingHiragana: '',
+        replies: [],
+        reason: null,
       }
       const keys = Object.keys(next)
       if (keys.length <= OWNER_ASSIST_CACHE_LIMIT) return next
@@ -336,8 +590,10 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
     })
     if (shouldSkip) return
 
-    const index = messages.findIndex((item) => item.id === message.id)
-    const historySource = (index >= 0 ? messages.slice(0, index) : messages)
+    const reqId = ++ownerAssistReqRef.current
+    const firstId = batchMessages[0]?.id
+    const firstIndex = messages.findIndex((item) => item.id === firstId)
+    const historySource = (firstIndex >= 0 ? messages.slice(0, firstIndex) : messages)
       .filter((item) => !item.deleted && String(item.text || '').trim())
       .slice(-8)
       .map((item) => ({
@@ -351,21 +607,28 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
         guestName: activeGuestName,
         history: historySource,
       })
-      const ok = Boolean(data.translationVi || data.readingHiragana || data.replies?.length)
-      setOwnerAssist((prev) => ({
-        ...prev,
-        [message.id]: {
+      if (reqId !== ownerAssistReqRef.current && !force) return
+      const ok = Boolean(data.translationVi || data.readingHiragana)
+      setOwnerAssist((prev) => {
+        const next = { ...prev }
+        for (const item of batchMessages.slice(0, -1)) {
+          if (item?.id) delete next[item.id]
+        }
+        next[target.id] = {
           status: ok ? 'ready' : 'error',
           translationVi: data.translationVi || '',
           readingHiragana: data.readingHiragana || '',
-          replies: Array.isArray(data.replies) ? data.replies : [],
+          replies: [],
           reason: data.reason || (ok ? null : 'empty'),
-        },
-      }))
+          sourceText: text,
+        }
+        return next
+      })
     } catch {
+      if (reqId !== ownerAssistReqRef.current && !force) return
       setOwnerAssist((prev) => ({
         ...prev,
-        [message.id]: {
+        [target.id]: {
           status: 'error',
           translationVi: '',
           readingHiragana: '',
@@ -374,16 +637,17 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
         },
       }))
     }
-  }, [activeGuestName, messages])
+  }, [ownerAssistEnabled, activeGuestName, messages])
 
-  // Analyze only messages that arrive after the thread was opened, so a late
-  // snapshot cannot make the whole history look new and flood the API.
+  // One combined はな専用 card for the unanswered guest streak (debounced bursts).
   useEffect(() => {
-    if (!activeId) {
+    if (!activeId || !ownerAssistEnabled) {
       ownerAssistBaselineRef.current = ''
       ownerAssistSeenRef.current = new Set()
       ownerAssistOpenedAtRef.current = 0
       ownerAssistSeedRef.current = ''
+      window.clearTimeout(ownerAssistDebounceRef.current)
+      if (!ownerAssistEnabled) setOwnerAssist({})
       return undefined
     }
 
@@ -392,22 +656,18 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
       ownerAssistSeenRef.current = new Set()
       ownerAssistOpenedAtRef.current = Date.now()
       ownerAssistSeedRef.current = ''
+      window.clearTimeout(ownerAssistDebounceRef.current)
     }
 
-    // Seed every consecutive unanswered guest text (not only the latest), so a
-    // burst of messages waiting for a reply all get translation cards on open.
     if (ownerAssistSeedRef.current !== activeId && messages.length) {
       ownerAssistSeedRef.current = activeId
-      const pending = collectUnansweredOwnerAssistMessages(messages, {
+      const streak = collectUnansweredOwnerAssistMessages(messages, {
         isAssistable: isOwnerAssistableGuestMessage,
         max: 8,
-      }).filter((item) => !ownerAssistSeenRef.current.has(item.id))
-      pending.forEach((item) => ownerAssistSeenRef.current.add(item.id))
-      void (async () => {
-        for (const item of pending) {
-          await requestOwnerAssist(item)
-        }
-      })()
+      })
+      streak.forEach((item) => ownerAssistSeenRef.current.add(item.id))
+      const last = streak[streak.length - 1]
+      if (last) void requestOwnerAssist(last, { force: true, batch: streak })
     }
 
     const openedAt = ownerAssistOpenedAtRef.current
@@ -417,12 +677,45 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
       const createdAt = Date.parse(item.createdAt || '')
       return Number.isFinite(createdAt) && createdAt >= openedAt
     })
-    newcomers.forEach((item) => {
-      ownerAssistSeenRef.current.add(item.id)
-      void requestOwnerAssist(item)
-    })
-    return undefined
-  }, [activeId, messages, requestOwnerAssist])
+    if (newcomers.length) {
+      newcomers.forEach((item) => ownerAssistSeenRef.current.add(item.id))
+      const previewStreak = collectUnansweredOwnerAssistMessages(messages, {
+        isAssistable: isOwnerAssistableGuestMessage,
+        max: 8,
+      })
+      const previewLast = previewStreak[previewStreak.length - 1]
+      if (previewLast) {
+        setOwnerAssist((prev) => {
+          const next = { ...prev }
+          for (const item of previewStreak.slice(0, -1)) {
+            if (item?.id) delete next[item.id]
+          }
+          next[previewLast.id] = {
+            status: 'loading',
+            translationVi: '',
+            readingHiragana: '',
+            replies: [],
+            reason: null,
+          }
+          return next
+        })
+      }
+      window.clearTimeout(ownerAssistDebounceRef.current)
+      ownerAssistDebounceRef.current = window.setTimeout(() => {
+        const streak = collectUnansweredOwnerAssistMessages(messagesRef.current, {
+          isAssistable: isOwnerAssistableGuestMessage,
+          max: 8,
+        })
+        const last = streak[streak.length - 1]
+        if (!last) return
+        void requestOwnerAssist(last, { force: true, batch: streak })
+      }, OWNER_ASSIST_BURST_DEBOUNCE_MS)
+    }
+
+    return () => {
+      window.clearTimeout(ownerAssistDebounceRef.current)
+    }
+  }, [activeId, ownerAssistEnabled, messages, requestOwnerAssist])
 
   const clearComposerExtras = () => {
     setReplyTo(null)
@@ -434,7 +727,14 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
   const avatarSrcForProfile = (profileId, displayName) => {
     const id = String(profileId || '').trim().toLowerCase() || 'guest'
     const fallback = id === OWNER_PROFILE.key || id === 'hana' ? hanachanArt : ''
-    return resolveAvatarSrc(id, displayName || id, chatProfiles[id]?.avatarUrl || '', fallback)
+    const profile = chatProfiles[id] || {}
+    return resolveAvatarSrc(
+      id,
+      displayName || id,
+      profile.avatarUrl || '',
+      fallback,
+      getAvatarPresetSrc(profile.avatarPresetId),
+    )
   }
 
   const activeGuestKey = useMemo(() => {
@@ -479,15 +779,31 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
     })
   }
 
+  useEffect(() => {
+    const unsubscribe = subscribeChatAppSettings(
+      (settings) => {
+        setEditWindowMs(messageEditWindowMsFromMinutes(settings?.messageEditWindowMinutes))
+        setOwnerAssistEnabled(settings?.ownerAssistEnabled !== false)
+      },
+      () => {},
+    )
+    return unsubscribe
+  }, [])
+
+    const canMutateMessage = (message) => canMutateOwnMessage(message, {
+    unreadByPartner: getMessageDeliveryStatus(message, activeThread, 'hana') === 'sent',
+    windowMs: editWindowMs,
+  })
+
   const startEdit = (message) => {
-    if (!canMutateOwnMessage(message) || message.deleted) return
+    if (!canMutateMessage(message) || message.deleted) return
     setReplyTo(null)
     setEditingId(message.id)
     setDraft(message.rawText || message.text)
   }
 
   const handleDelete = async (message) => {
-    if (!canMutateOwnMessage(message) || message.deleted || !activeId) return
+    if (!canMutateMessage(message) || message.deleted || !activeId) return
     if (!window.confirm('このメッセージを削除しますか？')) return
     try {
       await deleteChatMessage({ threadId: activeId, messageId: message.id })
@@ -684,7 +1000,7 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
               ユーザー管理
               <span className="admin-badge">{ownerRoster.length + guestRoster.length}</span>
             </h2>
-            <p>ゲスト / オーナーの発行・編集・削除と会話スレッド</p>
+            <p>ゲスト / オーナーの発行・編集・削除と会話スレッド。5日間アクセスがないアカウントは自動停止されます（hana除く）。</p>
           </div>
           <div className="admin-user-header-actions">
             <button
@@ -733,7 +1049,7 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
                 </select>
               </label>
               <label>
-                ID（ログイン用・変更不可）
+                ID（固定・変更不可）
                 <input
                   value={accountForm.key}
                   disabled={Boolean(editingAccountKey)}
@@ -775,6 +1091,70 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
                 />
               </label>
             </div>
+            {accountForm.role === 'guest' ? (
+              <div className="admin-account-playlists">
+                <div className="admin-account-playlists-head">
+                  <strong>アクセスできるプレイリスト</strong>
+                  <div className="admin-account-playlists-quick">
+                    <button type="button" className="admin-btn admin-btn--ghost admin-btn--sm" onClick={() => setFormPlaylistAccessAll(true)}>
+                      すべて
+                    </button>
+                    <button type="button" className="admin-btn admin-btn--ghost admin-btn--sm" onClick={() => setFormPlaylistAccessAll(false)}>
+                      なし
+                    </button>
+                  </div>
+                </div>
+                {sharedPlaylists.length === 0 ? (
+                  <p className="admin-hint">まだ共有プレイリストがありません。アプリ側で作成するとここに表示されます。</p>
+                ) : (
+                  <div className="admin-account-playlist-checks" role="group" aria-label="プレイリスト権限">
+                    {sharedPlaylists.map((playlist) => (
+                      <label key={playlist.id} className="admin-playlist-check">
+                        <input
+                          type="checkbox"
+                          checked={formAllowsPlaylist(playlist.id)}
+                          onChange={() => toggleFormPlaylist(playlist.id)}
+                        />
+                        <span>{playlist.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                <p className="admin-hint">「すべて」「お気に入り」は常に利用できます。許可していないプレイリストの曲は「すべて」からも除外されます。</p>
+              </div>
+            ) : null}
+            {accountForm.role === 'guest' ? (
+              <div className="admin-account-playlists">
+                <div className="admin-account-playlists-head">
+                  <strong>アクセスできるフォトアルバム</strong>
+                  <div className="admin-account-playlists-quick">
+                    <button type="button" className="admin-btn admin-btn--ghost admin-btn--sm" onClick={() => setFormAlbumAccessAll(true)}>
+                      すべて
+                    </button>
+                    <button type="button" className="admin-btn admin-btn--ghost admin-btn--sm" onClick={() => setFormAlbumAccessAll(false)}>
+                      なし
+                    </button>
+                  </div>
+                </div>
+                {sharedAlbums.length === 0 ? (
+                  <p className="admin-hint">まだ共有フォトアルバムがありません。アプリ側で作成するとここに表示されます。</p>
+                ) : (
+                  <div className="admin-account-playlist-checks" role="group" aria-label="フォトアルバム権限">
+                    {sharedAlbums.map((album) => (
+                      <label key={album.id} className="admin-playlist-check">
+                        <input
+                          type="checkbox"
+                          checked={formAllowsAlbum(album.id)}
+                          onChange={() => toggleFormAlbum(album.id)}
+                        />
+                        <span>{album.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                <p className="admin-hint">許可していないアルバムはゲストのライブラリに表示されません。</p>
+              </div>
+            ) : null}
             <div className="admin-account-form-actions">
               <button type="submit" className="admin-btn admin-btn--primary" disabled={accountBusy}>
                 {accountBusy ? '保存中…' : '保存'}
@@ -789,7 +1169,7 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
         <p className="admin-group-label">オーナー</p>
         <div className="admin-guest-roster" aria-label="オーナー一覧">
           {ownerRoster.map(({ profile }) => (
-            <article key={`owner-${profile.key}`} className="admin-guest-card is-owner">
+            <article key={`owner-${profile.key}`} className={`admin-guest-card is-owner${resolveLiveAccount(profile).accountActive === false ? ' is-inactive' : ''}`}>
               <div className="admin-guest-card-main">
                 <strong className="admin-guest-name">
                   <span className="admin-guest-avatar-wrap">
@@ -801,6 +1181,7 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
                   </span>
                   <span className="admin-guest-name-text">{profile.displayName}</span>
                   <span className="admin-badge admin-badge--owner">オーナー</span>
+                  {accountStatusBadge(profile)}
                 </strong>
                 <span className="admin-cred-row">
                   <span className="admin-cred"><b>id</b><span>{profile.key}</span></span>
@@ -809,6 +1190,7 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
                     <span className="admin-cred"><b>呼び</b><span>{profile.addressAs}</span></span>
                   ) : null}
                 </span>
+                <span className="admin-guest-meta">{accountLastAccessLabel(profile)}</span>
               </div>
               <div className="admin-guest-card-actions">
                 <button
@@ -819,10 +1201,20 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
                 >
                   編集
                 </button>
+                {!isProtectedOwnerAccount(profile.key) ? (
+                  <button
+                    type="button"
+                    className="admin-btn admin-btn--ghost admin-btn--sm"
+                    disabled={accountBusy}
+                    onClick={() => { void handleToggleAccountActive(profile) }}
+                  >
+                    {resolveLiveAccount(profile).accountActive === false ? '再開' : '停止'}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="admin-btn admin-btn--ghost admin-btn--sm"
-                  disabled={accountBusy || ownerRoster.length <= 1}
+                  disabled={accountBusy || ownerRoster.length <= 1 || isProtectedOwnerAccount(profile.key)}
                   onClick={() => { void handleDeleteAccount(profile) }}
                 >
                   削除
@@ -842,7 +1234,7 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
             return (
               <article
                 key={profile.key}
-                className={`admin-guest-card${activeId === threadId ? ' is-active' : ''}${thread?.unreadByHana ? ' is-unread' : ''}`}
+                className={`admin-guest-card${activeId === threadId ? ' is-active' : ''}${thread?.unreadByHana ? ' is-unread' : ''}${resolveLiveAccount(profile).accountActive === false ? ' is-inactive' : ''}`}
               >
                 <div className="admin-guest-card-main">
                   <strong className="admin-guest-name">
@@ -857,6 +1249,7 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
                     <span className="admin-guest-name-text">{profile.displayName}</span>
                     <span className={`admin-guest-online-label ${presence.className}`}>{presence.label}</span>
                     {thread?.unreadByHana ? <span className="admin-badge admin-badge--warn">未読</span> : null}
+                    {accountStatusBadge(profile)}
                   </strong>
                   <span className="admin-cred-row">
                     <span className="admin-cred"><b>id</b><span>{profile.key}</span></span>
@@ -869,6 +1262,8 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
                     {thread?.updatedAt
                       ? `最終メッセージ: ${formatChatTimestamp(thread.updatedAt)}`
                       : 'まだ会話なし'}
+                    {' · '}
+                    {accountLastAccessLabel(profile)}
                   </span>
                   {thread?.lastText ? (
                     <span className="admin-guest-preview">{thread.lastText}</span>
@@ -882,6 +1277,14 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
                     onClick={() => handleOpenGuest(profile)}
                   >
                     チャットを開く
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-btn admin-btn--ghost admin-btn--sm"
+                    disabled={accountBusy}
+                    onClick={() => { void handleToggleAccountActive(profile) }}
+                  >
+                    {resolveLiveAccount(profile).accountActive === false ? '再開' : '停止'}
                   </button>
                   <button
                     type="button"
@@ -933,6 +1336,156 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
             )
           })}
         </div>
+
+        <section className="admin-playlist-matrix" aria-label="プレイリスト権限">
+          <div className="admin-playlist-matrix-head">
+            <p className="admin-group-label">プレイリスト権限</p>
+            <p className="admin-hint">行＝ゲスト、列＝プレイリスト。未チェックのリストは非表示で、その曲は「すべて」からも除外されます。</p>
+          </div>
+          {sharedPlaylists.length === 0 ? (
+            <p className="admin-hint">共有プレイリストがまだありません。</p>
+          ) : guestRoster.length === 0 ? (
+            <p className="admin-hint">ゲストがまだいません。</p>
+          ) : (
+            <div className="admin-playlist-matrix-scroll">
+              <table className="admin-playlist-matrix-table">
+                <thead>
+                  <tr>
+                    <th scope="col">ゲスト</th>
+                    {sharedPlaylists.map((playlist) => (
+                      <th key={playlist.id} scope="col" title={playlist.name}>
+                        <span>{playlist.name}</span>
+                      </th>
+                    ))}
+                    <th scope="col">一括</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {guestRoster.map(({ profile }) => {
+                    const guest = chatAccounts.find((item) => item.key === profile.key) || profile
+                    const rowBusy = playlistAccessBusyKey.startsWith(`${guest.key}:`)
+                    return (
+                      <tr key={`matrix-${guest.key}`}>
+                        <th scope="row">{guest.displayName}</th>
+                        {sharedPlaylists.map((playlist) => {
+                          const checked = guestAllowsPlaylist(guest, playlist.id)
+                          const cellBusy = playlistAccessBusyKey === `${guest.key}:${playlist.id}`
+                          return (
+                            <td key={`${guest.key}-${playlist.id}`}>
+                              <label className="admin-matrix-check">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  disabled={Boolean(playlistAccessBusyKey) || accountBusy}
+                                  onChange={() => { void handleMatrixToggle(guest, playlist.id) }}
+                                  aria-label={`${guest.displayName} / ${playlist.name}`}
+                                />
+                                {cellBusy ? <span className="admin-matrix-busy">…</span> : null}
+                              </label>
+                            </td>
+                          )
+                        })}
+                        <td className="admin-matrix-row-actions">
+                          <button
+                            type="button"
+                            className="admin-btn admin-btn--ghost admin-btn--sm"
+                            disabled={rowBusy || accountBusy}
+                            onClick={() => { void handleMatrixSetRow(guest, true) }}
+                          >
+                            全
+                          </button>
+                          <button
+                            type="button"
+                            className="admin-btn admin-btn--ghost admin-btn--sm"
+                            disabled={rowBusy || accountBusy}
+                            onClick={() => { void handleMatrixSetRow(guest, false) }}
+                          >
+                            無
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <section className="admin-album-matrix" aria-label="フォトアルバム権限">
+          <div className="admin-album-matrix-head">
+            <p className="admin-group-label">フォトアルバム権限</p>
+            <p className="admin-hint">行＝ゲスト、列＝フォトアルバム。未チェックのアルバムはゲストに表示されません。</p>
+          </div>
+          {sharedAlbums.length === 0 ? (
+            <p className="admin-hint">共有フォトアルバムがまだありません。</p>
+          ) : guestRoster.length === 0 ? (
+            <p className="admin-hint">ゲストがまだいません。</p>
+          ) : (
+            <div className="admin-album-matrix-scroll">
+              <table className="admin-album-matrix-table">
+                <thead>
+                  <tr>
+                    <th scope="col">ゲスト</th>
+                    {sharedAlbums.map((album) => (
+                      <th key={album.id} scope="col" title={album.name}>
+                        <span>{album.name}</span>
+                      </th>
+                    ))}
+                    <th scope="col">一括</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {guestRoster.map(({ profile }) => {
+                    const guest = chatAccounts.find((item) => item.key === profile.key) || profile
+                    const rowBusy = albumAccessBusyKey.startsWith(`${guest.key}:`)
+                    return (
+                      <tr key={`album-matrix-${guest.key}`}>
+                        <th scope="row">{guest.displayName}</th>
+                        {sharedAlbums.map((album) => {
+                          const checked = guestAllowsAlbum(guest, album.id)
+                          const cellBusy = albumAccessBusyKey === `${guest.key}:${album.id}`
+                          return (
+                            <td key={`${guest.key}-${album.id}`}>
+                              <label className="admin-matrix-check">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  disabled={Boolean(albumAccessBusyKey) || accountBusy}
+                                  onChange={() => { void handleAlbumMatrixToggle(guest, album.id) }}
+                                  aria-label={`${guest.displayName} / ${album.name}`}
+                                />
+                                {cellBusy ? <span className="admin-matrix-busy">…</span> : null}
+                              </label>
+                            </td>
+                          )
+                        })}
+                        <td className="admin-matrix-row-actions">
+                          <button
+                            type="button"
+                            className="admin-btn admin-btn--ghost admin-btn--sm"
+                            disabled={rowBusy || accountBusy}
+                            onClick={() => { void handleAlbumMatrixSetRow(guest, true) }}
+                          >
+                            全
+                          </button>
+                          <button
+                            type="button"
+                            className="admin-btn admin-btn--ghost admin-btn--sm"
+                            disabled={rowBusy || accountBusy}
+                            onClick={() => { void handleAlbumMatrixSetRow(guest, false) }}
+                          >
+                            無
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
         </div>
       </section>
 
@@ -1067,10 +1620,14 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
                       ? null
                       : getMessageDeliveryStatus(message, activeThread, 'hana')
                     const timeLabel = formatChatTimestamp(message.createdAt)
-                    const mutable = message.sender === 'hana' && canMutateOwnMessage(message)
+                    const mutable = message.sender === 'hana' && canMutateMessage(message)
                     const isOwn = message.sender === 'hana'
                     const showsSticker = !message.deleted && isHanaSticker(message.sticker)
-                    const showsImage = !message.deleted && Boolean(message.imageUrl)
+                    const attachment = getChatMessageAttachment(message)
+                    const showsImage = Boolean(attachment && attachment.kind === 'image')
+                    const showsVideo = Boolean(attachment && attachment.kind === 'video')
+                    const showsFile = Boolean(attachment && attachment.kind === 'file')
+                    const showsMedia = showsImage || showsVideo || showsFile
                     const effectEmoji = !message.deleted && message.effect
                       ? (String(message.effectEmoji || '').trim()
                         || EMOTION_MOMENTS.find((item) => item.id === message.effect)?.emoji
@@ -1102,7 +1659,7 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
                             <ChatSwipeBubble
                               className={`${isOwn ? 'is-own' : 'is-other'} is-${message.sender}`}
                               canReply={!message.deleted}
-                              canEdit={mutable && !showsSticker && !showsEffect && !showsImage}
+                              canEdit={mutable && !showsSticker && !showsEffect && !showsMedia}
                               canDelete={mutable}
                               canReact={!message.deleted}
                               showFlowerReact={!message.deleted && !isOwn}
@@ -1116,7 +1673,7 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
                               onReact={(emoji, options) => { void handleReact(message, emoji, options) }}
                               onMenuAction={(actionId) => handleMenuAction(actionId, message)}
                             >
-                              <div className={`admin-chat-bubble is-${message.sender}${message.deleted ? ' is-deleted' : ''}${showsSticker ? ' is-sticker' : ''}${showsEffect ? ' is-effect' : ''}${showsImage ? ' is-image' : ''}`}>
+                              <div className={`admin-chat-bubble is-${message.sender}${message.deleted ? ' is-deleted' : ''}${showsSticker ? ' is-sticker' : ''}${showsEffect ? ' is-effect' : ''}${showsImage ? ' is-image' : ''}${showsVideo ? ' is-video' : ''}${showsFile ? ' is-file' : ''}`}>
                                 {message.replyTo ? (
                                   <div className="hana-chat-quote">
                                     <strong>{labelForSender(message.replyTo.sender)}</strong>
@@ -1129,34 +1686,60 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
                                   <button
                                     type="button"
                                     className="hana-chat-image-link"
-                                    data-no-bubble-press="true"
                                     aria-label="画像を拡大表示"
                                     onClick={(event) => {
                                       event.preventDefault()
                                       event.stopPropagation()
                                       setPreviewImage({
-                                        src: message.imageUrl,
-                                        alt: message.text || '写真',
+                                        src: attachment.url,
+                                        alt: attachment.fileName || message.text || '写真',
                                       })
                                     }}
                                   >
                                     <img
                                       className="hana-chat-image"
-                                      src={message.imageUrl}
-                                      alt={message.text || '写真'}
+                                      src={attachment.url}
+                                      alt={attachment.fileName || message.text || '写真'}
                                       loading="lazy"
                                     />
                                   </button>
+                                ) : showsVideo ? (
+                                  <div className="hana-chat-video-wrap" data-no-bubble-press="true">
+                                    <video
+                                      className="hana-chat-video"
+                                      src={attachment.url}
+                                      controls
+                                      playsInline
+                                      preload="metadata"
+                                    />
+                                  </div>
+                                ) : showsFile ? (
+                                  <a
+                                    className="hana-chat-file-card"
+                                    href={attachment.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    download={attachment.fileName || true}
+                                    data-no-bubble-press="true"
+                                  >
+                                    <span className="hana-chat-file-icon" aria-hidden="true">📄</span>
+                                    <span className="hana-chat-file-meta">
+                                      <strong className="hana-chat-file-name">{attachment.fileName}</strong>
+                                      <span className="hana-chat-file-sub">
+                                        {attachment.fileSize ? formatChatFileSize(attachment.fileSize) : 'ファイル'}
+                                      </span>
+                                    </span>
+                                  </a>
                                 ) : showsEffect ? (
                                   <div className="hana-chat-effect-msg">
                                     <span className="hana-chat-effect-msg-emoji" aria-hidden="true">{effectEmoji}</span>
-                                    <p className="hana-chat-effect-msg-caption">{message.text}</p>
+                                    <p className="hana-chat-effect-msg-caption">{renderChatTextWithLinks(message.text)}</p>
                                   </div>
                                 ) : (
-                                  <p>{message.text}</p>
+                                  <p className="hana-chat-text">{renderChatTextWithLinks(message.text)}</p>
                                 )}
                                 {translations[message.id] ? (
-                                  <p className="hana-chat-translation">{translations[message.id]}</p>
+                                  <p className="hana-chat-translation">{renderChatTextWithLinks(translations[message.id])}</p>
                                 ) : null}
                               </div>
                             </ChatSwipeBubble>
@@ -1169,15 +1752,18 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
                               </div>
                             ) : null}
                           </div>
-                          {!isOwn && ownerAssist[message.id] ? (
+                          {!isOwn && ownerAssistEnabled && ownerAssist[message.id] ? (
                             <OwnerMessageAssist
                               assist={ownerAssist[message.id]}
                               collapsed={ownerAssistShouldCollapse(message.id, messages)}
-                              onRetry={() => { void requestOwnerAssist(message, { force: true }) }}
-                              onUseReply={(text) => {
-                                setDraft(String(text || '').trim())
-                                setEditingId(null)
-                              }}
+                              onRetry={() => {
+                              const streak = collectUnansweredOwnerAssistMessages(messages, {
+                                isAssistable: isOwnerAssistableGuestMessage,
+                                max: 8,
+                              })
+                              const batch = streak.length ? streak : [message]
+                              void requestOwnerAssist(batch[batch.length - 1], { force: true, batch })
+                            }}
                             />
                           ) : null}
                         </div>

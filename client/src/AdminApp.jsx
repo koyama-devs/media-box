@@ -1,12 +1,26 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import './Admin.css'
 import AdminHanaInbox from './AdminHanaInbox'
+import NatsuAtmosphere from './NatsuAtmosphere'
+import { SITE_THEMES, SITE_THEME_DEFAULT, applySiteTheme } from './siteTheme'
 import {
     completeAdminRedirectLogin,
+    DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
+    fetchHostingReleases,
+    fetchLiveVersionInfo,
+    fetchReleasesHistoryFile,
     getFirebaseErrorMessage,
     loginAdmin,
     loginAdminWithGoogle,
     logoutAdmin,
+    normalizeMessageEditWindowMinutes,
+    recordAppRelease,
+    rollbackHostingRelease,
+    saveChatAppSettings,
+    saveSiteAppearance,
+    subscribeAppReleases,
+    subscribeChatAppSettings,
+    subscribeSiteAppearance,
     subscribeToAccessLogs,
     subscribeToAdminAuth,
     subscribeToMediaItems,
@@ -248,7 +262,596 @@ const ADMIN_TABS = [
   { id: 'logs', label: 'アクセスログ', kicker: 'Analytics', lead: '訪問の内訳を国・デバイス・期間で確認します。' },
   { id: 'users', label: 'ユーザー', kicker: 'Accounts', lead: 'ゲストとオーナーのアカウントを管理します。' },
   { id: 'chat', label: 'はなチャット', kicker: 'Inbox', lead: 'ゲストとのやりとりをここから返信します。' },
+  { id: 'releases', label: 'リリース', kicker: 'Releases', lead: '各バージョンの変更点とロールバック情報です。' },
+  { id: 'settings', label: '設定', kicker: 'Settings', lead: 'サイトテーマとチャットの共通設定を管理します。' },
 ]
+
+const EDIT_WINDOW_PRESETS = [
+  { minutes: 5, label: '5分' },
+  { minutes: 10, label: '10分' },
+  { minutes: 30, label: '30分' },
+  { minutes: 0, label: '制限なし' },
+]
+
+function formatEditWindowLabel(minutes) {
+  const n = normalizeMessageEditWindowMinutes(minutes)
+  if (n === 0) return '制限なし（既読後もいつでも編集・削除可）'
+  return `既読後 ${n} 分まで編集・削除可`
+}
+
+function formatReleaseTime(value) {
+  if (!value) return '—'
+  try {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return String(value)
+    return new Intl.DateTimeFormat('ja-JP', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date)
+  } catch {
+    return String(value)
+  }
+}
+
+function AdminReleasesPanel({ hidden = false }) {
+  const [live, setLive] = useState(null)
+  const [releases, setReleases] = useState([])
+  const [fileReleases, setFileReleases] = useState([])
+  const [hosting, setHosting] = useState({ liveHostingVersionId: null, releases: [] })
+  const [notesDraft, setNotesDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [rollingBackId, setRollingBackId] = useState('')
+  const [error, setError] = useState('')
+  const [status, setStatus] = useState('')
+
+  const reloadVersionInfo = useCallback(async () => {
+    const [version, history, hostingInfo] = await Promise.all([
+      fetchLiveVersionInfo().catch(() => null),
+      fetchReleasesHistoryFile().catch(() => []),
+      fetchHostingReleases().catch((err) => {
+        console.error(err)
+        return { liveHostingVersionId: null, releases: [] }
+      }),
+    ])
+    setLive(version)
+    setFileReleases(Array.isArray(history) ? history : [])
+    setHosting(hostingInfo || { liveHostingVersionId: null, releases: [] })
+    if (version?.notes) setNotesDraft(String(version.notes))
+    return { version, hostingInfo }
+  }, [])
+
+  useEffect(() => {
+    if (hidden) return undefined
+    let cancelled = false
+    ;(async () => {
+      try {
+        await reloadVersionInfo()
+        if (cancelled) return
+        setError('')
+      } catch (loadError) {
+        if (!cancelled) setError(getFirebaseErrorMessage(loadError) || 'バージョン情報の取得に失敗しました。')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [hidden, reloadVersionInfo])
+
+  useEffect(() => {
+    if (hidden) return undefined
+    return subscribeAppReleases(
+      (next) => {
+        setReleases(next)
+        setError('')
+      },
+      (subscribeError) => {
+        console.error(subscribeError)
+        setError(getFirebaseErrorMessage(subscribeError) || 'リリース履歴の読み込みに失敗しました。')
+      },
+    )
+  }, [hidden])
+
+  const notesByHostingId = useMemo(() => {
+    const map = new Map()
+    ;[...fileReleases, ...releases].forEach((item) => {
+      const hid = String(item?.hostingVersionId || '').trim()
+      if (!hid) return
+      const prev = map.get(hid) || {}
+      map.set(hid, {
+        ...prev,
+        ...item,
+        notes: item.notes || prev.notes || '',
+        version: item.version || prev.version || '',
+      })
+    })
+    return map
+  }, [fileReleases, releases])
+
+  const mergedReleases = useMemo(() => {
+    const map = new Map()
+    ;[...fileReleases, ...releases].forEach((item) => {
+      const key = String(item?.version || item?.id || '').trim()
+      if (!key) return
+      const prev = map.get(key) || {}
+      map.set(key, {
+        ...prev,
+        ...item,
+        version: key,
+        notes: item.notes || prev.notes || '',
+        builtAt: item.builtAt || item.createdAt || prev.builtAt || null,
+        previousVersion: item.previousVersion || prev.previousVersion || null,
+        previousHostingVersionId: item.previousHostingVersionId || prev.previousHostingVersionId || null,
+        hostingVersionId: item.hostingVersionId || prev.hostingVersionId || null,
+      })
+    })
+    return [...map.values()].sort((a, b) => {
+      const ta = Date.parse(a.builtAt || a.createdAt || '') || 0
+      const tb = Date.parse(b.builtAt || b.createdAt || '') || 0
+      return tb - ta
+    })
+  }, [fileReleases, releases])
+
+  const hostingRows = useMemo(() => {
+    const rows = (hosting.releases || []).map((item, index) => {
+      const meta = notesByHostingId.get(item.hostingVersionId) || {}
+      const appMatch = mergedReleases.find((r) => r.hostingVersionId === item.hostingVersionId)
+      return {
+        ...item,
+        isLive: Boolean(item.isLive) || index === 0,
+        appVersion: appMatch?.version || meta.version || '',
+        notes: appMatch?.notes || meta.notes || '',
+      }
+    })
+    return rows
+  }, [hosting.releases, notesByHostingId, mergedReleases])
+
+  const previousHosting = hostingRows.find((row) => !row.isLive) || null
+  const rollbackTargetApp = live?.previousVersion
+    || previousHosting?.appVersion
+    || mergedReleases[0]?.previousVersion
+    || mergedReleases[1]?.version
+    || null
+
+  const handleRecord = async (event) => {
+    event.preventDefault()
+    if (!live?.version) {
+      setError('現在の version.json が読めません。')
+      return
+    }
+    setSaving(true)
+    setError('')
+    setStatus('')
+    try {
+      await recordAppRelease({
+        version: live.version,
+        notes: notesDraft,
+        builtAt: live.builtAt || new Date().toISOString(),
+        previousVersion: live.previousVersion || null,
+        previousHostingVersionId: live.previousHostingVersionId || previousHosting?.hostingVersionId || null,
+        hostingVersionId: live.hostingVersionId || hosting.liveHostingVersionId || null,
+      })
+      setStatus('リリースノートを保存しました。')
+    } catch (saveError) {
+      setError(getFirebaseErrorMessage(saveError) || saveError?.message || '保存に失敗しました。')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleRollback = async (row) => {
+    const hostingVersionId = String(row?.hostingVersionId || '').trim()
+    if (!hostingVersionId) {
+      setError('この版の Hosting ID がありません。')
+      return
+    }
+    if (row?.isLive || hostingVersionId === hosting.liveHostingVersionId) {
+      setStatus('すでにこの版がライブです。')
+      return
+    }
+    const label = row?.appVersion || hostingVersionId
+    const ok = window.confirm(
+      `ライブ版を「${label}」へロールバックしますか？\n（数秒で反映されます。あとでハードリロードしてください）`,
+    )
+    if (!ok) return
+
+    setRollingBackId(hostingVersionId)
+    setError('')
+    setStatus('')
+    try {
+      const result = await rollbackHostingRelease({
+        hostingVersionId,
+        appVersion: row?.appVersion || '',
+      })
+      setStatus(result?.message || 'ロールバックしました。ページを再読み込みしてください。')
+      await reloadVersionInfo()
+    } catch (rollbackError) {
+      console.error(rollbackError)
+      setError(getFirebaseErrorMessage(rollbackError) || rollbackError?.message || 'ロールバックに失敗しました。')
+    } finally {
+      setRollingBackId('')
+    }
+  }
+
+  return (
+    <section className="admin-panel" hidden={hidden}>
+      <div className="admin-panel-head">
+        <div>
+          <h2>バージョン管理</h2>
+          <p>各リリースの変更点を確認し、問題があればワンクリックで前の版へ戻せます。</p>
+        </div>
+      </div>
+      <div className="admin-panel-body">
+        <div className="admin-settings-block">
+          <div className="admin-settings-copy">
+            <p className="admin-settings-label">現在のライブ版</p>
+            <p className="admin-settings-current">
+              アプリ版: <strong>{live?.version || '—'}</strong>
+              {live?.builtAt ? ` · ${formatReleaseTime(live.builtAt)}` : ''}
+            </p>
+            <p className="admin-settings-hint">
+              Hosting: <strong>{hosting.liveHostingVersionId || '—'}</strong>
+            </p>
+            {live?.notes ? (
+              <p className="admin-release-live-notes">{live.notes}</p>
+            ) : null}
+            <p className="admin-settings-hint">
+              直前の版: <strong>{rollbackTargetApp || previousHosting?.hostingVersionId || '—'}</strong>
+            </p>
+          </div>
+          <div className="admin-release-actions">
+            <button
+              type="button"
+              className="admin-btn admin-btn--danger"
+              disabled={!previousHosting || Boolean(rollingBackId)}
+              onClick={() => handleRollback(previousHosting)}
+            >
+              {rollingBackId && previousHosting && rollingBackId === previousHosting.hostingVersionId
+                ? 'ロールバック中…'
+                : '直前の版へロールバック'}
+            </button>
+            <button
+              type="button"
+              className="admin-btn admin-btn--secondary"
+              disabled={Boolean(rollingBackId)}
+              onClick={() => reloadVersionInfo().catch(() => null)}
+            >
+              再読み込み
+            </button>
+          </div>
+          {!previousHosting ? (
+            <p className="admin-hint">ロールバック可能な過去の Hosting 版が見つかりません。</p>
+          ) : (
+            <p className="admin-hint">
+              ボタンを押すと Firebase Hosting のライブチャンネルを直前の版へ切り替えます。
+            </p>
+          )}
+          {status ? <p className="admin-settings-saved">{status}</p> : null}
+          {error ? <p className="admin-error">{error}</p> : null}
+        </div>
+
+        <form className="admin-settings-block" onSubmit={handleRecord}>
+          <div className="admin-settings-copy">
+            <p className="admin-settings-label">この版のリリースノートを記録</p>
+            <p className="admin-settings-hint">
+              デプロイ時の notes、またはここで追記・修正できます。
+            </p>
+          </div>
+          <textarea
+            className="admin-release-notes-input"
+            rows={4}
+            value={notesDraft}
+            onChange={(event) => setNotesDraft(event.target.value)}
+            placeholder="例: チャット黒画面修正、アバター import 修正、アルバム ACL…"
+            disabled={saving || Boolean(rollingBackId)}
+          />
+          <div className="admin-release-actions">
+            <button type="submit" className="admin-btn admin-btn--primary" disabled={saving || !notesDraft.trim() || Boolean(rollingBackId)}>
+              {saving ? '保存中…' : 'ノートを保存'}
+            </button>
+          </div>
+        </form>
+
+        <div className="admin-release-list">
+          <p className="admin-group-label">Hosting 履歴（ロールバック可）</p>
+          {hostingRows.length === 0 ? (
+            <p className="admin-hint">Hosting リリース一覧を取得できませんでした。Functions の権限を確認してください。</p>
+          ) : (
+            hostingRows.map((item) => (
+              <article
+                key={item.hostingVersionId}
+                className={`admin-release-card${item.isLive ? ' is-live' : ''}`}
+              >
+                <header className="admin-release-card-head">
+                  <strong>{item.appVersion || item.hostingVersionId}</strong>
+                  <span>{formatReleaseTime(item.releaseTime)}</span>
+                  {item.isLive ? <span className="admin-badge">LIVE</span> : null}
+                </header>
+                <p className="admin-release-card-notes">
+                  {item.notes || (item.isLive ? (live?.notes || '（ノートなし）') : '（ノートなし）')}
+                </p>
+                <p className="admin-release-card-meta">
+                  Hosting ID: {item.hostingVersionId}
+                  {item.appVersion ? ` · app: ${item.appVersion}` : ''}
+                </p>
+                <div className="admin-release-actions">
+                  {item.isLive ? (
+                    <span className="admin-hint">現在配信中</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="admin-btn admin-btn--danger"
+                      disabled={Boolean(rollingBackId)}
+                      onClick={() => handleRollback(item)}
+                    >
+                      {rollingBackId === item.hostingVersionId ? 'ロールバック中…' : 'この版に戻す'}
+                    </button>
+                  )}
+                </div>
+              </article>
+            ))
+          )}
+        </div>
+
+        {mergedReleases.length > 0 ? (
+          <div className="admin-release-list">
+            <p className="admin-group-label">アプリ版ノート履歴</p>
+            {mergedReleases.map((item) => (
+              <article key={item.version} className={`admin-release-card${item.version === live?.version ? ' is-live' : ''}`}>
+                <header className="admin-release-card-head">
+                  <strong>{item.version}</strong>
+                  <span>{formatReleaseTime(item.builtAt || item.createdAt)}</span>
+                  {item.version === live?.version ? <span className="admin-badge">LIVE</span> : null}
+                </header>
+                <p className="admin-release-card-notes">{item.notes || '（ノートなし）'}</p>
+                {item.hostingVersionId ? (
+                  <p className="admin-release-card-meta">Hosting: {item.hostingVersionId}</p>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </section>
+  )
+}
+
+function AdminChatSettingsPanel({ hidden = false }) {
+  const [minutes, setMinutes] = useState(DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES)
+  const [draft, setDraft] = useState(String(DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES))
+  const [ownerAssistEnabled, setOwnerAssistEnabled] = useState(true)
+  const [themeId, setThemeId] = useState(SITE_THEME_DEFAULT)
+  const [saving, setSaving] = useState(false)
+  const [savedFlash, setSavedFlash] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    const unsubscribe = subscribeChatAppSettings(
+      (settings) => {
+        const next = normalizeMessageEditWindowMinutes(settings?.messageEditWindowMinutes)
+        setMinutes(next)
+        setDraft(String(next))
+        setOwnerAssistEnabled(settings?.ownerAssistEnabled !== false)
+        setError('')
+      },
+      (subscribeError) => {
+        console.error(subscribeError)
+        setError(getFirebaseErrorMessage(subscribeError) || '設定の読み込みに失敗しました。')
+      },
+    )
+    return unsubscribe
+  }, [])
+
+  useEffect(() => {
+    if (!savedFlash) return undefined
+    const timer = window.setTimeout(() => setSavedFlash(false), 1800)
+    return () => window.clearTimeout(timer)
+  }, [savedFlash])
+
+  const applyMinutes = async (nextMinutes) => {
+    const normalized = normalizeMessageEditWindowMinutes(nextMinutes)
+    setSaving(true)
+    setError('')
+    try {
+      const saved = await saveChatAppSettings({ messageEditWindowMinutes: normalized })
+      setMinutes(saved.messageEditWindowMinutes ?? normalized)
+      setDraft(String(saved.messageEditWindowMinutes ?? normalized))
+      if (typeof saved.ownerAssistEnabled === 'boolean') {
+        setOwnerAssistEnabled(saved.ownerAssistEnabled)
+      }
+      setSavedFlash(true)
+    } catch (saveError) {
+      console.error(saveError)
+      setError(getFirebaseErrorMessage(saveError) || '設定の保存に失敗しました。')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+
+  useEffect(() => {
+    const unsubscribe = subscribeSiteAppearance(
+      (appearance) => {
+        const next = appearance?.themeId || SITE_THEME_DEFAULT
+        setThemeId(next)
+        applySiteTheme(next)
+      },
+      () => {
+        setThemeId(SITE_THEME_DEFAULT)
+        applySiteTheme(SITE_THEME_DEFAULT)
+      },
+    )
+    return unsubscribe
+  }, [])
+
+  const applyThemeId = async (nextThemeId) => {
+    setSaving(true)
+    setError('')
+    try {
+      const saved = await saveSiteAppearance({ themeId: nextThemeId })
+      const id = saved.themeId || SITE_THEME_DEFAULT
+      setThemeId(id)
+      applySiteTheme(id)
+      setSavedFlash(true)
+    } catch (saveError) {
+      console.error(saveError)
+      setError(getFirebaseErrorMessage(saveError) || 'テーマの保存に失敗しました。')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+    const applyOwnerAssistEnabled = async (nextEnabled) => {
+    setSaving(true)
+    setError('')
+    try {
+      const saved = await saveChatAppSettings({ ownerAssistEnabled: nextEnabled })
+      setOwnerAssistEnabled(saved.ownerAssistEnabled !== false)
+      setSavedFlash(true)
+    } catch (saveError) {
+      console.error(saveError)
+      setError(getFirebaseErrorMessage(saveError) || '設定の保存に失敗しました。')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleSaveCustom = (event) => {
+    event.preventDefault()
+    void applyMinutes(draft)
+  }
+
+  return (
+    <section className="admin-panel" hidden={hidden}>
+      <div className="admin-panel-head">
+        <div>
+          <h2>チャット設定</h2>
+          <p>ゲストとオーナーの両方に同じルールが適用されます。</p>
+        </div>
+      </div>
+      <div className="admin-panel-body">
+        <div className="admin-settings-block">
+          <div className="admin-settings-copy">
+            <p className="admin-settings-label">サイトテーマ</p>
+            <p className="admin-settings-hint">
+              ゲスト画面全体の雰囲気を切り替えます。夏は花火大会の夜空テーマです。
+            </p>
+            <p className="admin-settings-current">
+              現在: <strong>{SITE_THEMES.find((t) => t.id === themeId)?.label || themeId}</strong>
+              {savedFlash ? <span className="admin-settings-saved">保存しました</span> : null}
+            </p>
+          </div>
+          <div className="admin-theme-grid" role="listbox" aria-label="サイトテーマ">
+            {SITE_THEMES.map((theme) => (
+              <button
+                key={theme.id}
+                type="button"
+                role="option"
+                aria-selected={themeId === theme.id}
+                className={'admin-theme-card' + (themeId === theme.id ? ' is-active' : '')}
+                disabled={saving}
+                onClick={() => { void applyThemeId(theme.id) }}
+                style={{
+                  '--theme-preview-0': theme.preview[0],
+                  '--theme-preview-1': theme.preview[1],
+                  '--theme-preview-2': theme.preview[2],
+                }}
+              >
+                <span className="admin-theme-card-swatch" aria-hidden="true" />
+                <span className="admin-theme-card-copy">
+                  <strong>{theme.label}</strong>
+                  <small>{theme.kicker}</small>
+                  <em>{theme.description}</em>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="admin-settings-block">
+          <div className="admin-settings-copy">
+            <p className="admin-settings-label">既読後の編集・削除できる時間</p>
+            <p className="admin-settings-hint">
+              未読（送信済）の間は時間制限なし。既読になってからの猶予だけを設定します。
+            </p>
+            <p className="admin-settings-current">
+              現在: <strong>{formatEditWindowLabel(minutes)}</strong>
+              {savedFlash ? <span className="admin-settings-saved">保存しました</span> : null}
+            </p>
+          </div>
+
+          <div className="admin-seg admin-seg--wrap" role="group" aria-label="編集・削除の時間プリセット">
+            {EDIT_WINDOW_PRESETS.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                className={minutes === item.minutes ? 'is-active' : ''}
+                disabled={saving}
+                onClick={() => void applyMinutes(item.minutes)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
+          <form className="admin-settings-custom" onSubmit={handleSaveCustom}>
+            <label className="admin-field">
+              <span>分数を指定（0 = 制限なし）</span>
+              <input
+                className="admin-input"
+                type="number"
+                min="0"
+                max={7 * 24 * 60}
+                step="1"
+                inputMode="numeric"
+                value={draft}
+                disabled={saving}
+                onChange={(event) => setDraft(event.target.value)}
+              />
+            </label>
+            <button type="submit" className="admin-btn admin-btn--primary" disabled={saving}>
+              {saving ? '保存中…' : '保存'}
+            </button>
+          </form>
+
+          {error ? <p className="admin-inline-error">{error}</p> : null}
+        </div>
+
+        <div className="admin-settings-block">
+          <div className="admin-settings-copy">
+            <p className="admin-settings-label">はな専用モード</p>
+            <p className="admin-settings-hint">
+              ゲストメッセージのベトナム語訳・読み・返信案をオーナー側に表示します。オフにすると Gemini 呼び出しも止まります。
+            </p>
+            <p className="admin-settings-current">
+              現在: <strong>{ownerAssistEnabled ? 'オン' : 'オフ'}</strong>
+              {savedFlash ? <span className="admin-settings-saved">保存しました</span> : null}
+            </p>
+          </div>
+          <div className="admin-seg" role="group" aria-label="はな専用モード">
+            <button
+              type="button"
+              className={ownerAssistEnabled ? 'is-active' : ''}
+              disabled={saving || ownerAssistEnabled}
+              onClick={() => { void applyOwnerAssistEnabled(true) }}
+            >
+              オン
+            </button>
+            <button
+              type="button"
+              className={!ownerAssistEnabled ? 'is-active' : ''}
+              disabled={saving || !ownerAssistEnabled}
+              onClick={() => { void applyOwnerAssistEnabled(false) }}
+            >
+              オフ
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </section>
+  )
+}
 
 function AdminDashboard({ user }) {
   const [logs, setLogs] = useState([])
@@ -262,6 +865,14 @@ function AdminDashboard({ user }) {
   const [loggingOut, setLoggingOut] = useState(false)
   const [tab, setTab] = useState('logs')
   const [chatUnread, setChatUnread] = useState(0)
+  const [adminSiteThemeId, setAdminSiteThemeId] = useState(SITE_THEME_DEFAULT)
+
+  useEffect(() => {
+    return subscribeSiteAppearance(
+      (appearance) => setAdminSiteThemeId(appearance?.themeId || SITE_THEME_DEFAULT),
+      () => setAdminSiteThemeId(SITE_THEME_DEFAULT),
+    )
+  }, [])
 
   useEffect(() => {
     const unsubscribe = subscribeToAccessLogs(
@@ -392,6 +1003,7 @@ function AdminDashboard({ user }) {
 
   return (
     <div className="admin-root">
+      <NatsuAtmosphere active={adminSiteThemeId === 'natsu'} />
       <div className="admin-shell">
         <header className="admin-appbar">
           <div className="admin-appbar-inner">
@@ -412,11 +1024,18 @@ function AdminDashboard({ user }) {
               </a>
               <button
                 type="button"
-                className="admin-btn admin-btn--ghost"
+                className="admin-btn admin-btn--icon"
                 onClick={handleLogout}
                 disabled={loggingOut}
+                aria-label="ログアウト"
+                title="ログアウト"
               >
-                {loggingOut ? '…' : 'ログアウト'}
+                {loggingOut ? '…' : (
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
+                    <path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"/>
+                    <path d="M15 12H9m6 0-3-3m3 3-3 3" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
               </button>
             </div>
           </div>
@@ -484,6 +1103,9 @@ function AdminDashboard({ user }) {
             onUnreadChange={setChatUnread}
             onOpenChat={openChatTab}
           />
+
+          <AdminChatSettingsPanel hidden={tab !== 'settings'} />
+          <AdminReleasesPanel hidden={tab !== 'releases'} />
 
           <section className="admin-panel" hidden={tab !== 'logs'}>
             <div className="admin-panel-head">

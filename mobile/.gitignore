@@ -25,6 +25,9 @@ RELEASE_SECRETS.md
 # Local screenshots
 hana-screen*.png
 
+# Built APKs (timestamped copies)
+apk-out/
+
 # iOS local
 ios/App/Pods/
 ios/App/App/public/

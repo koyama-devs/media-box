@@ -27,6 +27,12 @@ export function unlockChatNotifySound() {
   if (ctx.state === 'suspended') {
     ctx.resume().catch(() => {})
   }
+  try {
+    // Keep call ringtone ready after the same user gesture.
+    import('./callSounds').then((mod) => mod.unlockCallSounds?.()).catch(() => {})
+  } catch {
+    /* ignore */
+  }
 }
 
 function tone(ctx, {

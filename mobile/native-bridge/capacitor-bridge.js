@@ -75,6 +75,15 @@
       })
 
       await Push.addListener('pushNotificationReceived', (notification) => {
+        const raw = notification?.data?.badge ?? notification?.badge
+        const n = Math.max(0, Math.floor(Number(raw) || 0))
+        try {
+          if (n > 0 && typeof navigator !== 'undefined' && typeof navigator.setAppBadge === 'function') {
+            void navigator.setAppBadge(n).catch(() => {})
+          }
+        } catch {
+          /* ignore */
+        }
         w.dispatchEvent(
           new CustomEvent('hana-push-received', { detail: notification }),
         )

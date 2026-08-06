@@ -11,6 +11,9 @@
     "cap:sync:build": "npm run sync:web:build && npx cap sync",
     "android": "npx cap open android",
     "ios": "npx cap open ios",
+    "apk": "node ./scripts/build-apk.mjs",
+    "apk:release": "node ./scripts/build-apk.mjs --release",
+    "apk:sync": "node ./scripts/build-apk.mjs --sync --build",
     "add:android": "npx cap add android",
     "add:ios": "npx cap add ios"
   },

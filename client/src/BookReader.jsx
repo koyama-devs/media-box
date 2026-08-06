@@ -2,7 +2,9 @@ import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
 import pdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { readBookAssistCache, writeBookAssistCache } from './bookAssistCache'
 import { setBookBookmark } from './bookProgress'
+import { analyzeBookPageForOwner, getFirebaseErrorMessage } from './firebase'
 
 // Modern pdf.js expects Map.getOrInsertComputed (not in all browsers yet).
 if (typeof Map.prototype.getOrInsertComputed !== 'function') {
@@ -20,18 +22,74 @@ if (typeof Map.prototype.getOrInsertComputed !== 'function') {
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker
 
+const MAX_RENDER_SCALE = 5
+// Keeps a very large page from allocating a huge bitmap on phones.
+const MAX_RENDER_PIXELS = 9_000_000
+const MAX_CACHED_PAGES = 8
+const MAX_ASSIST_CHARS = 4000
+/** Keep in sync with `.book-reader-volume.is-flipping-*` CSS transition. */
+const PAGE_FLIP_MS = 1100
+
+function screenPixelRatio() {
+  if (typeof window === 'undefined') return 1
+  return Math.min(3, Math.max(1, window.devicePixelRatio || 1))
+}
+
+let pageImageType = ''
+
+function pickPageImageType() {
+  if (pageImageType) return pageImageType
+  try {
+    const probe = document.createElement('canvas')
+    probe.width = 1
+    probe.height = 1
+    pageImageType = probe.toDataURL('image/webp').startsWith('data:image/webp')
+      ? 'image/webp'
+      : 'image/png'
+  } catch {
+    pageImageType = 'image/png'
+  }
+  return pageImageType
+}
+
 async function renderPageToCanvas(pdf, pageNumber, targetWidth) {
   const page = await pdf.getPage(pageNumber)
   const unscaled = page.getViewport({ scale: 1 })
-  const scale = Math.min(2, Math.max(0.9, targetWidth / unscaled.width))
+  let scale = Math.min(MAX_RENDER_SCALE, Math.max(1, targetWidth / unscaled.width))
+  const pixels = unscaled.width * unscaled.height * scale * scale
+  if (pixels > MAX_RENDER_PIXELS) scale *= Math.sqrt(MAX_RENDER_PIXELS / pixels)
   const viewport = page.getViewport({ scale })
   const canvas = document.createElement('canvas')
-  canvas.width = Math.floor(viewport.width)
-  canvas.height = Math.floor(viewport.height)
+  canvas.width = Math.ceil(viewport.width)
+  canvas.height = Math.ceil(viewport.height)
   const ctx = canvas.getContext('2d', { alpha: false })
   if (!ctx) throw new Error('canvas unavailable')
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
   await page.render({ canvasContext: ctx, viewport, canvas }).promise
   return { canvas, aspect: unscaled.width / unscaled.height }
+}
+
+/** Render the current page to a JPEG (for OCR translate). */
+async function capturePageJpegBase64(pdf, pageNumber, maxWidth = 1100) {
+  const { canvas } = await renderPageToCanvas(pdf, pageNumber, maxWidth)
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.72)
+  const base64 = dataUrl.replace(/^data:image\/jpeg;base64,/, '')
+  if (!base64) throw new Error('page capture failed')
+  return { base64, mimeType: 'image/jpeg' }
+}
+
+function trimPageCache(cache, keepPage) {
+  if (cache.size <= MAX_CACHED_PAGES) return
+  const farthestFirst = [...cache.keys()].sort(
+    (a, b) => Math.abs(b - keepPage) - Math.abs(a - keepPage),
+  )
+  for (const key of farthestFirst) {
+    if (cache.size <= MAX_CACHED_PAGES) break
+    if (Math.abs(key - keepPage) <= 2) continue
+    URL.revokeObjectURL(cache.get(key))
+    cache.delete(key)
+  }
 }
 
 async function loadPdfSource(pdfUrl, pdfData) {
@@ -80,6 +138,7 @@ function clampPage(page, pageCount) {
 
 /**
  * Japanese-bound reading room with しおり resume.
+ * Owner (hana) gets a private page assist: VI translation + hiragana reading.
  */
 export default function BookReader({
   open,
@@ -88,6 +147,7 @@ export default function BookReader({
   pdfUrl,
   pdfData = null,
   initialPage = 1,
+  isOwner = false,
   onClose,
   onProgressChange,
 }) {
@@ -102,6 +162,7 @@ export default function BookReader({
   const startPageRef = useRef(initialPage)
   const closedRef = useRef(false)
   const timersRef = useRef([])
+  const assistReqRef = useRef(0)
   const [pageCount, setPageCount] = useState(0)
   const [page, setPage] = useState(1)
   const [frontUrl, setFrontUrl] = useState(null)
@@ -112,6 +173,11 @@ export default function BookReader({
   const [frame, setFrame] = useState(frameRef.current)
   const [resumeNotice, setResumeNotice] = useState('')
   const [shioriPulse, setShioriPulse] = useState(false)
+  const [assistOpen, setAssistOpen] = useState(false)
+  const [assistStatus, setAssistStatus] = useState('idle') // idle | loading | ready | empty | error
+  const [assistNote, setAssistNote] = useState('')
+  const [assistVi, setAssistVi] = useState('')
+  const [assistReading, setAssistReading] = useState('')
 
   useEffect(() => {
     onProgressChangeRef.current = onProgressChange
@@ -121,8 +187,102 @@ export default function BookReader({
     if (open) {
       closedRef.current = false
       startPageRef.current = initialPage
+      setAssistOpen(false)
+      setAssistStatus('idle')
+      setAssistNote('')
+      setAssistVi('')
+      setAssistReading('')
     }
   }, [open, initialPage])
+
+  // Restore cached assist when the page changes (owner only).
+  useEffect(() => {
+    if (!open || !isOwner || !bookId || !page) return
+    const cached = readBookAssistCache(bookId, page)
+    if (cached) {
+      setAssistVi(cached.translationVi)
+      setAssistReading(cached.readingHiragana)
+      setAssistStatus('ready')
+      setAssistNote('')
+      return
+    }
+    setAssistStatus('idle')
+    setAssistNote('')
+    setAssistVi('')
+    setAssistReading('')
+  }, [open, isOwner, bookId, page])
+
+  const runPageAssist = useCallback(async ({ force = false } = {}) => {
+    if (!isOwner) return
+    if (!pdfRef.current || pageCountRef.current < 1) {
+      setAssistOpen(true)
+      setAssistStatus('error')
+      setAssistNote('本がまだ読み込まれていません。')
+      return
+    }
+    if (flipping) return
+    const currentPage = pageRef.current
+    if (!force) {
+      const cached = readBookAssistCache(bookId, currentPage)
+      if (cached) {
+        setAssistVi(cached.translationVi)
+        setAssistReading(cached.readingHiragana)
+        setAssistStatus('ready')
+        setAssistNote('')
+        setAssistOpen(true)
+        return
+      }
+    }
+
+    const reqId = ++assistReqRef.current
+    setAssistOpen(true)
+    setAssistStatus('loading')
+    setAssistNote('この頁を翻訳しています…')
+    setAssistVi('')
+    setAssistReading('')
+
+    try {
+      setAssistNote('この頁を撮影して翻訳しています…')
+      const shot = await capturePageJpegBase64(pdfRef.current, currentPage, 1100)
+      if (reqId !== assistReqRef.current) return
+      if (!shot?.base64) {
+        setAssistStatus('empty')
+        setAssistNote('ページ画像を取れませんでした。もう一度お試しください。')
+        return
+      }
+
+      const data = await analyzeBookPageForOwner({
+        imageBase64: shot.base64,
+        imageMimeType: shot.mimeType,
+        title,
+        page: currentPage,
+      })
+      if (reqId !== assistReqRef.current) return
+
+      const translationVi = String(data?.translationVi || '').trim()
+      const readingHiragana = String(data?.readingHiragana || '').trim()
+      if (!translationVi && !readingHiragana) {
+        setAssistStatus(data?.reason === 'quota' ? 'error' : 'empty')
+        setAssistNote(
+          data?.reason === 'quota'
+            ? '翻訳枠が足りません。しばらくしてからもう一度どうぞ。'
+            : '文字を読めませんでした。もう一度お試しください。',
+        )
+        return
+      }
+
+      setAssistVi(translationVi)
+      setAssistReading(readingHiragana)
+      setAssistStatus('ready')
+      setAssistNote('')
+      writeBookAssistCache(bookId, currentPage, { translationVi, readingHiragana })
+    } catch (assistError) {
+      console.error(assistError)
+      if (reqId !== assistReqRef.current) return
+      setAssistStatus('error')
+      setAssistNote(getFirebaseErrorMessage(assistError) || 'ページ翻訳に失敗しました。')
+    }
+  }, [isOwner, flipping, bookId, title])
 
   useEffect(() => {
     if (!open) return undefined
@@ -184,9 +344,8 @@ export default function BookReader({
     const cached = pageCacheRef.current.get(pageNumber)
     if (cached) return cached
 
-    const width = Math.max(320, Math.round(renderWidth || frameRef.current.width || 640))
-    const dprBoost = typeof window !== 'undefined' && window.devicePixelRatio > 1.5 ? 1.15 : 1
-    const { canvas } = await renderPageToCanvas(pdf, pageNumber, width * dprBoost)
+    const cssWidth = Math.max(320, Math.round(renderWidth || frameRef.current.width || 640))
+    const { canvas } = await renderPageToCanvas(pdf, pageNumber, cssWidth * screenPixelRatio())
     const url = await new Promise((resolve, reject) => {
       canvas.toBlob((blob) => {
         if (!blob) {
@@ -194,9 +353,10 @@ export default function BookReader({
           return
         }
         resolve(URL.createObjectURL(blob))
-      }, 'image/jpeg', 0.92)
+      }, pickPageImageType(), 0.98)
     })
     pageCacheRef.current.set(pageNumber, url)
+    trimPageCache(pageCacheRef.current, pageRef.current)
     return url
   }, [])
 
@@ -327,18 +487,17 @@ export default function BookReader({
         scheduleTimeout(() => {
           setFrontUrl(nextUrl)
           finishTurn()
-        }, 780)
+        }, PAGE_FLIP_MS)
       } else {
-        // 前へ: place previous page already folded, then open it onto the desk.
+        // 前へ: mirror of 次へ — previous page starts folded at the spine, then opens.
         setBackUrl(frontUrl)
         setFrontUrl(nextUrl)
         setFlipping('prep-prev')
-        window.requestAnimationFrame(() => {
-          window.requestAnimationFrame(() => {
-            setFlipping('prev')
-            scheduleTimeout(finishTurn, 780)
-          })
-        })
+        // Let the folded pose paint before animating, or the open feels abrupt vs 次へ.
+        scheduleTimeout(() => {
+          setFlipping('prev')
+          scheduleTimeout(finishTurn, PAGE_FLIP_MS)
+        }, 50)
       }
     } catch (turnError) {
       console.error(turnError)
@@ -365,19 +524,26 @@ export default function BookReader({
   useEffect(() => {
     if (!open) return undefined
     const onKey = (event) => {
-      if (event.key === 'Escape') handleClose()
+      if (event.key === 'Escape') {
+        if (assistOpen) {
+          setAssistOpen(false)
+          return
+        }
+        handleClose()
+      }
       if (event.key === 'ArrowLeft') void turnPage(1)
       if (event.key === 'ArrowRight') void turnPage(-1)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, handleClose, turnPage])
+  }, [open, handleClose, turnPage, assistOpen])
 
   if (!open || typeof document === 'undefined') return null
 
   const canGoNext = !busy && !flipping && page < pageCount
   const canGoPrev = !busy && !flipping && page > 1
   const progressRatio = pageCount > 0 ? page / pageCount : 0
+  const assistBusy = assistStatus === 'loading'
 
   return createPortal(
     <div className="book-reader-overlay" role="presentation" onClick={() => handleClose()}>
@@ -388,7 +554,7 @@ export default function BookReader({
       </div>
 
       <div
-        className="book-reader"
+        className={`book-reader${assistOpen && isOwner ? ' is-assist-open' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -405,15 +571,34 @@ export default function BookReader({
               <p className="book-reader-kicker">読書室 · 右開き</p>
               <h2>{title}</h2>
             </div>
-            <button
-              type="button"
-              className="book-reader-close"
-              onClick={handleClose}
-              aria-label="閉じる"
-              title="閉じる"
-            >
-              閉じる
-            </button>
+            <div className="book-reader-header-actions">
+              {isOwner ? (
+                <button
+                  type="button"
+                  className={`book-reader-assist-btn${assistOpen ? ' is-open' : ''}${assistBusy ? ' is-loading' : ''}`}
+                  onClick={() => {
+                    if (assistOpen) {
+                      setAssistOpen(false)
+                      return
+                    }
+                    void runPageAssist()
+                  }}
+                  disabled={Boolean(flipping) || assistBusy || pageCount < 1}
+                  title="この頁を翻訳（はな専用・画面キャプチャ）"
+                >
+                  {assistBusy ? '翻訳中…' : assistOpen ? '翻訳を閉じる' : 'この頁を翻訳'}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="book-reader-close"
+                onClick={handleClose}
+                aria-label="閉じる"
+                title="閉じる"
+              >
+                閉じる
+              </button>
+            </div>
           </header>
 
           <div className="book-reader-stage" ref={stageRef}>
@@ -471,6 +656,50 @@ export default function BookReader({
                 />
               </div>
             </div>
+
+            {isOwner && assistOpen ? (
+              <section className="book-reader-assist" aria-label="はな専用・頁翻訳">
+                <div className="book-reader-assist-head">
+                  <p className="book-reader-assist-kicker">はな専用・撮影翻訳 · {page}頁</p>
+                  <div className="book-reader-assist-actions">
+                    <button
+                      type="button"
+                      className="book-reader-assist-refresh"
+                      disabled={assistBusy || Boolean(flipping)}
+                      onClick={() => void runPageAssist({ force: true })}
+                    >
+                      再解析
+                    </button>
+                    <button
+                      type="button"
+                      className="book-reader-assist-dismiss"
+                      onClick={() => setAssistOpen(false)}
+                    >
+                      閉じる
+                    </button>
+                  </div>
+                </div>
+                {assistBusy ? (
+                  <div className="book-reader-assist-loading" aria-live="polite">
+                    <span className="book-reader-assist-spinner" aria-hidden="true" />
+                    <p>この頁を翻訳しています…</p>
+                  </div>
+                ) : null}
+                {assistNote && !assistBusy ? <p className="book-reader-assist-note">{assistNote}</p> : null}
+                {assistReading ? (
+                  <div className="book-reader-assist-block">
+                    <p className="book-reader-assist-label">読み（ひらがな）</p>
+                    <p className="book-reader-assist-reading">{assistReading}</p>
+                  </div>
+                ) : null}
+                {assistVi ? (
+                  <div className="book-reader-assist-block">
+                    <p className="book-reader-assist-label">ベトナム語訳</p>
+                    <p className="book-reader-assist-vi">{assistVi}</p>
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
           </div>
 
           {resumeNotice ? <p className="book-reader-resume">{resumeNotice}</p> : null}
@@ -509,7 +738,11 @@ export default function BookReader({
             </button>
           </footer>
 
-          <p className="book-reader-hint">左で次へ · 右で戻る · Escで閉じる · 頁は自動で覚えます</p>
+          <p className="book-reader-hint">
+            {isOwner
+              ? '左で次へ · 右で戻る · Escで閉じる · はな専用の頁解析あり'
+              : '左で次へ · 右で戻る · Escで閉じる · 頁は自動で覚えます'}
+          </p>
         </div>
       </div>
     </div>,

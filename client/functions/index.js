@@ -1,5 +1,5 @@
 const { onCall, HttpsError } = require('firebase-functions/v2/https')
-const { onDocumentCreated } = require('firebase-functions/v2/firestore')
+const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore')
 const { setGlobalOptions } = require('firebase-functions/v2')
 const { initializeApp } = require('firebase-admin/app')
 const { getFirestore } = require('firebase-admin/firestore')
@@ -319,12 +319,12 @@ const OWNER_ASSIST_SYSTEM_PROMPT = `あなたは「はな」（Hana Mediaboxの�
 - ゲストが「Mika」「ミカ」「みか」と呼びかけたり、その名前について話した場合、それは原則として返信者本人のはなを指す。Mikaを別人として扱わず、はな本人への呼びかけ・はな本人についての発言として文脈を理解する。
 - translationViでは原文の名前を自然に保ち、repliesでは「自分がMikaである」という前提に沿った自然な返答を作る。
 
-{"translationVi":"...","readingHiragana":"...","replies":[{"ja":"...","vi":"..."},{"ja":"...","vi":"..."}]}
+{"translationVi":"...","readingHiragana":"...","replies":[{"ja":"..."}]}
 
 ルール:
 - translationVi: ゲスト文の自然なベトナム語訳。すでにベトナム語なら軽く整える。
 - readingHiragana: ゲスト文の読み方をひらがな中心で。漢字はすべてひらがな化し、句読点は残してよい。英語や固有名詞はそのままでよい。
-- replies: はながゲストへ返す候補。やさしく自然な短めの日本語。友達に近い親しみやすさ。マスコット口調や過度な敬語は避ける。2〜3個。
+- replies: はながゲストへ返す最良の候補を1つだけ。やさしく自然な短めの日本語。友達に近い親しみやすさ。マスコット口調や過度な敬語は避ける。
   - ja: 日本語の返信文（各40文字以内）
   - vi: その日本語返信のベトナム語訳（短く）
 - JSON以外は一切出力しない。`
@@ -345,7 +345,7 @@ function parseOwnerAssistJson(raw) {
           vi: String(item?.vi || '').trim(),
         }))
         .filter((item) => item.ja)
-        .slice(0, 3)
+        .slice(0, 1)
       : []
     return {
       translationVi: String(parsed?.translationVi || '').trim(),
@@ -471,6 +471,156 @@ exports.analyzeGuestMessageForOwner = onCall({ cors: true }, async (request) => 
   }
 })
 
+const BOOK_ASSIST_SYSTEM_PROMPT = `あなたは「はな」（Hana Mediaboxのオーナー本人）専用の読書アシスタントです。
+書籍ページの画像（または本文テキスト）を読み取り、次のJSONだけを返してください（説明・コードフェンス禁止）:
+
+{"translationVi":"...","readingHiragana":"..."}
+
+ルール:
+- 画像の場合はページ上の本文をOCRしてから処理する。見出し・本文・ルビがあれば含める。ページ番号や装飾だけのノイズは無視してよい。
+- translationVi: 本文の自然なベトナム語訳。すでにベトナム語なら軽く整える。長文でも意味が通るよう段落感を保つ。
+- readingHiragana: 本文の読みをひらがな中心で。漢字はすべてひらがな化し、句読点は残してよい。英語や固有名詞はそのままでよい。
+- 文字が読めない／無い場合は両方空文字。
+- JSON以外は一切出力しない。`
+
+function parseBookAssistJson(raw) {
+  const text = String(raw || '').trim()
+  if (!text) {
+    return { translationVi: '', readingHiragana: '' }
+  }
+  const fenced = text.match(/\{[\s\S]*\}/)
+  const jsonText = fenced ? fenced[0] : text
+  try {
+    const parsed = JSON.parse(jsonText)
+    return {
+      translationVi: String(parsed?.translationVi || '').trim(),
+      readingHiragana: String(parsed?.readingHiragana || '').trim(),
+    }
+  } catch {
+    return { translationVi: '', readingHiragana: '' }
+  }
+}
+
+async function callGeminiBookAssist({ apiKey, text, imageBase64, imageMimeType, title, page }) {
+  const bookTitle = String(title || '').trim().slice(0, 80)
+  const pageLabel = Number(page) > 0 ? String(Math.floor(Number(page))) : ''
+  const meta = [
+    bookTitle ? `書名: ${bookTitle}` : '',
+    pageLabel ? `頁: ${pageLabel}` : '',
+  ].filter(Boolean).join(' / ')
+
+  const parts = []
+  const safeImage = String(imageBase64 || '').replace(/^data:image\/\w+;base64,/, '').trim()
+  if (safeImage) {
+    parts.push({
+      inlineData: {
+        mimeType: String(imageMimeType || 'image/jpeg').slice(0, 64) || 'image/jpeg',
+        data: safeImage,
+      },
+    })
+    parts.push({
+      text: meta
+        ? `${meta}\n\nこの書籍ページ画像の本文を読み取り、指定のJSONでベトナム語訳とひらがな読みを返してください。`
+        : 'この書籍ページ画像の本文を読み取り、指定のJSONでベトナム語訳とひらがな読みを返してください。',
+    })
+  } else {
+    const body = String(text || '').trim()
+    parts.push({
+      text: meta ? `${meta}\n\n本文:\n${body}` : body,
+    })
+  }
+
+  const json = await callGeminiApi({
+    apiKey,
+    payload: {
+      systemInstruction: { parts: [{ text: BOOK_ASSIST_SYSTEM_PROMPT }] },
+      contents: [{ role: 'user', parts }],
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: 4096,
+        responseMimeType: 'application/json',
+      },
+    },
+  })
+
+  return parseBookAssistJson(geminiReplyText(json))
+}
+
+exports.analyzeBookPageForOwner = onCall({ cors: true, timeoutSeconds: 120, memory: '512MiB' }, async (request) => {
+  const imageBase64 = String(request.data?.imageBase64 || '')
+    .replace(/^data:image\/\w+;base64,/, '')
+    .trim()
+  const imageMimeType = String(request.data?.imageMimeType || 'image/jpeg').trim().slice(0, 64) || 'image/jpeg'
+  const text = String(request.data?.text || '').trim()
+  if (!imageBase64 && !text) {
+    throw new HttpsError('invalid-argument', 'image or text is required')
+  }
+  if (imageBase64.length > 3_500_000) {
+    throw new HttpsError('invalid-argument', 'image too large')
+  }
+  if (text.length > 4000) {
+    throw new HttpsError('invalid-argument', 'text too long')
+  }
+
+  const title = String(request.data?.title || '').trim().slice(0, 80)
+  const page = Math.max(0, Math.floor(Number(request.data?.page) || 0))
+  const key = process.env.GEMINI_API_KEY || ''
+  if (!key) {
+    return {
+      translationVi: '',
+      readingHiragana: '',
+      reason: 'quota',
+    }
+  }
+
+  try {
+    let result = await callGeminiBookAssist({
+      apiKey: key,
+      text,
+      imageBase64,
+      imageMimeType,
+      title,
+      page,
+    })
+
+    if (!result.translationVi && !result.readingHiragana) {
+      result = await callGeminiBookAssist({
+        apiKey: key,
+        text,
+        imageBase64,
+        imageMimeType,
+        title,
+        page,
+      })
+    }
+
+    if (!result.translationVi && text) {
+      const translationVi = await callGeminiTranslate({
+        apiKey: key,
+        text: text.slice(0, 2000),
+        targetLang: 'vi',
+      }).catch(() => '')
+      result = { ...result, translationVi }
+    }
+
+    const ok = Boolean(result.translationVi || result.readingHiragana)
+    return {
+      ...result,
+      reason: ok ? null : 'empty',
+    }
+  } catch (error) {
+    console.error('analyzeBookPageForOwner', error)
+    if (error?.status === 429 || /credits? are depleted|quota|RESOURCE_EXHAUSTED/i.test(String(error?.message || ''))) {
+      return {
+        translationVi: '',
+        readingHiragana: '',
+        reason: 'quota',
+      }
+    }
+    throw new HttpsError('internal', 'ページ解析に失敗しました')
+  }
+})
+
 function resolveGuestKeyFromThread(threadId, threadData) {
   const fromDoc = String(threadData?.guestKey || '').trim().toLowerCase()
   if (fromDoc) return fromDoc
@@ -588,3 +738,254 @@ exports.notifyOnChatMessage = onDocumentCreated(
     return null
   },
 )
+
+exports.notifyOnChatCall = onDocumentUpdated(
+  {
+    document: `${CHAT_THREADS_COLLECTION}/{threadId}/calls/{callId}`,
+    region: 'asia-northeast1',
+  },
+  async (event) => {
+    const before = event.data?.before?.data?.() || {}
+    const after = event.data?.after?.data?.() || {}
+    if (after.status !== 'ringing' || !after.offer) return null
+    if (before.status === 'ringing' && before.offer) return null
+
+    const threadId = event.params.threadId
+    const callerRole = after.callerRole === 'hana' ? 'hana' : 'guest'
+    const calleeRole = after.calleeRole === 'hana' ? 'hana' : 'guest'
+    if (!callerRole || !calleeRole) return null
+
+    const db = getFirestore()
+    const threadSnap = await db.collection(CHAT_THREADS_COLLECTION).doc(threadId).get()
+    const threadData = threadSnap.exists ? threadSnap.data() : {}
+
+    let targetUserKey = ''
+    let title = '着信'
+    if (calleeRole === 'hana') {
+      targetUserKey = OWNER_PUSH_KEY
+      title = String(threadData?.guestLabel || resolveGuestKeyFromThread(threadId, threadData) || 'ゲスト')
+    } else {
+      targetUserKey = resolveGuestKeyFromThread(threadId, threadData)
+      title = 'はな'
+    }
+    if (!targetUserKey) return null
+
+    const tokensSnap = await db
+      .collection(PUSH_TOKENS_COLLECTION)
+      .where('userKey', '==', targetUserKey)
+      .limit(50)
+      .get()
+
+    const tokenDocs = tokensSnap.docs
+      .map((document) => ({ id: document.id, token: String(document.data()?.token || '').trim() }))
+      .filter((row) => row.token)
+
+    if (!tokenDocs.length) {
+      console.info('notifyOnChatCall: no tokens for', targetUserKey)
+      return null
+    }
+
+    const tokens = tokenDocs.map((row) => row.token)
+    const response = await getMessaging().sendEachForMulticast({
+      tokens,
+      notification: {
+        title,
+        body: '通話の着信です',
+      },
+      data: {
+        threadId: String(threadId),
+        callId: String(event.params.callId || ''),
+        type: 'call',
+      },
+      android: {
+        priority: 'high',
+        notification: {
+          channelId: 'hana_chat',
+          sound: 'default',
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: 'default',
+            badge: 1,
+          },
+        },
+      },
+    })
+
+    const stale = []
+    response.responses.forEach((result, index) => {
+      if (result.success) return
+      const code = result.error?.code || ''
+      if (
+        code === 'messaging/registration-token-not-registered'
+        || code === 'messaging/invalid-registration-token'
+      ) {
+        stale.push(tokenDocs[index].id)
+      }
+      console.warn('notifyOnChatCall send fail', code, result.error?.message)
+    })
+    await Promise.all(stale.map((id) => db.collection(PUSH_TOKENS_COLLECTION).doc(id).delete().catch(() => null)))
+    console.info('notifyOnChatCall', targetUserKey, 'sent', response.successCount, 'fail', response.failureCount)
+    return null
+  },
+)
+
+const HOSTING_SITE = 'hana-mediabox'
+const ADMIN_EMAIL_ALLOWLIST = [
+  'hihig9@gmail.com',
+  'koyamamika.me@gmail.com',
+]
+
+function assertAdminCaller(request) {
+  if (!request.auth?.uid) {
+    throw new HttpsError('unauthenticated', 'ログインが必要です。')
+  }
+  const email = String(request.auth.token?.email || '').trim().toLowerCase()
+  if (!email || !ADMIN_EMAIL_ALLOWLIST.includes(email)) {
+    throw new HttpsError('permission-denied', '管理権限がありません。')
+  }
+  return email
+}
+
+async function getGoogleAccessToken() {
+  const { getApp } = require('firebase-admin/app')
+  const credential = getApp().options.credential
+  if (!credential?.getAccessToken) {
+    throw new Error('Admin credential cannot mint access tokens')
+  }
+  const tokenResponse = await credential.getAccessToken()
+  const token = tokenResponse?.access_token || tokenResponse?.token
+  if (!token) throw new Error('Could not obtain Google access token')
+  return token
+}
+
+function hostingVersionIdFromName(name) {
+  return String(name || '').split('/').pop() || ''
+}
+
+async function hostingApi(path, { method = 'GET', body } = {}) {
+  const token = await getGoogleAccessToken()
+  const response = await fetch(`https://firebasehosting.googleapis.com/v1beta1/${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: body == null ? undefined : JSON.stringify(body),
+  })
+  const text = await response.text()
+  let json = null
+  try {
+    json = text ? JSON.parse(text) : null
+  } catch {
+    json = null
+  }
+  if (!response.ok) {
+    const message = json?.error?.message || text.slice(0, 240) || `Hosting API ${response.status}`
+    const error = new Error(message)
+    error.status = response.status
+    throw error
+  }
+  return json
+}
+
+/** Admin: list recent live-channel Hosting releases for the version manager UI. */
+exports.getHostingReleases = onCall({ cors: true }, async (request) => {
+  assertAdminCaller(request)
+  try {
+    const data = await hostingApi(
+      `sites/${HOSTING_SITE}/channels/live/releases?pageSize=25`,
+    )
+    const releases = Array.isArray(data?.releases) ? data.releases : []
+    const items = releases.map((release, index) => {
+      const hostingVersionId = hostingVersionIdFromName(release?.version?.name || release?.versionName)
+      return {
+        hostingVersionId,
+        releaseName: release?.name || null,
+        releaseTime: release?.releaseTime || release?.version?.finalizeTime || null,
+        type: release?.type || null,
+        isLive: index === 0,
+        fileCount: release?.version?.fileCount != null ? Number(release.version.fileCount) : null,
+      }
+    }).filter((item) => item.hostingVersionId)
+
+    return {
+      site: HOSTING_SITE,
+      liveHostingVersionId: items[0]?.hostingVersionId || null,
+      releases: items,
+    }
+  } catch (error) {
+    console.error('getHostingReleases', error)
+    throw new HttpsError(
+      'internal',
+      error?.message || 'Hosting リリース一覧を取得できませんでした。',
+    )
+  }
+})
+
+/**
+ * Admin: promote a previous Hosting version to the live channel (instant rollback).
+ * Pass hostingVersionId, or appVersion to resolve from Firestore app-releases.
+ */
+exports.rollbackHostingRelease = onCall({ cors: true, timeoutSeconds: 120 }, async (request) => {
+  const adminEmail = assertAdminCaller(request)
+  let hostingVersionId = String(request.data?.hostingVersionId || '').trim()
+  const appVersion = String(request.data?.appVersion || '').trim()
+
+  if (!hostingVersionId && appVersion) {
+    const snap = await getFirestore().collection('app-releases').doc(appVersion).get()
+    hostingVersionId = String(snap.data()?.hostingVersionId || '').trim()
+  }
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(hostingVersionId)) {
+    throw new HttpsError('invalid-argument', '有効な Hosting version id がありません。')
+  }
+
+  const versionName = `sites/${HOSTING_SITE}/versions/${hostingVersionId}`
+
+  try {
+    const current = await hostingApi(
+      `sites/${HOSTING_SITE}/channels/live/releases?pageSize=1`,
+    )
+    const liveId = hostingVersionIdFromName(current?.releases?.[0]?.version?.name)
+    if (liveId && liveId === hostingVersionId) {
+      return {
+        ok: true,
+        alreadyLive: true,
+        hostingVersionId,
+        message: 'すでにこの版がライブです。',
+      }
+    }
+
+    const release = await hostingApi(
+      `sites/${HOSTING_SITE}/channels/live/releases?versionName=${encodeURIComponent(versionName)}`,
+      { method: 'POST', body: {} },
+    )
+
+    await getFirestore().collection('app-releases').doc(`rollback-${Date.now()}`).set({
+      type: 'rollback',
+      hostingVersionId,
+      appVersion: appVersion || null,
+      rolledBackBy: adminEmail,
+      createdAt: new Date().toISOString(),
+      releaseName: release?.name || null,
+    }).catch((err) => console.warn('rollback log write failed', err))
+
+    return {
+      ok: true,
+      alreadyLive: false,
+      hostingVersionId,
+      releaseName: release?.name || null,
+      message: 'ロールバックしました。ハードリロードしてください。',
+    }
+  } catch (error) {
+    console.error('rollbackHostingRelease', error)
+    if (error instanceof HttpsError) throw error
+    throw new HttpsError(
+      'internal',
+      error?.message || 'ロールバックに失敗しました。Cloud Functions に Hosting 権限があるか確認してください。',
+    )
+  }
+})

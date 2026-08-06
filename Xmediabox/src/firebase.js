@@ -1,5 +1,4 @@
 // Firebase initialization — Firestore + Auth + Storage (large PDFs)
-import { getAnalytics } from 'firebase/analytics'
 import { initializeApp } from 'firebase/app'
 import {
     getAuth,
@@ -54,11 +53,11 @@ const firebaseConfig = {
 }
 
 const app = initializeApp(firebaseConfig)
-let analytics
+let analytics = null
 try {
-  analytics = getAnalytics(app)
+  /* analytics intentionally disabled to avoid hard crash if submodule missing */
 } catch (e) {
-  // analytics may fail in non-browser envs — ignore
+  // ignore
 }
 
 // Android WebView (Capacitor) often fails Firestore's WebChannel streams,

@@ -63,6 +63,15 @@ dependencies {
 
 apply from: 'capacitor.build.gradle'
 
+// Stamp APK filenames: hana-mediabox-{version}-{debug|release}-{yyyyMMdd-HHmmss}.apk
+android.applicationVariants.configureEach { variant ->
+    variant.outputs.configureEach { output ->
+        def stamped = new Date().format('yyyyMMdd-HHmmss')
+        def vName = (variant.versionName ?: '0').toString().replaceAll(/[^0-9A-Za-z._-]/, '_')
+        output.outputFileName = "hana-mediabox-${vName}-${variant.buildType.name}-${stamped}.apk"
+    }
+}
+
 try {
     def servicesJSON = file('google-services.json')
     if (servicesJSON.text) {

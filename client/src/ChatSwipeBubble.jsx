@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { triggerFlowerRain, triggerPartyBurst, CHAT_PARTY_REACTION } from './FlowerRain'
 import { EMOTION_MOMENTS, triggerEmotionMoment } from './EmotionMoment'
 import {
     CHAT_DEFAULT_REACTION,
@@ -8,6 +7,7 @@ import {
     reactionMine,
     reactionTotal,
 } from './firebase'
+import { CHAT_PARTY_REACTION, triggerFlowerRain, triggerPartyBurst } from './FlowerRain'
 
 const REPLY_THRESHOLD = 52
 const ACTION_THRESHOLD = 56
@@ -186,12 +186,13 @@ function useIsCoarsePointer() {
 }
 
 function isIgnoredPressTarget(target) {
-  return (
-    target instanceof Element
-    && Boolean(target.closest(
-      'button, a, textarea, input, [data-no-bubble-press], .hana-chat-reactions, .chat-desktop-actions, .chat-msg-menu',
-    ))
-  )
+  if (!(target instanceof Element)) return false
+  // Image bubbles are a full-surface <button class="hana-chat-image-link">.
+  // Allow swipe-to-reply / long-press menu; short tap still opens the preview.
+  if (target.closest('.hana-chat-image-link')) return false
+  return Boolean(target.closest(
+    'button, a, textarea, input, [data-no-bubble-press], .hana-chat-reactions, .chat-desktop-actions, .chat-msg-menu',
+  ))
 }
 
 /** Soft device vibration when supported (Android Chrome, etc.). */
@@ -221,7 +222,7 @@ function haptic(kind = 'tap') {
  * Touch: swipe right → reply, swipe left → menu; long-press → menu.
  * Desktop: hover toolbar + right-click / long-press → fixed center menu.
  */
-export default function ChatSwipeBubble({
+function ChatSwipeBubble({
   className = '',
   canReply = true,
   canEdit = false,
@@ -252,6 +253,7 @@ export default function ChatSwipeBubble({
   const leaveTimer = useRef(null)
   const longPressFired = useRef(false)
   const suppressMenuDismissUntil = useRef(0)
+  const suppressClickRef = useRef(false)
   const activeTouchId = useRef(null)
   const canReplyRef = useRef(canReply)
   const canSwipeLeftRef = useRef(false)
@@ -538,6 +540,7 @@ export default function ChatSwipeBubble({
     const fireMenu = (options = {}) => {
       openedByPress = true
       longPressFired.current = true
+      suppressClickRef.current = true
       locking.current = 'hold'
       setActions(false)
       applyOffset(0)
@@ -637,6 +640,8 @@ export default function ChatSwipeBubble({
 
       if (swipeMode && locking.current === 'h') {
         const current = offsetRef.current
+        // Any committed horizontal swipe should not also fire the image tap.
+        if (Math.abs(current) > 8) suppressClickRef.current = true
         if (current >= REPLY_THRESHOLD && canReplyRef.current) {
           onReplyRef.current?.()
           haptic('reply')
@@ -664,12 +669,20 @@ export default function ChatSwipeBubble({
     root.addEventListener('touchmove', onTouchMove, { passive: false })
     root.addEventListener('touchend', finishTouch, { passive: true })
     root.addEventListener('touchcancel', finishTouch, { passive: true })
+    const onClickCapture = (event) => {
+      if (!suppressClickRef.current) return
+      suppressClickRef.current = false
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    root.addEventListener('click', onClickCapture, true)
     return () => {
       clearPress()
       root.removeEventListener('touchstart', onTouchStart)
       root.removeEventListener('touchmove', onTouchMove)
       root.removeEventListener('touchend', finishTouch)
       root.removeEventListener('touchcancel', finishTouch)
+      root.removeEventListener('click', onClickCapture, true)
     }
   }, [swipeMode])
 
@@ -680,6 +693,7 @@ export default function ChatSwipeBubble({
 
     const fireMenu = () => {
       longPressFired.current = true
+      suppressClickRef.current = true
       locking.current = 'hold'
       setActions(false)
       applyOffset(0)
@@ -928,7 +942,9 @@ export default function ChatSwipeBubble({
               reactions={reactions}
               reactorId={reactorId}
               defaultReaction={quickReaction}
-              includeDefaultReaction={false}
+              // When the corner flower FAB is hidden (e.g. own message),
+              // still show default reaction chips so taps are visible.
+              includeDefaultReaction={!showFlowerFab}
               disabled={!canReact}
               onToggle={canReact ? (emoji) => {
                 if (
@@ -1012,11 +1028,25 @@ export default function ChatSwipeBubble({
 
 export const MESSAGE_EDIT_WINDOW_MS = 5 * 60 * 1000
 
-export function canMutateOwnMessage(message, now = Date.now()) {
+export function canMutateOwnMessage(message, nowOrOptions = Date.now()) {
+  const options = typeof nowOrOptions === 'number'
+    ? { now: nowOrOptions }
+    : (nowOrOptions || {})
+  const now = options.now ?? Date.now()
+  const unreadByPartner = Boolean(options.unreadByPartner)
+  const windowMs = options.windowMs == null
+    ? MESSAGE_EDIT_WINDOW_MS
+    : Number(options.windowMs)
+
   if (!message?.createdAt || message.deleted) return false
+  // Partner has not read yet → edit/delete freely.
+  if (unreadByPartner) return true
+  // Unlimited after-read window (admin setting = 0 minutes).
+  if (!Number.isFinite(windowMs) || windowMs === Infinity) return true
+  if (windowMs <= 0) return true
   const created = new Date(message.createdAt).getTime()
   if (Number.isNaN(created)) return false
-  return now - created <= MESSAGE_EDIT_WINDOW_MS
+  return now - created <= windowMs
 }
 
 /** Other reactions under a bubble (flower FAB is separate on the bubble corner). */
@@ -1170,3 +1200,5 @@ function FlowerReactionButton({ emoji = CHAT_DEFAULT_REACTION, total = 0, mine =
     </button>
   )
 }
+
+export default memo(ChatSwipeBubble)

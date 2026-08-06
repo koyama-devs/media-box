@@ -273,6 +273,7 @@ export default function ListeningPostcard({
   onClose,
   onListen = null,
   onShareFile = null,
+  onSendToChat = null,
 }) {
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
@@ -386,6 +387,31 @@ export default function ListeningPostcard({
     }
   }
 
+  const handleSendToChat = async () => {
+    if (busy || typeof onSendToChat !== 'function') return
+    setBusy(true)
+    setStatus('')
+    setLocalError('')
+    try {
+      const canvas = await buildCanvas()
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+      if (!blob) throw new Error('export failed')
+      const file = new File([blob], 'listening-card.png', { type: 'image/png' })
+      const result = onSendToChat({ file, title, shareUrl })
+      if (!result?.accepted) {
+        setLocalError(result?.reason || '送信先のチャットを選んでください。')
+        return
+      }
+      setStatus('チャットに送信中です…')
+      onClose?.()
+    } catch (error) {
+      console.error(error)
+      setLocalError('チャットへの送信に失敗しました。')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return createPortal(
     <div
       className="postcard-overlay"
@@ -488,6 +514,11 @@ export default function ListeningPostcard({
             </button>
           ) : (
             <>
+              {typeof onSendToChat === 'function' ? (
+                <button type="button" className="primary-button" disabled={busy} onClick={handleSendToChat}>
+                  {busy ? '準備中...' : 'このチャットに送る'}
+                </button>
+              ) : null}
               <button type="button" className="primary-button" disabled={busy} onClick={handleShare}>
                 {busy ? '準備中...' : '共有する'}
               </button>

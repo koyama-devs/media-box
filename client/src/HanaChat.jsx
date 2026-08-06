@@ -1,88 +1,97 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { createPortal, flushSync } from 'react-dom'
+import { setAppUnreadBadge } from './appBadge'
 import hanachanArt from './assets/hanachan.svg'
 import {
-  addChatReminder,
-  dueChatReminders,
-  loadChatPins,
-  markChatReminderDone,
-  remindAtFromChoice,
-  toggleChatPin,
-  unpinChatMessage,
+    addChatReminder,
+    dueChatReminders,
+    loadChatPins,
+    markChatReminderDone,
+    remindAtFromChoice,
+    toggleChatPin,
+    unpinChatMessage,
 } from './chatExtras'
 import ChatImageLightbox from './ChatImageLightbox'
+import ChatNatsuFireworks from './ChatNatsuFireworks'
 import { playChatNotifySound, unlockChatNotifySound } from './chatNotifySound'
 import {
-  readDefaultReaction,
-  readEnterToSend,
-  readMessageSound,
-  readStickerSet,
-  writeDefaultReaction,
-  writeEnterToSend,
-  writeMessageSound,
-  writeStickerSet,
+    readDefaultReaction,
+    readEnterToSend,
+    readMessageSound,
+    readStickerSet,
+    writeDefaultReaction,
+    writeEnterToSend,
+    writeMessageSound,
+    writeStickerSet,
 } from './chatSettings'
 import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
 import EmotionMomentLayer, { EMOTION_MOMENTS, triggerEmotionMoment } from './EmotionMoment'
 import {
-  analyzeGuestMessageForOwner,
-  broadcastChatEffect,
-  CHAT_PRESENCE_MODES,
-  CHAT_REACTION_EMOJIS,
-  chatWithHanachan,
-  deleteChatMessage,
-  deliveryStatusLabel,
-  ensureChatThread,
-  ensureDefaultChatAccounts,
-  ensureGuestChatId,
-  formatChatTimestamp,
-  getFirebaseErrorMessage,
-  getGuestProfile,
-  getMessageDeliveryStatus,
-  isAdminUser,
-  listGuestProfiles,
-  markThreadRead,
-  migrateLegacyGuestThread,
-  normalizeChatPresenceMode,
-  OWNER_PROFILE,
-  pulseChatPresence,
-  resolveAvatarSrc,
-  resolveChatPresence,
-  resolveGuestDisplayName,
-  resolveSessionProfile,
-  sendChatMessage,
-  setChatPresenceStatus,
-  setChatProfileStatus,
-  setChatTyping,
-  subscribeChatAccounts,
-  subscribeChatMessages,
-  subscribeChatProfiles,
-  subscribeChatThreads,
-  subscribeOwnChatThread,
-  subscribeToAuthUser,
-  suggestHanaChat,
-  threadUnreadCount,
-  toggleChatReaction,
-  translateChatMessage,
-  updateChatMessage,
-  uploadChatImage,
+    analyzeGuestMessageForOwner,
+    applyReactionLocally,
+    broadcastChatEffect,
+    CHAT_PRESENCE_MODES,
+    CHAT_REACTION_EMOJIS,
+    chatWithHanachan,
+    DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
+    deleteChatMessage,
+    deliveryStatusLabel,
+    ensureChatThread,
+    ensureDefaultChatAccounts,
+    ensureGuestChatId,
+    formatChatTimestamp,
+    getFirebaseErrorMessage,
+    getGuestProfile,
+    getMessageDeliveryStatus,
+    isAdminUser,
+    listGuestProfiles,
+    markThreadRead,
+    messageEditWindowMsFromMinutes,
+    migrateLegacyGuestThread,
+    normalizeChatPresenceMode,
+    OWNER_PROFILE,
+    pulseChatPresence,
+    resolveAvatarSrc,
+    resolveChatPresence,
+    resolveGuestDisplayName,
+    resolveGuestThreadWithHistory,
+    resolveSessionProfile,
+    sendChatMessage,
+    setChatPresenceStatus,
+    setChatProfileStatus,
+    setChatTyping,
+    sortChatMessages,
+    subscribeChatAccounts,
+    subscribeChatMessages,
+    subscribeChatProfiles,
+    subscribeChatThreads,
+    subscribeOwnChatThread,
+    subscribeToAuthUser,
+    suggestHanaChat,
+    threadUnreadCount,
+    toggleChatReaction,
+    translateChatMessage,
+    updateChatMessage,
+    uploadChatImage
 } from './firebase'
 import FlowerRainLayer, {
-  CHAT_PARTY_REACTION,
-  triggerFlowerRain,
-  triggerPartyBurst,
+    CHAT_PARTY_REACTION,
+    triggerFlowerRain,
+    triggerPartyBurst,
 } from './FlowerRain'
 import './hana-chat.css'
 import HanaCall from './HanaCall'
 import HanaSticker, {
-  HANA_STICKER_SETS,
-  isHanaSticker,
-  suggestHanaStickers,
+    HANA_STICKER_SETS,
+    isHanaSticker,
+    suggestHanaStickers,
 } from './HanaStickers'
+import NatsuKingyo from './NatsuKingyo'
 import OwnerMessageAssist, {
-  collectUnansweredOwnerAssistMessages,
-  ownerAssistShouldCollapse,
+    collectUnansweredOwnerAssistMessages,
+    ownerAssistShouldCollapse,
 } from './OwnerMessageAssist'
+import { bindForegroundPush, ensureWebPush } from './webPush'
 
 const AI_HISTORY_PREFIX = 'hana-chat-ai-history-'
 const CHANNEL_PREFIX = 'hana-chat-channel-'
@@ -120,12 +129,32 @@ function useDesktopKeyboard() {
   return desktop
 }
 
+/** Phone/tablet: LINE-style sticker dock (not floating popover). */
+function useNarrowScreen() {
+  const [narrow, setNarrow] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.matchMedia('(max-width: 640px), (pointer: coarse)').matches
+  })
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 640px), (pointer: coarse)')
+    const sync = () => setNarrow(media.matches)
+    sync()
+    media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
+  }, [])
+  return narrow
+}
+
 /** Keep optimistic (pending) bubbles until the matching Firestore message arrives. */
-let stickerSendSeq = 0
+let chatSendSeq = 0
+
+function nextChatPendingId(kind = 'msg') {
+  chatSendSeq += 1
+  return `pending-${kind}-${Date.now()}-${chatSendSeq}`
+}
 
 function nextStickerPendingId() {
-  stickerSendSeq += 1
-  return `pending-sticker-${stickerSendSeq}`
+  return nextChatPendingId('sticker')
 }
 
 /** Resolve caption + big-icon emoji for a standalone effect-bar tap. */
@@ -160,19 +189,32 @@ function mergeServerMessagesWithPending(server, previous) {
   const usedServerIds = new Set()
   const kept = []
   for (const item of pending) {
+    const itemClientId = String(item.clientId || item.id || '')
+    const itemServerId = String(item.serverId || '')
+    const pendingTs = Date.parse(item.createdAtIso || item.createdAt || '') || 0
     const match = server.find((row) => {
       if (usedServerIds.has(row.id)) return false
+      if (itemServerId && row.id === itemServerId) return true
+      if (itemClientId && row.clientId && row.clientId === itemClientId) return true
+      // Pending sends always carry clientId — never content-match (that drops the
+      // optimistic bubble against an older same-text message before the new doc
+      // appears in the snapshot, which looks like a "missing last message").
+      if (itemServerId || itemClientId) return false
       if ((row.sender || row.role) !== (item.sender || item.role)) return false
       if (String(row.text || '') !== String(item.text || '')) return false
       if (String(row.sticker || '') !== String(item.sticker || '')) return false
       if (String(row.effect || '') !== String(item.effect || '')) return false
       if (Boolean(row.imageUrl) !== Boolean(item.imageUrl)) return false
+      if (pendingTs) {
+        const rowTs = Date.parse(row.createdAtIso || row.createdAt || '') || 0
+        if (rowTs && Math.abs(rowTs - pendingTs) > 90_000) return false
+      }
       return true
     })
     if (match) usedServerIds.add(match.id)
     else kept.push(item)
   }
-  return kept.length ? [...server, ...kept] : server
+  return sortChatMessages(kept.length ? [...server, ...kept] : server)
 }
 
 function scrollChatListToLatest(listNode) {
@@ -309,6 +351,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [channel, setChannel] = useState('ai') // ai | human (guest only)
   const [aiMessages, setAiMessages] = useState(() => defaultIntroMessages(getGuestProfile(guestKey)))
   const [hanaMessages, setHanaMessages] = useState([])
+  /** True after first Firestore snapshot for the open human thread. */
+  const [messagesHydrated, setMessagesHydrated] = useState(false)
+  /** Summer décor waits until messages have painted. */
+  const [showSummerFx, setShowSummerFx] = useState(false)
   const [threads, setThreads] = useState([])
   const [ownThread, setOwnThread] = useState(null)
   const [activeThreadId, setActiveThreadId] = useState(null)
@@ -316,8 +362,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [storageReady, setStorageReady] = useState(false)
   const [replyTo, setReplyTo] = useState(null)
   const [editingId, setEditingId] = useState(null)
-  const [presenceTick, setPresenceTick] = useState(() => Date.now())
-  const [typingTick, setTypingTick] = useState(() => Date.now())
   const [chatProfiles, setChatProfiles] = useState({})
   const [ownerSuggestions, setOwnerSuggestions] = useState({ replies: [], topics: [], expressions: [] })
   const [suggestBusy, setSuggestBusy] = useState(false)
@@ -332,9 +376,15 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [defaultReaction, setDefaultReaction] = useState(() => readDefaultReaction())
   const [enterToSend, setEnterToSend] = useState(() => readEnterToSend())
   const desktopKeyboard = useDesktopKeyboard()
+  const narrowScreen = useNarrowScreen()
   // Soft-keyboard phones/tablets keep Enter = newline; the toggle is desktop-only.
   const enterSendsMessage = desktopKeyboard && enterToSend
   const [messageSound, setMessageSound] = useState(() => readMessageSound())
+  const [notifyPermission, setNotifyPermission] = useState(() => (
+    typeof Notification === 'undefined' ? 'unsupported' : Notification.permission
+  ))
+  const [incomingBanner, setIncomingBanner] = useState(null)
+  const incomingBannerTimerRef = useRef(null)
   const [chatAccounts, setChatAccounts] = useState(() => listGuestProfiles())
   const [copyNote, setCopyNote] = useState('')
   const [actionNote, setActionNote] = useState('')
@@ -350,13 +400,32 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const composerRef = useRef(null)
   const guestMenuRef = useRef(null)
   const stickerRef = useRef(null)
+  const stickerTriggerRef = useRef(null)
   const imageInputRef = useRef(null)
   const settingsRef = useRef(null)
+  const callButtonsHostRef = useRef(null)
+  const [callButtonsHost, setCallButtonsHost] = useState(null)
   const syncPanelViewportRef = useRef(() => {})
   const scrollToLatestRef = useRef(() => {})
   const viewportApplyRef = useRef({ top: 0, height: 0, width: 0, keyboard: false })
   const viewportDebounceRef = useRef(null)
   const keyboardPinnedRef = useRef(false)
+  const keyboardHeightRef = useRef(280)
+  /** Full-screen layout height (no keyboard). */
+  const baselineLayoutRef = useRef(0)
+  /** Half-screen dock height for the sticker tray. */
+  const stableChromeHRef = useRef(0)
+  /**
+   * Sticker dock bottom strip (px). 0 = idle or keyboard mode.
+   * Composer always sits directly above this strip (or above the soft keyboard).
+   */
+  const [bottomChromePx, setBottomChromePx] = useState(0)
+  const bottomChromePxRef = useRef(0)
+  bottomChromePxRef.current = bottomChromePx
+  /** Phone width: bottom half sticker dock (not the floating popover). */
+  const stickerDockMode = narrowScreen
+  const stickerDockOpenRef = useRef(false)
+  stickerDockOpenRef.current = Boolean(stickerOpen && stickerDockMode)
   const retainComposerFocusRef = useRef(false)
   const migrationCheckedRef = useRef(new Set())
   const seenEffectRef = useRef(new Set())
@@ -372,6 +441,32 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const typingStopTimerRef = useRef(null)
   const threadsRef = useRef(threads)
   threadsRef.current = threads
+  /** Keep last snapshot per thread so open/switch never flashes an empty list. */
+  const messageCacheRef = useRef(new Map())
+  /** Ids removed locally while Firestore delete is in flight (blocks snapshot revive). */
+  const deletingIdsRef = useRef(new Set())
+  const [editWindowMs, setEditWindowMs] = useState(() => (
+    messageEditWindowMsFromMinutes(DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES)
+  ))
+
+  const showThreadMessages = useCallback((threadId, relatedIds = []) => {
+    if (!threadId) {
+      setHanaMessages([])
+      return
+    }
+    const ids = [threadId, ...relatedIds].filter(Boolean)
+    for (const id of ids) {
+      const cached = messageCacheRef.current.get(id)
+      if (Array.isArray(cached) && cached.length > 0) {
+        // Alias cache under the thread we are about to open so subscribe merges cleanly.
+        messageCacheRef.current.set(threadId, cached)
+        setHanaMessages(cached)
+        return
+      }
+    }
+    const cached = messageCacheRef.current.get(threadId)
+    setHanaMessages(Array.isArray(cached) ? cached : [])
+  }, [])
 
   scrollToLatestRef.current = () => {
     const run = () => scrollChatListToLatest(listRef.current)
@@ -423,18 +518,28 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const ownerGuestRoster = useMemo(() => {
     if (!actingAsOwner) return []
     const usedIds = new Set()
-    const knownProfiles = chatAccounts.length ? chatAccounts : listGuestProfiles()
+    const knownProfiles = (chatAccounts.length ? chatAccounts : listGuestProfiles())
+      .filter((profile) => profile.accountActive !== false)
     const known = knownProfiles.map((profile) => {
       const canonicalId = `guest-${profile.key}`
       const matches = threads.filter((t) => (
         t.id === canonicalId
         || t.guestKey === profile.key
         || t.guestLabel === profile.displayName
+        || String(t.guestLabel || '').trim() === String(profile.addressAs || '').trim()
       ))
       const thread = [...matches].sort((a, b) => {
-        const score = (entry) => (entry.lastText ? 4 : 0)
-          + (entry.id === canonicalId ? 2 : 0)
-          + (entry.guestKey === profile.key ? 1 : 0)
+        const score = (entry) => {
+          const hasText = String(entry.lastText || '').trim() ? 40 : 0
+          // Prefer a keyed non-canonical thread over an empty guest-{key} shell.
+          const legacyHint = entry.guestKey === profile.key && entry.id !== canonicalId
+            && String(entry.lastText || '').trim()
+            ? 12
+            : (entry.guestKey === profile.key && entry.id !== canonicalId ? 6 : 0)
+          const canonHit = entry.id === canonicalId ? 2 : 0
+          const keyHit = entry.guestKey === profile.key ? 1 : 0
+          return hasText + legacyHint + canonHit + keyHit
+        }
         const diff = score(b) - score(a)
         if (diff !== 0) return diff
         return String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
@@ -462,7 +567,14 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         guestKey: thread.guestKey || '',
       }))
       // Hide anonymous / auto-generated guests (ゲスト桜42, ゲスト蜜15, …).
-      .filter((entry) => !/^ゲスト/.test(String(entry.label || '').trim()))
+      .filter((entry) => {
+        if (/^ゲスト/.test(String(entry.label || '').trim())) return false
+        const key = String(entry.guestKey || '').trim().toLowerCase()
+        if (!key) return true
+        const account = (chatAccounts.length ? chatAccounts : listGuestProfiles())
+          .find((profile) => profile.key === key)
+        return !account || account.accountActive !== false
+      })
     return [...known, ...extras]
   }, [actingAsOwner, threads, chatAccounts])
 
@@ -493,6 +605,23 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     return known ? known[1].toLowerCase() : ''
   }, [actingAsOwner, activeThreadId, threads])
 
+  const callListenThreadIds = useMemo(() => {
+    if (actingAsOwner) {
+      const ids = new Set()
+      // All live threads — not only the active roster — so a guest call still rings
+      // even if the profile was filtered out of the combobox.
+      threads.forEach((thread) => {
+        if (thread?.id) ids.add(thread.id)
+      })
+      ownerGuestRoster.forEach((entry) => {
+        ;[entry.threadId, entry.canonicalId, entry.thread?.id].filter(Boolean).forEach((id) => ids.add(id))
+      })
+      return [...ids]
+    }
+    // Guest: always watch the human thread so Hana's call rings even on AI channel.
+    return guestChatId ? [guestChatId] : []
+  }, [actingAsOwner, threads, ownerGuestRoster, guestChatId])
+
   const unreadLauncher = useMemo(() => {
     if (actingAsOwner) {
       const visibleIds = new Set(
@@ -504,6 +633,14 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     }
     return threadUnreadCount(ownThread, 'guest')
   }, [actingAsOwner, threads, ownThread, ownerGuestRoster])
+
+  useEffect(() => {
+    if (hidden) {
+      setAppUnreadBadge(0)
+      return
+    }
+    setAppUnreadBadge(unreadLauncher)
+  }, [hidden, unreadLauncher])
 
   const threadUnreadSnapshotRef = useRef({})
   const guestUnreadSnapshotRef = useRef(null)
@@ -522,10 +659,49 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     }
   }, [hidden])
 
-  const notifyIncomingMessage = useCallback(() => {
-    if (!messageSound) return
-    playChatNotifySound()
-  }, [messageSound])
+  const dismissIncomingBanner = useCallback(() => {
+    if (incomingBannerTimerRef.current) {
+      window.clearTimeout(incomingBannerTimerRef.current)
+      incomingBannerTimerRef.current = null
+    }
+    setIncomingBanner(null)
+  }, [])
+
+  const notifyIncomingMessage = useCallback((payload = {}) => {
+    const title = String(payload.title || '').trim() || '新しいメッセージ'
+    const body = String(payload.body || '').trim() || 'メッセージが届きました'
+    const threadId = String(payload.threadId || '').trim()
+    const showBanner = payload.showBanner !== false
+
+    if (messageSound) playChatNotifySound()
+
+    if (!showBanner) return
+    // Skip banner when already looking at that conversation.
+    if (open && (!threadId || threadId === activeThreadId)) return
+
+    setIncomingBanner({ title, body, threadId })
+    if (incomingBannerTimerRef.current) window.clearTimeout(incomingBannerTimerRef.current)
+    incomingBannerTimerRef.current = window.setTimeout(() => {
+      setIncomingBanner(null)
+      incomingBannerTimerRef.current = null
+    }, 6500)
+  }, [activeThreadId, messageSound, open])
+  useEffect(() => {
+    if (hidden) return undefined
+    bindForegroundPush()
+    const onPush = (event) => {
+      const detail = event?.detail || {}
+      if (detail.type && detail.type !== 'chat') return
+      notifyIncomingMessage({
+        title: detail.title,
+        body: detail.body,
+        threadId: detail.threadId,
+      })
+    }
+    window.addEventListener('hana-chat-push', onPush)
+    return () => window.removeEventListener('hana-chat-push', onPush)
+  }, [hidden, notifyIncomingMessage])
+
 
   useEffect(() => {
     if (hidden) return undefined
@@ -580,6 +756,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   // Also leave any anonymous ゲスト* thread that is no longer shown in the roster.
   useEffect(() => {
     if (hidden || !actingAsOwner) return
+    // Wait until roster has entries — an empty interim list used to clear
+    // the open thread and wipe the bubble list (looked like "no messages").
+    if (!ownerGuestRoster.length) return
 
     if (activeThreadId) {
       const stillVisible = ownerGuestRoster.some((item) => (
@@ -600,15 +779,20 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     const label = entry?.label || profile?.displayName || 'ガブリエル'
     const guestKeyForThread = entry?.guestKey || DEFAULT_OWNER_GUEST_KEY
 
-    setHanaMessages([])
-    setActiveThreadId(threadId)
+    if (activeThreadId !== threadId) {
+      showThreadMessages(threadId, [canonicalId, entry?.thread?.id].filter(Boolean))
+      setMessagesHydrated(false)
+      setActiveThreadId(threadId)
+    } else if (!activeThreadId) {
+      setActiveThreadId(threadId)
+    }
 
     void ensureChatThread({
       threadId: canonicalId,
       guestLabel: label,
       guestKey: guestKeyForThread,
     }).catch(() => {})
-  }, [hidden, actingAsOwner, activeThreadId, ownerGuestRoster])
+  }, [hidden, actingAsOwner, activeThreadId, ownerGuestRoster, showThreadMessages])
 
   // Owner inbox: chime on new unread (panel open or closed), jump only while open.
   useEffect(() => {
@@ -655,7 +839,19 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     })
 
     threadUnreadSnapshotRef.current = snapshot
-    if (newestId) notifyIncomingMessage()
+    if (newestId) {
+        const thread = threads.find((item) => item.id === newestId)
+        const entry = ownerGuestRoster.find((item) => (
+          item.threadId === newestId
+          || item.canonicalId === newestId
+          || item.thread?.id === newestId
+        ))
+        notifyIncomingMessage({
+          title: entry?.label || thread?.guestLabel || 'ゲスト',
+          body: String(thread?.lastText || '').trim() || '新しいメッセージ',
+          threadId: newestId,
+        })
+      }
     if (!open || !newestId || newestId === activeThreadId) return
 
     const entry = ownerGuestRoster.find((item) => (
@@ -664,9 +860,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     if (!entry) return
     setReplyTo(null)
     setEditingId(null)
-    setHanaMessages([])
+    showThreadMessages(entry.threadId, [entry.canonicalId, entry.thread?.id, newestId].filter(Boolean))
+    setMessagesHydrated(false)
     setActiveThreadId(entry.threadId)
-  }, [hidden, actingAsOwner, open, threads, activeThreadId, ownerGuestRoster, notifyIncomingMessage])
+  }, [hidden, actingAsOwner, open, threads, activeThreadId, ownerGuestRoster, notifyIncomingMessage, showThreadMessages])
 
   // Guest: soft chime when Hana (or the other party) leaves a new unread message.
   useEffect(() => {
@@ -688,7 +885,13 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       || (!prev.unread && unread)
     )
     guestUnreadSnapshotRef.current = next
-    if (grew) notifyIncomingMessage()
+    if (grew) {
+      notifyIncomingMessage({
+        title: 'はな',
+        body: String(ownThread?.lastText || '').trim() || '新しいメッセージ',
+        threadId: ownThread?.id || guestChatId || '',
+      })
+    }
   }, [hidden, actingAsOwner, ownThread, notifyIncomingMessage])
 
   useEffect(() => {
@@ -732,18 +935,63 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   const guestOnHuman = !actingAsOwner && channel === 'human'
 
+  // Messages first: reset summer FX whenever the open conversation changes.
   useEffect(() => {
-    if (hidden || actingAsOwner) {
+    if (!open) {
+      setMessagesHydrated(false)
+      setShowSummerFx(false)
       return undefined
     }
-    if (!guestOnHuman || !guestChatId) {
-      if (!guestOnHuman) setHanaMessages([])
+    if (!actingAsOwner && channel === 'ai') {
+      setMessagesHydrated(true)
       return undefined
     }
+    setMessagesHydrated(false)
+    setShowSummerFx(false)
+    return undefined
+  }, [open, actingAsOwner, channel, activeThreadId, guestChatId, guestOnHuman])
+
+  // Only start chat summer décor after messages are hydrated and the list has painted.
+  useEffect(() => {
+    if (!open || !messagesHydrated) {
+      setShowSummerFx(false)
+      return undefined
+    }
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      const enable = () => {
+        if (cancelled) return
+        setShowSummerFx(true)
+      }
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          if (cancelled) return
+          if (typeof window.requestIdleCallback === 'function') {
+            window.requestIdleCallback(enable, { timeout: 900 })
+          } else {
+            enable()
+          }
+        })
+      })
+    }, 320)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [open, messagesHydrated])
+
+  useEffect(() => {
+    if (hidden || actingAsOwner || !guestChatId) {
+      return undefined
+    }
+    if (!guestOnHuman) return undefined
     const unsub = subscribeChatMessages(
       guestChatId,
       (next) => {
-        setHanaMessages((prev) => mergeServerMessagesWithPending(next, prev))
+        const filtered = next.filter((m) => !deletingIdsRef.current.has(m.id))
+        messageCacheRef.current.set(guestChatId, filtered)
+        setHanaMessages((prev) => mergeServerMessagesWithPending(filtered, prev))
+        setMessagesHydrated(true)
         setError('')
       },
       (err) => setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。'),
@@ -761,7 +1009,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       activeThreadId,
       (next) => {
         if (cancelled) return
-        setHanaMessages((prev) => mergeServerMessagesWithPending(next, prev))
+        const filtered = next.filter((m) => !deletingIdsRef.current.has(m.id))
+        messageCacheRef.current.set(activeThreadId, filtered)
+        setHanaMessages((prev) => mergeServerMessagesWithPending(filtered, prev))
+        setMessagesHydrated(true)
         setError('')
       },
       (err) => {
@@ -826,14 +1077,14 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       if (reqId !== ownerAssistReqRef.current && !force) {
         // Newer requests may have started; still apply if this id is still loading.
       }
-      const ok = Boolean(data.translationVi || data.readingHiragana || data.replies?.length)
+      const ok = Boolean(data.translationVi || data.readingHiragana)
       setOwnerAssist((prev) => ({
         ...prev,
         [message.id]: {
           status: ok ? 'ready' : 'error',
           translationVi: data.translationVi || '',
           readingHiragana: data.readingHiragana || '',
-          replies: Array.isArray(data.replies) ? data.replies : [],
+          replies: [],
           reason: data.reason || (ok ? null : 'empty'),
         },
       }))
@@ -880,7 +1131,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       ownerAssistSeedRef.current = activeThreadId
       const pending = collectUnansweredOwnerAssistMessages(hanaMessages, {
         isAssistable: isOwnerAssistableGuestMessage,
-        max: 8,
+        max: 3,
       }).filter((item) => !ownerAssistSeenRef.current.has(item.id))
       pending.forEach((item) => ownerAssistSeenRef.current.add(item.id))
       void (async () => {
@@ -930,7 +1181,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     activeThreadId,
     guestOnHuman,
     guestChatId,
-    hanaMessages,
   ])
 
   const messagesScrollKey = useMemo(() => {
@@ -1019,30 +1269,48 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   }, [])
 
   useEffect(() => {
-    if (!open) return undefined
-    const timer = window.setInterval(() => setTypingTick(Date.now()), 1_000)
-    return () => window.clearInterval(timer)
+    if (!open) {
+      setCallButtonsHost(null)
+      return undefined
+    }
+    setCallButtonsHost(callButtonsHostRef.current)
+    return undefined
+  }, [open, actingAsOwner, activeThreadId, guestOnHuman, channel])
+
+  useEffect(() => {
+    if (open) document.documentElement.dataset.hanaChatOpen = '1'
+    else delete document.documentElement.dataset.hanaChatOpen
+    return () => { delete document.documentElement.dataset.hanaChatOpen }
   }, [open])
 
-  const partnerTyping = useMemo(() => {
-    void typingTick
-    if (!open || (!actingAsOwner && !guestOnHuman)) return false
+  const [partnerTyping, setPartnerTyping] = useState(false)
+  useEffect(() => {
+    if (!open || (!actingAsOwner && !guestOnHuman)) {
+      setPartnerTyping(false)
+      return undefined
+    }
     const value = actingAsOwner
       ? activeThreadMeta?.guestTypingAt
       : activeThreadMeta?.hanaTypingAt
     const at = Date.parse(String(value || ''))
-    return Number.isFinite(at) && typingTick - at < TYPING_VISIBLE_MS
-  }, [open, actingAsOwner, guestOnHuman, activeThreadMeta, typingTick])
+    if (!Number.isFinite(at)) {
+      setPartnerTyping(false)
+      return undefined
+    }
+    const remaining = TYPING_VISIBLE_MS - (Date.now() - at)
+    if (remaining <= 0) {
+      setPartnerTyping(false)
+      return undefined
+    }
+    setPartnerTyping(true)
+    const timer = window.setTimeout(() => setPartnerTyping(false), remaining)
+    return () => window.clearTimeout(timer)
+  }, [open, actingAsOwner, guestOnHuman, activeThreadMeta?.guestTypingAt, activeThreadMeta?.hanaTypingAt])
+
 
   const partnerTypingLabel = actingAsOwner
     ? `${ownerActiveGuestLabel}が入力中`
     : 'はなが入力中'
-
-  useEffect(() => {
-    if (hidden || !open) return undefined
-    const timer = window.setInterval(() => setPresenceTick(Date.now()), 15_000)
-    return () => window.clearInterval(timer)
-  }, [hidden, open])
 
   /**
    * Replay the effect the other participant just triggered.
@@ -1111,7 +1379,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   }, [hidden, open, actingAsOwner, activeThreadId, guestChatId])
 
   const partnerPresence = useMemo(() => {
-    void presenceTick
     if (actingAsOwner) {
       if (!activeThreadId) {
         return resolveChatPresence({})
@@ -1119,19 +1386,19 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       return resolveChatPresence({
         onlineAt: activeThreadMeta?.guestOnlineAt,
         status: chatProfiles[ownerActiveGuestKey]?.status || activeThreadMeta?.guestStatus,
-      }, presenceTick)
+      }, Date.now())
     }
     if (channel === 'ai') {
       return resolveChatPresence({
-        onlineAt: new Date(presenceTick).toISOString(),
+        onlineAt: new Date().toISOString(),
         status: 'auto',
-      }, presenceTick)
+      }, Date.now())
     }
     return resolveChatPresence({
       onlineAt: activeThreadMeta?.hanaOnlineAt,
       status: chatProfiles[OWNER_PROFILE.key]?.status || activeThreadMeta?.hanaStatus,
-    }, presenceTick)
-  }, [actingAsOwner, channel, activeThreadMeta, presenceTick, activeThreadId, chatProfiles, ownerActiveGuestKey])
+    }, Date.now())
+  }, [actingAsOwner, channel, activeThreadMeta, activeThreadId, chatProfiles, ownerActiveGuestKey])
 
   // Status is a profile-level setting (same on the main page and in every thread).
   const myPresenceMode = normalizeChatPresenceMode(
@@ -1145,10 +1412,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     }
     // While this chat is open we are effectively online; mode may still be busy/away.
     return resolveChatPresence({
-      onlineAt: new Date(presenceTick).toISOString(),
+      onlineAt: new Date().toISOString(),
       status: myPresenceMode,
-    }, presenceTick)
-  }, [open, myPresenceMode, presenceTick])
+    }, Date.now())
+  }, [open, myPresenceMode])
 
   const applyMyPresenceStatus = async (mode) => {
     const threadId = actingAsOwner ? activeThreadId : guestChatId
@@ -1167,11 +1434,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     const panel = panelRef.current
     if (!panel) return undefined
 
-    const scrollMessagesToEnd = () => {
-      scrollToLatestRef.current()
-    }
-
-    const clearInline = ({ keepPinned = false } = {}) => {
+    const clearInline = () => {
       panel.style.left = ''
       panel.style.right = ''
       panel.style.top = ''
@@ -1179,8 +1442,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       panel.style.width = ''
       panel.style.height = ''
       panel.style.maxHeight = ''
+      panel.style.minHeight = ''
+      panel.style.paddingBottom = ''
       panel.classList.remove('is-keyboard')
-      if (!keepPinned) keyboardPinnedRef.current = false
+      keyboardPinnedRef.current = false
       viewportApplyRef.current = { top: 0, height: 0, width: 0, keyboard: false }
     }
 
@@ -1195,120 +1460,152 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       }
     }
 
-    const applyMobileViewport = (options = {}) => {
-      if (!window.matchMedia('(max-width: 640px)').matches) {
+    const getFullLayoutH = () => {
+      const inner = window.innerHeight || document.documentElement.clientHeight || 0
+      const vv = window.visualViewport
+      let fromVv = 0
+      if (vv) {
+        const inset = Math.max(0, inner - vv.height - (vv.offsetTop || 0))
+        fromVv = Math.round(vv.height + inset)
+      }
+      return Math.max(baselineLayoutRef.current || 0, inner, fromVv)
+    }
+
+    const halfDockPx = () => {
+      const fullH = getFullLayoutH()
+      const half = Math.round(fullH * 0.5)
+      stableChromeHRef.current = half
+      keyboardHeightRef.current = half
+      return half
+    }
+
+    const setDockChrome = (px) => {
+      const chrome = Math.max(0, Math.round(px) || 0)
+      if (bottomChromePxRef.current !== chrome) {
+        flushSync(() => setBottomChromePx(chrome))
+      }
+      if (chrome > 0) {
+        panel.style.setProperty('--hana-bottom-chrome-h', `${chrome}px`)
+        panel.style.setProperty('--hana-sticker-dock-h', `${chrome}px`)
+      } else {
+        panel.style.removeProperty('--hana-bottom-chrome-h')
+        panel.style.removeProperty('--hana-sticker-dock-h')
+      }
+    }
+
+    /**
+     * Mid slot: composer fixed at screen mid.
+     * Bottom half = sticker dock OR empty space for the soft keyboard.
+     * Panel height is locked to full screen so a shrunk parent cannot shove
+     * the composer to the top.
+     */
+    const applyMidSlot = () => {
+      const fullH = getFullLayoutH()
+      const half = Math.round(fullH * 0.5)
+      stableChromeHRef.current = half
+      keyboardHeightRef.current = half
+      setDockChrome(half)
+      panel.style.left = '0px'
+      panel.style.right = 'auto'
+      panel.style.width = '100%'
+      panel.style.top = '0px'
+      panel.style.bottom = 'auto'
+      panel.style.minHeight = '0px'
+      panel.style.height = `${fullH}px`
+      panel.style.maxHeight = `${fullH}px`
+      panel.style.paddingBottom = '0px'
+      panel.classList.remove('is-keyboard')
+      keyboardPinnedRef.current = false
+      viewportApplyRef.current = { top: 0, height: fullH, width: 0, keyboard: false }
+    }
+
+    let keyboardWasOpen = false
+    const applyMobileViewport = () => {
+      if (!window.matchMedia('(max-width: 640px), (pointer: coarse)').matches) {
+        setDockChrome(0)
         clearInline()
         lockPageScroll(false)
+        keyboardWasOpen = false
         return
       }
 
-      // Always lock background page while chat is open on mobile.
       lockPageScroll(true)
 
+      const inner = window.innerHeight || document.documentElement.clientHeight || 0
       const vv = window.visualViewport
+      const vvInset = vv
+        ? Math.max(0, inner - vv.height - (vv.offsetTop || 0))
+        : 0
+      const keyboardOpen = vvInset > 80
+      const wasKeyboardOpen = keyboardWasOpen
+      keyboardWasOpen = keyboardOpen
       const inputFocused = document.activeElement === inputRef.current
-      const layoutHeight = window.innerHeight || document.documentElement.clientHeight || 0
-      const vvHeight = vv ? vv.height : layoutHeight
-      const keyboardInset = Math.max(0, layoutHeight - vvHeight - (vv?.offsetTop || 0))
-      const vvShrunk = keyboardInset > 80 || (vv && vv.height < layoutHeight - 100)
+      const wantMid = stickerDockOpenRef.current || inputFocused || keyboardOpen
 
-      if (inputFocused || options.forceKeyboard) keyboardPinnedRef.current = true
-      if (!inputFocused && !options.forceKeyboard && !vvShrunk) {
-        keyboardPinnedRef.current = false
+      if (!wantMid) {
+        baselineLayoutRef.current = Math.max(baselineLayoutRef.current || 0, inner)
+      } else if (keyboardOpen) {
+        const fullH = Math.max(baselineLayoutRef.current || 0, inner + Math.round(vvInset))
+        if (fullH > (baselineLayoutRef.current || 0)) baselineLayoutRef.current = fullH
       }
 
-      const wantKeyboard = Boolean(options.forceKeyboard)
-        || keyboardPinnedRef.current
-        || inputFocused
-
-      if (!vv) {
-        if (wantKeyboard) panel.classList.add('is-keyboard')
-        else clearInline()
+      // Sticker dock open → mid slot with stickers in the bottom half.
+      if (stickerDockOpenRef.current) {
+        applyMidSlot()
         return
       }
 
-      // Focused but keyboard not open yet: keep fullscreen CSS (no shrink flash).
-      if (wantKeyboard && !vvShrunk) {
-        panel.classList.add('is-keyboard')
-        // Clear any half-applied shrink from a previous frame.
-        if (viewportApplyRef.current.keyboard) {
-          panel.style.left = ''
-          panel.style.right = ''
-          panel.style.top = ''
-          panel.style.bottom = ''
-          panel.style.width = ''
-          panel.style.height = ''
-          panel.style.maxHeight = ''
-          viewportApplyRef.current = { top: 0, height: 0, width: 0, keyboard: false }
-        }
-        if (options.revealComposer || options.force) {
-          window.requestAnimationFrame(scrollMessagesToEnd)
-        }
-        return
-      }
-
-      if (!wantKeyboard && !vvShrunk) {
+      // 完了: keyboard dismissed → composer back to bottom.
+      if (wasKeyboardOpen && !keyboardOpen) {
+        setDockChrome(0)
         clearInline()
+        if (inputFocused) {
+          try { inputRef.current?.blur() } catch { /* ignore */ }
+        }
         return
       }
 
-      // Keyboard visible: pin panel to the visual viewport above the keyboard.
-      const left = Math.max(0, Math.round(vv.offsetLeft))
-      const width = Math.max(240, Math.round(vv.width))
-      const top = Math.max(0, Math.round(vv.offsetTop))
-      const height = Math.max(180, Math.round(vv.height))
-      const prev = viewportApplyRef.current
-      const same = prev.keyboard
-        && Math.abs(prev.top - top) < 8
-        && Math.abs(prev.height - height) < 8
-        && Math.abs(prev.width - width) < 8
+      // Typing / keyboard up → same mid slot (empty chrome; IME covers it).
+      if (inputFocused || keyboardOpen) {
+        applyMidSlot()
+        return
+      }
 
-      if (same && !options.force && !options.revealComposer) return
-
-      viewportApplyRef.current = { top, height, width, keyboard: true }
-      panel.style.left = `${left}px`
-      panel.style.right = 'auto'
-      panel.style.width = `${width}px`
-      panel.style.top = `${top}px`
-      panel.style.bottom = 'auto'
-      panel.style.height = `${height}px`
-      panel.style.maxHeight = `${height}px`
-      panel.classList.add('is-keyboard')
-
-      // After height settles, keep newest messages in view (not mid-list).
-      window.requestAnimationFrame(() => {
-        scrollMessagesToEnd()
-        window.requestAnimationFrame(scrollMessagesToEnd)
-      })
+      setDockChrome(0)
+      clearInline()
     }
 
     const syncMobileViewport = (options = {}) => {
-      if (options.forceKeyboard || options.immediate || options.force) {
+      if (options.immediate || options.force || options.forceKeyboard) {
         if (viewportDebounceRef.current) {
           window.clearTimeout(viewportDebounceRef.current)
           viewportDebounceRef.current = null
         }
-        applyMobileViewport(options)
+        applyMobileViewport()
         return
       }
       if (viewportDebounceRef.current) window.clearTimeout(viewportDebounceRef.current)
       viewportDebounceRef.current = window.setTimeout(() => {
         viewportDebounceRef.current = null
-        applyMobileViewport(options)
-      }, 60)
+        applyMobileViewport()
+      }, 32)
     }
 
+    if (!baselineLayoutRef.current) {
+      baselineLayoutRef.current = window.innerHeight || document.documentElement.clientHeight || 0
+    }
     syncMobileViewport({ immediate: true })
     syncPanelViewportRef.current = syncMobileViewport
     const vv = window.visualViewport
-    // resize only — scroll events on iOS cause constant jitter
     vv?.addEventListener('resize', syncMobileViewport)
+    vv?.addEventListener('scroll', syncMobileViewport)
     window.addEventListener('resize', syncMobileViewport)
     window.addEventListener('orientationchange', syncMobileViewport)
     return () => {
       syncPanelViewportRef.current = () => {}
       if (viewportDebounceRef.current) window.clearTimeout(viewportDebounceRef.current)
       vv?.removeEventListener('resize', syncMobileViewport)
+      vv?.removeEventListener('scroll', syncMobileViewport)
       window.removeEventListener('resize', syncMobileViewport)
       window.removeEventListener('orientationchange', syncMobileViewport)
       clearInline()
@@ -1322,7 +1619,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       const input = inputRef.current
       if (!input) return
       input.focus({ preventScroll: true })
-      syncPanelViewportRef.current({ forceKeyboard: true, revealComposer: true })
+      syncPanelViewportRef.current({ immediate: true, force: true })
     })
     return () => window.cancelAnimationFrame(id)
   }, [open, editingId, replyTo])
@@ -1335,6 +1632,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     setOpen(false)
     setSuggestPickerGroup(null)
     setGuestMenuOpen(false)
+    setBottomChromePx(0)
+    setStickerOpen(false)
   }
 
   const toggleChatOpen = () => {
@@ -1366,6 +1665,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const visibleMessages = actingAsOwner || guestOnHuman
     ? hanaMessages.map((m) => ({
         id: m.id,
+        serverId: m.serverId || '',
+        clientId: m.clientId || '',
         role: m.sender === 'hana' ? 'hana' : (m.role || 'guest'),
         text: m.text,
         rawText: m.rawText,
@@ -1381,8 +1682,21 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         reactions: m.reactions || {},
         pending: Boolean(m.pending),
         uploading: Boolean(m.uploading),
+        kind: m.kind || '',
+        callLog: m.callLog || null,
       }))
     : aiMessages
+
+  const ownerAssistCollapseById = useMemo(() => {
+    const map = Object.create(null)
+    if (!actingAsOwner) return map
+    for (const message of visibleMessages) {
+      if (ownerAssist[message.id]) {
+        map[message.id] = ownerAssistShouldCollapse(message.id, visibleMessages)
+      }
+    }
+    return map
+  }, [actingAsOwner, visibleMessages, ownerAssist])
 
   const ownSender = actingAsOwner ? 'hana' : 'guest'
   const reactorId = actingAsOwner
@@ -1483,6 +1797,24 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     setEnterToSend((prev) => writeEnterToSend(!prev))
   }
 
+  const togglePushNotifications = () => {
+    if (typeof Notification === 'undefined' || window.__HANA_CAPACITOR__) return
+    const pushKey = sessionProfile?.key || (actingAsOwner ? 'hana' : '')
+    if (!pushKey) return
+    if (Notification.permission === 'granted') {
+      void ensureWebPush(pushKey)
+      setNotifyPermission('granted')
+      return
+    }
+    if (Notification.permission === 'denied') {
+      setNotifyPermission('denied')
+      return
+    }
+    void ensureWebPush(pushKey, { requestPermission: true }).then(() => {
+      setNotifyPermission(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission)
+    })
+  }
+
   const toggleMessageSound = () => {
     setMessageSound((prev) => {
       const next = writeMessageSound(!prev)
@@ -1525,7 +1857,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   useEffect(() => {
     setSuggestPickerGroup(null)
     setGuestMenuOpen(false)
+    stickerDockOpenRef.current = false
     setStickerOpen(false)
+    setBottomChromePx(0)
     setSettingsOpen(false)
   }, [activeThreadId, open])
 
@@ -1535,8 +1869,16 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       if (guestMenuOpen && !guestMenuRef.current?.contains(event.target)) {
         setGuestMenuOpen(false)
       }
-      if (stickerOpen && !stickerRef.current?.contains(event.target)) {
-        setStickerOpen(false)
+      if (stickerOpen) {
+        const inPanel = stickerRef.current?.contains(event.target)
+        const inTrigger = stickerTriggerRef.current?.contains(event.target)
+        const inComposer = composerRef.current?.contains(event.target)
+        if (!inPanel && !inTrigger && !inComposer) {
+          stickerDockOpenRef.current = false
+          setStickerOpen(false)
+          setBottomChromePx(0)
+          syncPanelViewportRef.current({ immediate: true, force: true })
+        }
       }
       if (settingsOpen && !settingsRef.current?.contains(event.target)) {
         setSettingsOpen(false)
@@ -1545,6 +1887,75 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     document.addEventListener('pointerdown', onPointerDown)
     return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [guestMenuOpen, settingsOpen, stickerOpen])
+
+  const halfScreenDockPx = useCallback(() => {
+    if (typeof window === 'undefined') return stableChromeHRef.current || 320
+    const inner = window.innerHeight || document.documentElement.clientHeight || 0
+    const fullH = Math.max(baselineLayoutRef.current || 0, inner)
+    const half = Math.round(fullH * 0.5)
+    stableChromeHRef.current = half
+    keyboardHeightRef.current = half
+    return half
+  }, [])
+
+  const revealComposerKeyboard = useCallback(() => {
+    const h = halfScreenDockPx()
+    stickerDockOpenRef.current = false
+    flushSync(() => {
+      setStickerOpen(false)
+      setBottomChromePx(h)
+    })
+    panelRef.current?.style.setProperty('--hana-sticker-dock-h', `${h}px`)
+    panelRef.current?.style.setProperty('--hana-bottom-chrome-h', `${h}px`)
+    const input = inputRef.current
+    if (input) {
+      try {
+        input.focus({ preventScroll: true })
+      } catch {
+        input.focus()
+      }
+    }
+    syncPanelViewportRef.current({ immediate: true, force: true })
+  }, [halfScreenDockPx])
+
+  const closeStickerTray = useCallback((options = {}) => {
+    // Keyboard icon while dock is open → swap to IME, keep composer mid.
+    if (options.focusInput && stickerDockMode) {
+      revealComposerKeyboard()
+      return
+    }
+    stickerDockOpenRef.current = false
+    flushSync(() => {
+      setStickerOpen(false)
+      setBottomChromePx(0)
+    })
+    syncPanelViewportRef.current({ immediate: true, force: true })
+  }, [stickerDockMode, revealComposerKeyboard])
+
+  const openStickerTray = useCallback(() => {
+    if (stickerDockMode) {
+      const h = halfScreenDockPx()
+      stickerDockOpenRef.current = true
+      flushSync(() => {
+        setBottomChromePx(h)
+        setStickerOpen(true)
+      })
+      panelRef.current?.style.setProperty('--hana-sticker-dock-h', `${h}px`)
+      panelRef.current?.style.setProperty('--hana-bottom-chrome-h', `${h}px`)
+      inputRef.current?.blur()
+      syncPanelViewportRef.current({ immediate: true, force: true })
+      return
+    }
+    setStickerOpen(true)
+  }, [halfScreenDockPx, stickerDockMode])
+
+  const toggleStickerTray = useCallback(() => {
+    if (stickerOpen) {
+      closeStickerTray({ focusInput: stickerDockMode })
+    } else {
+      openStickerTray()
+    }
+  }, [closeStickerTray, openStickerTray, stickerDockMode, stickerOpen])
 
   const ownerReplyChips = ownerSuggestions.replies.length
     ? ownerSuggestions.replies
@@ -1619,6 +2030,28 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     return null
   }
 
+  /** Unread by partner → free edit/delete; after read → admin window. */
+  const canMutateMessage = useCallback((message) => {
+    if (!message || message.deleted) return false
+    const delivery = (() => {
+      if (actingAsOwner || guestOnHuman) {
+        const viewer = actingAsOwner ? 'hana' : 'guest'
+        const sender = message.sender || (message.role === 'hana' ? 'hana' : 'guest')
+        return getMessageDeliveryStatus(
+          { sender, createdAt: message.createdAt },
+          activeThreadMeta,
+          viewer,
+        )
+      }
+      if (message.role === 'guest') return 'sent'
+      return null
+    })()
+    return canMutateOwnMessage(message, {
+      unreadByPartner: delivery === 'sent',
+      windowMs: editWindowMs,
+    })
+  }, [actingAsOwner, guestOnHuman, activeThreadMeta, editWindowMs])
+
   const labelForRole = (role) => {
     if (role === 'hanachan') return 'はなちゃん'
     if (role === 'hana') return 'はな'
@@ -1665,12 +2098,34 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     clearComposerExtras()
     const key = guestKey || (canonicalId || threadId).replace(/^guest-/, '')
     const canon = canonicalId || (key ? `guest-${key}` : '')
-    // Open immediately — do not wait on Firestore writes/migration.
-    const openId = threadId || canon
+    const localMatches = threadsRef.current.filter((t) => (
+      t.id === threadId
+      || (canon && t.id === canon)
+      || (key && t.guestKey === key)
+      || (label && t.guestLabel === label)
+    ))
+    const relatedIds = localMatches.map((t) => t.id).filter(Boolean)
+    const localBest = [...localMatches].sort((a, b) => {
+      const score = (entry) => {
+        const hasText = String(entry.lastText || '').trim() ? 40 : 0
+        const legacyHint = key && entry.guestKey === key && entry.id !== canon
+          ? (String(entry.lastText || '').trim() ? 12 : 6)
+          : 0
+        return hasText + legacyHint
+          + (entry.id === canon ? 2 : 0)
+          + (entry.guestKey === key ? 1 : 0)
+      }
+      const diff = score(b) - score(a)
+      if (diff !== 0) return diff
+      return String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
+    })[0]
+    const openId = localBest?.id || threadId || canon
     if (!openId) return
 
     if (openId !== activeThreadId) {
-      setHanaMessages([])
+      showThreadMessages(openId, [...relatedIds, canon, threadId])
+      setMessagesHydrated(false)
+      setShowSummerFx(false)
       setActiveThreadId(openId)
     }
 
@@ -1680,23 +2135,40 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     )
 
     void (async () => {
-      // Migrate legacy UUID → guest-* only once per pair, and never block opening.
-      if (canon && threadId && canon !== threadId) {
-        const checkKey = `${canon}←${threadId}`
+      try {
+        const resolved = await resolveGuestThreadWithHistory({
+          guestKey: key,
+          canonicalId: canon,
+          guestLabel: label,
+          preferredId: openId,
+        })
+        if (resolved && resolved !== openId) {
+          showThreadMessages(resolved, [...relatedIds, openId, canon, threadId])
+          setMessagesHydrated(false)
+          setShowSummerFx(false)
+          setActiveThreadId(resolved)
+        }
+      } catch {
+        /* ignore */
+      }
+
+      if (canon && openId && canon !== openId) {
+        const checkKey = `${canon}←${openId}`
         if (!migrationCheckedRef.current.has(checkKey)) {
           migrationCheckedRef.current.add(checkKey)
           try {
-            const resolved = await migrateLegacyGuestThread({
+            const migrated = await migrateLegacyGuestThread({
               canonicalId: canon,
-              legacyThreadId: threadId,
+              legacyThreadId: openId,
               guestLabel: label,
               guestKey: key,
             })
-            if (resolved && resolved !== openId) {
-              setActiveThreadId(resolved)
+            if (migrated && migrated !== openId) {
+              showThreadMessages(migrated, [...relatedIds, openId, canon])
+              setActiveThreadId(migrated)
             }
           } catch {
-            /* ignore — keep showing the opened thread */
+            /* ignore */
           }
         }
       }
@@ -1718,37 +2190,74 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const startReply = (message) => {
     if (message.deleted) return
     setEditingId(null)
+    const raw = String(message.rawText || message.text || '').trim()
+    const replyText = raw
+      || (message.imageUrl ? '写真' : '')
+      || (message.sticker ? 'スタンプ' : '')
+      || (message.fileUrl ? (message.fileName || 'ファイル') : '')
+      || 'メッセージ'
     setReplyTo({
       id: message.id,
-      text: message.text,
+      text: replyText,
       sender: message.sender || message.role,
       role: message.role,
     })
   }
 
   const startEdit = (message) => {
-    if (!canMutateOwnMessage(message) || message.deleted) return
+    if (!canMutateMessage(message) || message.deleted) return
     setReplyTo(null)
     setEditingId(message.id)
     setDraft(message.rawText || message.text)
   }
 
   const handleDelete = async (message) => {
-    if (!canMutateOwnMessage(message) || message.deleted) return
+    if (!canMutateMessage(message) || message.deleted) return
     if (!window.confirm('このメッセージを削除しますか？')) return
     setError('')
-    try {
-      if (actingAsOwner || guestOnHuman) {
-        const threadId = actingAsOwner ? activeThreadId : guestChatId
-        await deleteChatMessage({ threadId, messageId: message.id })
-      } else {
-        setAiMessages((prev) => prev.filter((m) => m.id !== message.id))
-      }
+    const messageId = String(message.serverId || message.id || '').trim()
+    const threadId = actingAsOwner ? activeThreadId : guestChatId
+
+    // AI channel: local only.
+    if (!actingAsOwner && !guestOnHuman) {
+      setAiMessages((prev) => prev.filter((m) => m.id !== message.id))
       if (editingId === message.id) {
         setEditingId(null)
         setDraft('')
       }
+      return
+    }
+
+    if (!threadId || !messageId) return
+
+    // Optimistic: hide immediately; block snapshot from reviving until server confirms.
+    deletingIdsRef.current.add(messageId)
+    if (message.id && message.id !== messageId) deletingIdsRef.current.add(message.id)
+    const dropLocal = (list) => (list || []).filter((m) => (
+      m.id !== message.id
+      && m.id !== messageId
+      && m.serverId !== messageId
+    ))
+    setHanaMessages((prev) => dropLocal(prev))
+    const cached = messageCacheRef.current.get(threadId)
+    if (cached) messageCacheRef.current.set(threadId, dropLocal(cached))
+    if (editingId === message.id || editingId === messageId) {
+      setEditingId(null)
+      setDraft('')
+    }
+
+    try {
+      await deleteChatMessage({ threadId, messageId })
+      deletingIdsRef.current.delete(messageId)
+      if (message.id) deletingIdsRef.current.delete(message.id)
     } catch (err) {
+      deletingIdsRef.current.delete(messageId)
+      if (message.id) deletingIdsRef.current.delete(message.id)
+      // Snapshot will restore; nudge a local put-back if still missing.
+      setHanaMessages((prev) => {
+        if (prev.some((m) => m.id === message.id || m.id === messageId)) return prev
+        return sortChatMessages([...prev, message])
+      })
       setError(getFirebaseErrorMessage(err) || '削除に失敗しました。')
     }
   }
@@ -1780,7 +2289,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       setError('返信する相手を選んでください。')
       return
     }
-    setStickerOpen(false)
+    // Desktop popup closes after send; mobile dock stays open (LINE-style).
+    if (!stickerDockMode) setStickerOpen(false)
     setError('')
     setBusy(true)
     const role = actingAsOwner ? 'hana' : 'guest'
@@ -1798,6 +2308,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         ...prev,
         {
           id: pendingId,
+          clientId: pendingId,
           pending: true,
           role,
           sender: role,
@@ -1805,16 +2316,18 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           rawText: label,
           sticker: id,
           createdAt: new Date().toISOString(),
+          createdAtIso: new Date().toISOString(),
           replyTo: null,
         },
       ])
       scrollToLatestRef.current()
 
-      await sendChatMessage({
+      const serverId = await sendChatMessage({
         threadId,
         text: label,
         sender: role,
         sticker: id,
+        clientId: pendingId,
         ...(actingAsOwner
           ? {}
           : {
@@ -1822,6 +2335,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               guestKey: guestProfile?.key || guestKey || '',
             }),
       })
+      if (serverId) {
+        setHanaMessages((prev) => prev.map((m) => (
+          m.id === pendingId ? { ...m, serverId } : m
+        )))
+      }
       if (!actingAsOwner) setChannel('human')
     } catch (err) {
       setHanaMessages((prev) => prev.filter((m) => m.id !== pendingId))
@@ -1832,67 +2350,97 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     }
   }
 
-  /** Pick/take a photo → compress → Storage → chat message with imageUrl. */
-  const handleSendImage = async (file) => {
-    if (!file || busy) return
+  /** Pick/take photo(s) → compress → Storage → chat message(s) with imageUrl. */
+  const handleSendImage = async (fileOrFiles) => {
+    const files = (
+      Array.isArray(fileOrFiles) || (typeof FileList !== 'undefined' && fileOrFiles instanceof FileList)
+        ? [...fileOrFiles]
+        : [fileOrFiles]
+    ).filter((file) => file && String(file.type || '').startsWith('image/'))
+    if (!files.length || busy) return
     if (actingAsOwner && !activeThreadId) {
       setError('返信する相手を選んでください。')
       return
     }
+    // Cap a single picker batch so Storage / UI stay responsive.
+    const batch = files.slice(0, 12)
+    stickerDockOpenRef.current = false
     setStickerOpen(false)
+    setBottomChromePx(0)
     setError('')
     setBusy(true)
     const role = actingAsOwner ? 'hana' : 'guest'
-    const pendingId = nextStickerPendingId()
-    const localUrl = URL.createObjectURL(file)
+    const threadId = actingAsOwner
+      ? activeThreadId
+      : (guestChatId || ensureGuestChatId(guestKey || 'guest'))
+    if (!actingAsOwner) {
+      if (!guestChatId) setGuestChatId(threadId)
+      if (channel !== 'human') switchToHuman(HUMAN_SWITCH_INTENT)
+    }
+
+    const guestMeta = actingAsOwner
+      ? {}
+      : {
+          guestLabel: guestThreadLabel,
+          guestKey: guestProfile?.key || guestKey || '',
+        }
+
+    let failed = 0
     try {
-      const threadId = actingAsOwner
-        ? activeThreadId
-        : (guestChatId || ensureGuestChatId(guestKey || 'guest'))
-      if (!actingAsOwner) {
-        if (!guestChatId) setGuestChatId(threadId)
-        if (channel !== 'human') switchToHuman(HUMAN_SWITCH_INTENT)
+      for (const file of batch) {
+        const pendingId = nextStickerPendingId()
+        const localUrl = URL.createObjectURL(file)
+        try {
+          setHanaMessages((prev) => [
+            ...prev,
+            {
+              id: pendingId,
+              clientId: pendingId,
+              pending: true,
+              uploading: true,
+              role,
+              sender: role,
+              text: '写真',
+              rawText: '写真',
+              imageUrl: localUrl,
+              createdAt: new Date().toISOString(),
+              createdAtIso: new Date().toISOString(),
+              replyTo: null,
+            },
+          ])
+          scrollToLatestRef.current()
+
+          const imageUrl = await uploadChatImage(threadId, file)
+          setHanaMessages((prev) => prev.map((m) => (
+            m.id === pendingId ? { ...m, imageUrl, uploading: false } : m
+          )))
+          URL.revokeObjectURL(localUrl)
+          const serverId = await sendChatMessage({
+            threadId,
+            text: '写真',
+            sender: role,
+            imageUrl,
+            clientId: pendingId,
+            ...guestMeta,
+          })
+          if (serverId) {
+            setHanaMessages((prev) => prev.map((m) => (
+              m.id === pendingId ? { ...m, serverId } : m
+            )))
+          }
+        } catch (err) {
+          failed += 1
+          URL.revokeObjectURL(localUrl)
+          setHanaMessages((prev) => prev.filter((m) => m.id !== pendingId))
+          if (batch.length === 1) {
+            setError(getFirebaseErrorMessage(err) || err?.message || '写真を送れませんでした。')
+          }
+        }
       }
-
-      setHanaMessages((prev) => [
-        ...prev,
-        {
-          id: pendingId,
-          pending: true,
-          uploading: true,
-          role,
-          sender: role,
-          text: '写真',
-          rawText: '写真',
-          imageUrl: localUrl,
-          createdAt: new Date().toISOString(),
-          replyTo: null,
-        },
-      ])
-      scrollToLatestRef.current()
-
-      const imageUrl = await uploadChatImage(threadId, file)
-      setHanaMessages((prev) => prev.map((m) => (
-        m.id === pendingId ? { ...m, imageUrl, uploading: false } : m
-      )))
-      URL.revokeObjectURL(localUrl)
-      await sendChatMessage({
-        threadId,
-        text: '写真',
-        sender: role,
-        imageUrl,
-        ...(actingAsOwner
-          ? {}
-          : {
-              guestLabel: guestThreadLabel,
-              guestKey: guestProfile?.key || guestKey || '',
-            }),
-      })
       if (!actingAsOwner) setChannel('human')
-    } catch (err) {
-      URL.revokeObjectURL(localUrl)
-      setHanaMessages((prev) => prev.filter((m) => m.id !== pendingId))
-      setError(getFirebaseErrorMessage(err) || err?.message || '写真を送れませんでした。')
+      if (failed > 0 && batch.length > 1) {
+        setError(`${failed}枚の写真を送れませんでした。`)
+      }
     } finally {
       setBusy(false)
       scrollToLatestRef.current()
@@ -1944,6 +2492,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         ...prev,
         {
           id: pendingId,
+          clientId: pendingId,
           pending: true,
           role,
           sender: role,
@@ -1952,17 +2501,19 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           effect: described.effect,
           effectEmoji: described.effectEmoji,
           createdAt: new Date().toISOString(),
+          createdAtIso: new Date().toISOString(),
           replyTo: null,
         },
       ])
       scrollToLatestRef.current()
 
-      await sendChatMessage({
+      const serverId = await sendChatMessage({
         threadId,
         text: described.text,
         sender: role,
         effect: described.effect,
         effectEmoji: described.effectEmoji,
+        clientId: pendingId,
         ...(actingAsOwner
           ? {}
           : {
@@ -1970,6 +2521,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               guestKey: guestProfile?.key || guestKey || '',
             }),
       })
+      if (serverId) {
+        setHanaMessages((prev) => prev.map((m) => (
+          m.id === pendingId ? { ...m, serverId } : m
+        )))
+      }
       if (!actingAsOwner) setChannel('human')
     } catch (err) {
       setHanaMessages((prev) => prev.filter((m) => m.id !== pendingId))
@@ -1985,6 +2541,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     const em = String(emoji || '').trim()
     const rid = String(reactorId || '').trim().toLowerCase() || 'guest'
     if (!em || !rid) return
+    const mode = options.mode || 'toggle'
 
     // Keep composer focused if the keyboard was already open.
     const keepKb = document.activeElement === inputRef.current || keyboardPinnedRef.current
@@ -1993,22 +2550,17 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       keyboardPinnedRef.current = true
     }
 
+    const patchLocal = (prev) => prev.map((m) => {
+      if (m.id !== message.id && m.serverId !== message.id && m.id !== message.serverId) return m
+      return {
+        ...m,
+        reactions: applyReactionLocally(m.reactions, em, rid, mode),
+      }
+    })
+
     // Local AI channel: keep reactions in memory only.
     if (!canUseReactions) {
-      setAiMessages((prev) => prev.map((m) => {
-        if (m.id !== message.id) return m
-        const reactions = { ...(m.reactions || {}) }
-        const counts = { ...(reactions[em] || {}) }
-        const mine = Number(counts[rid]) || 0
-        const mode = options.mode || 'toggle'
-        if (mode === 'increment') counts[rid] = Math.min(99, mine + 1)
-        else if (mode === 'set') counts[rid] = 1
-        else if (mine > 0) delete counts[rid]
-        else counts[rid] = 1
-        if (Object.keys(counts).length) reactions[em] = counts
-        else delete reactions[em]
-        return { ...m, reactions }
-      }))
+      setAiMessages(patchLocal)
       if (keepKb) {
         window.requestAnimationFrame(() => {
           try {
@@ -2022,17 +2574,26 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     }
 
     const threadId = actingAsOwner ? activeThreadId : guestChatId
-    if (!threadId || !message?.id) {
+    const messageId = String(message.serverId || message.id || '').trim()
+    if (!threadId || !messageId) {
       setError('リアクションできません（スレッド未接続）。')
       return
     }
+    if (message.pending && !message.serverId) {
+      setError('送信が終わるまでリアクションできません。')
+      return
+    }
+
+    // Show the chip immediately; Firestore snapshot will confirm/reconcile.
+    setHanaMessages(patchLocal)
+    setError('')
     try {
       await toggleChatReaction({
         threadId,
-        messageId: message.id,
+        messageId,
         emoji: em,
         reactorId: rid,
-        mode: options.mode || 'toggle',
+        mode,
       })
     } catch (err) {
       setError(getFirebaseErrorMessage(err) || 'リアクションに失敗しました。')
@@ -2122,10 +2683,12 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     setError('')
     setBusy(true)
     setSpeaking(true)
-    keyboardPinnedRef.current = true
-    retainComposerFocusRef.current = true
-    // Keep the soft keyboard open after send (don't let submit steal focus).
+    // Keep the soft keyboard only if it was already open. After 完了, do not reopen it.
+    const keepKeyboard = document.activeElement === inputRef.current || keyboardPinnedRef.current
+    keyboardPinnedRef.current = keepKeyboard
+    retainComposerFocusRef.current = keepKeyboard
     const keepComposerFocused = () => {
+      if (!keepKeyboard) return
       const input = inputRef.current
       if (!input || input.disabled) return
       try {
@@ -2135,8 +2698,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       }
       syncPanelViewportRef.current({ forceKeyboard: true, force: true, revealComposer: true })
     }
-    keepComposerFocused()
-    window.requestAnimationFrame(keepComposerFocused)
+    if (keepKeyboard) {
+      keepComposerFocused()
+      window.requestAnimationFrame(keepComposerFocused)
+    }
     const nowIso = new Date().toISOString()
     const pendingReply = replyTo
     const pendingEditId = editingId
@@ -2162,17 +2727,19 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           setError('返信する相手を選んでください。')
           return
         }
-        const pendingId = `pending-${Date.now()}`
+        const pendingId = nextChatPendingId('msg')
         setHanaMessages((prev) => [
           ...prev,
           {
             id: pendingId,
+            clientId: pendingId,
             pending: true,
             role: 'hana',
             sender: 'hana',
             text,
             rawText: text,
             createdAt: nowIso,
+            createdAtIso: nowIso,
             replyTo: pendingReply
               ? {
                   id: pendingReply.id,
@@ -2183,12 +2750,18 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           },
         ])
         scrollToLatestRef.current()
-        await sendChatMessage({
+        const serverId = await sendChatMessage({
           threadId: activeThreadId,
           text,
           sender: 'hana',
+          clientId: pendingId,
           replyTo: pendingReply,
         })
+        if (serverId) {
+          setHanaMessages((prev) => prev.map((m) => (
+            m.id === pendingId ? { ...m, serverId } : m
+          )))
+        }
         scrollToLatestRef.current()
       } else if (channel === 'human' || wantsHumanHana(text)) {
         if (channel !== 'human') {
@@ -2196,17 +2769,19 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         }
         const threadId = guestChatId || ensureGuestChatId(guestKey || 'guest')
         if (!guestChatId) setGuestChatId(threadId)
-        const pendingId = `pending-${Date.now()}`
+        const pendingId = nextChatPendingId('msg')
         setHanaMessages((prev) => [
           ...prev,
           {
             id: pendingId,
+            clientId: pendingId,
             pending: true,
             role: 'guest',
             sender: 'guest',
             text,
             rawText: text,
             createdAt: nowIso,
+            createdAtIso: nowIso,
             replyTo: pendingReply
               ? {
                   id: pendingReply.id,
@@ -2217,14 +2792,20 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           },
         ])
         scrollToLatestRef.current()
-        await sendChatMessage({
+        const serverId = await sendChatMessage({
           threadId,
           text,
           sender: 'guest',
           guestLabel: guestThreadLabel,
           guestKey: guestProfile?.key || guestKey || '',
+          clientId: pendingId,
           replyTo: pendingReply,
         })
+        if (serverId) {
+          setHanaMessages((prev) => prev.map((m) => (
+            m.id === pendingId ? { ...m, serverId } : m
+          )))
+        }
         setChannel('human')
         scrollToLatestRef.current()
       } else {
@@ -2321,23 +2902,31 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     } finally {
       setBusy(false)
       window.setTimeout(() => setSpeaking(false), 600)
-      keyboardPinnedRef.current = true
-      retainComposerFocusRef.current = true
-      window.requestAnimationFrame(() => {
-        const input = inputRef.current
-        if (!input) return
-        try {
-          input.focus({ preventScroll: true })
-        } catch {
-          input.focus()
-        }
-        syncPanelViewportRef.current({ forceKeyboard: true, force: true, revealComposer: true })
-        scrollToLatestRef.current()
-        window.setTimeout(() => {
+      if (keepKeyboard) {
+        keyboardPinnedRef.current = true
+        retainComposerFocusRef.current = true
+        window.requestAnimationFrame(() => {
+          const input = inputRef.current
+          if (!input) return
+          try {
+            input.focus({ preventScroll: true })
+          } catch {
+            input.focus()
+          }
+          syncPanelViewportRef.current({ forceKeyboard: true, force: true, revealComposer: true })
           scrollToLatestRef.current()
-          retainComposerFocusRef.current = false
-        }, 400)
-      })
+          window.setTimeout(() => {
+            scrollToLatestRef.current()
+            retainComposerFocusRef.current = false
+          }, 400)
+        })
+      } else {
+        keyboardPinnedRef.current = false
+        retainComposerFocusRef.current = false
+        inputRef.current?.blur()
+        syncPanelViewportRef.current({ immediate: true, force: true })
+        scrollToLatestRef.current()
+      }
     }
   }
 
@@ -2346,11 +2935,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     : channel === 'human'
       ? 'はな'
       : 'はなちゃん'
-  const modeSub = actingAsOwner
-    ? (activeThreadId ? 'ゲストとチャット中' : 'ゲストへの返信')
-    : channel === 'human'
-      ? ''
-      : 'はなちゃんとお話し中'
+  const modeSub = actingAsOwner || channel === 'human'
+    ? ''
+    : 'はなちゃんとお話し中'
   const presenceLabel = partnerPresence.label
   const myStatusLabel = myPresence.label
 
@@ -2360,6 +2947,39 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   return createPortal(
     <div className={`hana-chat${open ? ' is-open is-fullscreen' : ''}`}>
       <FlowerRainLayer />
+      {incomingBanner ? (
+        <button
+          type="button"
+          className="hana-chat-incoming-banner"
+          onClick={() => {
+            const threadId = incomingBanner.threadId
+            dismissIncomingBanner()
+            setOpen(true)
+            if (actingAsOwner && threadId) {
+              const entry = ownerGuestRoster.find((item) => (
+                item.threadId === threadId
+                || item.canonicalId === threadId
+                || item.thread?.id === threadId
+              ))
+              if (entry) {
+                openOwnerThread(
+                  entry.threadId,
+                  entry.label,
+                  entry.guestKey || '',
+                  entry.canonicalId || entry.threadId,
+                )
+              }
+            } else if (!actingAsOwner) {
+              setChannel('human')
+            }
+          }}
+        >
+          <span className="hana-chat-incoming-banner-kicker">新しいメッセージ</span>
+          <strong className="hana-chat-incoming-banner-title">{incomingBanner.title}</strong>
+          <span className="hana-chat-incoming-banner-body">{incomingBanner.body}</span>
+        </button>
+      ) : null}
+
       <EmotionMomentLayer />
       <button
         type="button"
@@ -2376,27 +2996,93 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           </span>
         ) : null}
       </button>
+      {!hidden ? (
+        <HanaCall
+          threadId={actingAsOwner ? activeThreadId : guestChatId}
+          listenThreadIds={callListenThreadIds}
+          role={actingAsOwner ? 'hana' : 'guest'}
+          partnerName={actingAsOwner ? ownerActiveGuestLabel : 'はな'}
+          canStart={Boolean(open && (actingAsOwner ? activeThreadId : guestChatId))}
+          compact
+          buttonsHost={callButtonsHost}
+          onBeforeStart={() => {
+            if (!actingAsOwner) setChannel('human')
+          }}
+          onIncoming={(incoming) => {
+            setOpen(true)
+            if (!actingAsOwner) {
+              setChannel('human')
+              return
+            }
+            if (!incoming?.threadId) return
+            const entry = ownerGuestRoster.find((item) => (
+              item.threadId === incoming.threadId
+              || item.canonicalId === incoming.threadId
+              || item.thread?.id === incoming.threadId
+            ))
+            if (entry) {
+              openOwnerThread(
+                entry.threadId,
+                entry.label,
+                entry.guestKey || '',
+                entry.canonicalId,
+              )
+            } else {
+              setActiveThreadId(incoming.threadId)
+            }
+          }}
+        />
+      ) : null}
 
       {open ? (
         <section
           ref={panelRef}
           id="hana-chat-panel"
-          className="hana-chat-panel is-fullscreen"
+          className={`hana-chat-panel is-fullscreen${stickerOpen && stickerDockMode ? ' is-sticker-dock' : ''}${bottomChromePx > 0 ? ' is-bottom-chrome' : ''}`}
           aria-label="はなちゃんチャット"
         >
+          <div className="hana-chat-natsu-decor" aria-hidden="true">
+            {showSummerFx ? (
+              <>
+                <span className="hana-chat-natsu-lantern is-a" />
+                <span className="hana-chat-natsu-lantern is-b" />
+                <span className="hana-chat-natsu-fish"><NatsuKingyo gradientId="chat" /></span>
+                <ChatNatsuFireworks />
+              </>
+            ) : null}
+          </div>
           <header className="hana-chat-header">
-            <div className={`hana-chat-avatar${speaking ? ' is-speaking' : ''}`}>
-              <img src={partnerAvatarSrc} alt="" />
-              <span
-                className={`hana-chat-presence ${partnerPresence.className}`}
-                title={presenceLabel}
-                aria-label={presenceLabel}
-              />
-            </div>
+            {!actingAsOwner && channel === 'human' ? (
+              <button
+                type="button"
+                className={`hana-chat-avatar is-back-ai${speaking ? ' is-speaking' : ''}`}
+                onClick={() => setChannel('ai')}
+                title="はなちゃんに戻る"
+                aria-label="はなちゃんに戻る"
+              >
+                <img src={partnerAvatarSrc} alt="" />
+                <span
+                  className={`hana-chat-presence ${partnerPresence.className}`}
+                  title={presenceLabel}
+                  aria-hidden="true"
+                />
+                <span className="hana-chat-avatar-back-badge" aria-hidden="true">
+                  <img src={hanachanArt} alt="" />
+                </span>
+              </button>
+            ) : (
+              <div className={`hana-chat-avatar${speaking ? ' is-speaking' : ''}`}>
+                <img src={partnerAvatarSrc} alt="" />
+                <span
+                  className={`hana-chat-presence ${partnerPresence.className}`}
+                  title={presenceLabel}
+                  aria-label={presenceLabel}
+                />
+              </div>
+            )}
             <div className="hana-chat-titles">
               {actingAsOwner ? (
                 <div className="hana-chat-guest-select" ref={guestMenuRef}>
-                  <p className="hana-chat-kicker">{modeSub}</p>
                   <button
                     type="button"
                     className={`hana-chat-guest-select-trigger${guestMenuOpen ? ' is-open' : ''}`}
@@ -2414,11 +3100,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     ) : null}
                     <span className={`hana-chat-guest-select-caret${guestMenuOpen ? ' is-open' : ''}`} aria-hidden="true">▾</span>
                   </button>
-                  {activeThreadId ? (
-                    <p className={`hana-chat-presence-label ${partnerPresence.className}`}>
-                      {presenceLabel}
-                    </p>
-                  ) : null}
                   {guestMenuOpen ? (
                     <div className="hana-chat-guest-menu" role="listbox" aria-label="ゲスト一覧">
                       {ownerGuestRoster.length === 0 ? (
@@ -2430,7 +3111,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                           const guestPresence = resolveChatPresence({
                             onlineAt: entry.thread?.guestOnlineAt,
                             status: entry.thread?.guestStatus,
-                          }, presenceTick)
+                          }, Date.now())
                           return (
                             <button
                               key={`${entry.canonicalId}:${entry.threadId}`}
@@ -2486,35 +3167,18 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   {modeSub ? <p className="hana-chat-kicker">{modeSub}</p> : null}
                   <div className="hana-chat-heading-row">
                     <h2 className="hana-chat-heading">{modeTitle}</h2>
-                    <p className={`hana-chat-presence-label ${partnerPresence.className}`}>
-                      {presenceLabel}
-                    </p>
                   </div>
                 </>
               )}
             </div>
             <div className="hana-chat-header-actions">
-              {(actingAsOwner ? activeThreadId : guestOnHuman) ? (
-                <HanaCall
-                  key={actingAsOwner ? activeThreadId : guestChatId}
-                  threadId={actingAsOwner ? activeThreadId : guestChatId}
-                  role={actingAsOwner ? 'hana' : 'guest'}
-                  partnerName={actingAsOwner ? ownerActiveGuestLabel : 'はな'}
-                  compact
-                />
-              ) : null}
-              {!actingAsOwner && channel === 'human' ? (
-                <button
-                  type="button"
-                  className="hana-chat-back-ai"
-                  onClick={() => {
-                    setChannel('ai')
-                  }}
-                  title="はなちゃんに戻る"
-                >
-                  はなちゃんに戻る
-                </button>
-              ) : null}
+              <div
+                className="hana-chat-call-slot"
+                ref={(node) => {
+                  callButtonsHostRef.current = node
+                  if (open) setCallButtonsHost(node)
+                }}
+              />
               <div className="hana-chat-settings" ref={settingsRef}>
                 <button
                   type="button"
@@ -2608,7 +3272,36 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                         </div>
                       </div>
                     ) : null}
-                    <div className="hana-chat-settings-section">
+                                        <div className="hana-chat-settings-section">
+                      <div className="hana-chat-settings-row">
+                        <div>
+                          <p className="hana-chat-settings-label">プッシュ通知</p>
+                          <p className="hana-chat-settings-hint">
+                            {typeof window !== 'undefined' && window.__HANA_CAPACITOR__
+                              ? 'アプリの通知設定から変更できます'
+                              : notifyPermission === 'granted'
+                                ? '新しいメッセージをバナーでお知らせ'
+                                : notifyPermission === 'denied'
+                                  ? 'ブラウザ設定で通知を許可してください'
+                                  : 'タップして通知をオンにします'}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          className={`hana-chat-hint-toggle${notifyPermission === 'granted' ? ' is-on' : ''}`}
+                          aria-pressed={notifyPermission === 'granted'}
+                          title="プッシュ通知"
+                          disabled={typeof window !== 'undefined' && (window.__HANA_CAPACITOR__ || notifyPermission === 'denied' || notifyPermission === 'unsupported')}
+                          onClick={togglePushNotifications}
+                        >
+                          <span className="hana-chat-hint-toggle-label">通知</span>
+                          <span className="hana-chat-hint-toggle-track" aria-hidden="true">
+                            <span className="hana-chat-hint-toggle-thumb" />
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+<div className="hana-chat-settings-section">
                       <div className="hana-chat-settings-row">
                         <div>
                           <p className="hana-chat-settings-label">メッセージ音</p>
@@ -2731,9 +3424,28 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   || (message.effect === 'flower' ? defaultReaction : ''))
                 : ''
               const showsEffect = Boolean(effectEmoji)
-              const mutable = isOwn && canMutateOwnMessage(message)
+              const mutable = isOwn && canMutateMessage(message)
               const sideClass = isOwn ? 'is-own' : 'is-other'
               const avatarSrc = avatarSrcForMessage(message)
+              if (message.kind === 'call-log' || message.callLog) {
+                const callStatus = message.callLog?.status || ''
+                const callDur = Number(message.callLog?.durationSec) || 0
+                return (
+                  <div key={message.id} className="hana-chat-msg-row is-call-log">
+                    <div className={`hana-chat-call-log is-${callStatus || 'ended'}`} role="status">
+                      <span className="hana-chat-call-log-icon" aria-hidden="true">📞</span>
+                      <span className="hana-chat-call-log-text">{message.text}</span>
+                      {timeLabel ? <time dateTime={message.createdAt || undefined}>{timeLabel}</time> : null}
+                      {callStatus === 'ended' && callDur > 0 ? (
+                        <span className="hana-chat-call-log-meta">完了</span>
+                      ) : null}
+                      {callStatus === 'missed' ? (
+                        <span className="hana-chat-call-log-meta is-missed">不在</span>
+                      ) : null}
+                    </div>
+                  </div>
+                )
+              }
               return (
                 <div key={message.id} className={`hana-chat-msg-row ${sideClass}`}>
                   {!isOwn ? (
@@ -2788,7 +3500,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                             <button
                               type="button"
                               className="hana-chat-image-link"
-                              data-no-bubble-press="true"
                               disabled={Boolean(message.uploading)}
                               aria-label="画像を拡大表示"
                               onClick={(event) => {
@@ -2836,9 +3547,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     {actingAsOwner && !isOwn && ownerAssist[message.id] ? (
                       <OwnerMessageAssist
                         assist={ownerAssist[message.id]}
-                        collapsed={ownerAssistShouldCollapse(message.id, visibleMessages)}
+                        collapsed={Boolean(ownerAssistCollapseById[message.id])}
                         onRetry={() => { void requestOwnerAssist(message, { force: true }) }}
-                        onUseReply={applyOwnerSuggest}
                       />
                     ) : null}
                   </div>
@@ -3060,99 +3770,321 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             </div>
           ) : null}
 
-          {canUseReactions && effectThreadId ? (
-            <div className="hana-chat-effect-bar" role="toolbar" aria-label="スタンプとエフェクト">
-              <input
-                ref={imageInputRef}
-                type="file"
-                accept="image/*"
-                className="sr-only"
-                tabIndex={-1}
-                aria-hidden="true"
+          {replyTo || editingId ? (
+            <div className="hana-chat-composer-context">
+              <div>
+                <strong>{editingId ? 'メッセージを編集' : '返信先'}</strong>
+                <span>
+                  {editingId
+                    ? '内容を直して更新できます'
+                    : `${labelForRole(replyTo?.sender || replyTo?.role)}: ${String(replyTo?.text || '').slice(0, 60)}`}
+                </span>
+              </div>
+              <button type="button" onClick={clearComposerExtras} aria-label="キャンセル">×</button>
+            </div>
+          ) : null}
+
+          <form className="hana-chat-composer" ref={composerRef} onSubmit={handleSend}>
+            <label className="sr-only" htmlFor="hana-chat-input">
+              メッセージ
+            </label>
+            <div className={`hana-chat-composer-field${canUseReactions && effectThreadId ? ' has-sticker' : ''}`}>
+              {canUseReactions && effectThreadId ? (
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="sr-only"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  onChange={(event) => {
+                    const picked = event.target.files
+                    if (picked?.length) void handleSendImage(picked)
+                  }}
+                />
+              ) : null}
+              <textarea
+                ref={inputRef}
+                id="hana-chat-input"
+                rows={1}
+                value={draft}
                 onChange={(event) => {
-                  const file = event.target.files?.[0]
-                  if (file) void handleSendImage(file)
+                  setDraft(event.target.value)
+                  resizeComposer()
                 }}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter') return
+                  // Phones/tablets: leave Enter as newline (send via the button).
+                  if (!desktopKeyboard) return
+                  // IME composition (Japanese etc.): let Enter confirm the candidate.
+                  if (event.isComposing || event.keyCode === 229) return
+
+                  const sendWithModifier = event.shiftKey || event.ctrlKey || event.metaKey
+                  const shouldSend = enterToSend
+                    ? !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey
+                    : sendWithModifier
+
+                  if (!shouldSend) return
+                  event.preventDefault()
+                  if (!busy && draft.trim()) {
+                    event.currentTarget.form?.requestSubmit?.()
+                  }
+                }}
+                onPointerDown={() => {
+                  if (stickerOpen && stickerDockMode) {
+                    revealComposerKeyboard()
+                  }
+                }}
+                onFocus={() => {
+                  if (stickerOpen && stickerDockMode) return
+                  if (stickerDockMode && bottomChromePxRef.current <= 0) {
+                    const h = halfScreenDockPx()
+                    flushSync(() => setBottomChromePx(h))
+                  }
+                  syncPanelViewportRef.current({ immediate: true, force: true })
+                }}
+                onBlur={() => {
+                  window.setTimeout(() => {
+                    if (!open) return
+                    if (document.activeElement === inputRef.current) return
+                    if (retainComposerFocusRef.current) {
+                      try {
+                        inputRef.current?.focus({ preventScroll: true })
+                      } catch {
+                        inputRef.current?.focus()
+                      }
+                      return
+                    }
+                    if (stickerDockOpenRef.current || stickerOpen) {
+                      syncPanelViewportRef.current({ immediate: true, force: true })
+                      return
+                    }
+                    keyboardPinnedRef.current = false
+                    if (bottomChromePxRef.current > 0) {
+                      flushSync(() => setBottomChromePx(0))
+                    }
+                    const panel = panelRef.current
+                    if (panel) {
+                      panel.style.left = ''
+                      panel.style.right = ''
+                      panel.style.top = ''
+                      panel.style.bottom = ''
+                      panel.style.width = ''
+                      panel.style.height = ''
+                      panel.style.maxHeight = ''
+                      panel.style.minHeight = ''
+                      panel.style.paddingBottom = ''
+                      panel.classList.remove('is-keyboard')
+                      panel.style.removeProperty('--hana-bottom-chrome-h')
+                      panel.style.removeProperty('--hana-sticker-dock-h')
+                    }
+                    syncPanelViewportRef.current({ immediate: true, force: true })
+                  }, 60)
+                }}
+                placeholder={
+                  editingId
+                    ? '編集して更新…'
+                    : replyTo
+                      ? '返信を書く…'
+                      : actingAsOwner
+                        ? 'ゲストに返信…'
+                        : channel === 'human'
+                          ? 'はなに送る…'
+                          : 'はなちゃんに話しかける…'
+                }
+                maxLength={2000}
+                disabled={actingAsOwner && !activeThreadId}
+                autoComplete="off"
+                enterKeyHint={enterSendsMessage ? 'send' : 'enter'}
               />
+              {canUseReactions && effectThreadId ? (
+                <div className="hana-chat-sticker">
+                  <button
+                    ref={stickerTriggerRef}
+                    type="button"
+                    className={`hana-chat-sticker-trigger${stickerOpen ? ' is-open' : ''}${stickerOpen && stickerDockMode ? ' is-keyboard' : ''}`}
+                    title={stickerOpen && stickerDockMode ? 'キーボード' : 'スタンプ・エフェクト'}
+                    aria-label={stickerOpen && stickerDockMode ? 'キーボードを表示' : 'スタンプ・エフェクト'}
+                    aria-expanded={stickerOpen}
+                    disabled={busy}
+                    onMouseDown={(event) => {
+                      // Always preventDefault: otherwise the first tap only dismisses the
+                      // soft keyboard and never fires click / never opens the sticker dock.
+                      event.preventDefault()
+                    }}
+                    onPointerDown={(event) => {
+                      event.preventDefault()
+                    }}
+                    onClick={toggleStickerTray}
+                  >
+                    {stickerOpen && stickerDockMode ? (
+                      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
+                        <path
+                          fill="currentColor"
+                          d="M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2zm1.25 2.5v1.75h1.75V8.5H5.25zm3.25 0v1.75h1.75V8.5H8.5zm3.25 0v1.75h1.75V8.5h-1.75zm3.25 0v1.75H18V8.5h-1.75zm3.25 0V10H20V8.5h-1.5zM5.25 12v1.75h1.75V12H5.25zm3.25 0v1.75h8.5V12h-8.5zm10 0V13.75H20V12h-1.5zM7 15.75v1.25h10v-1.25H7z"
+                        />
+                      </svg>
+                    ) : (
+                      '✨'
+                    )}
+                  </button>
+                  {stickerOpen && !stickerDockMode ? (
+                    <div className="hana-chat-sticker-panel" ref={stickerRef} role="menu" aria-label="スタンプとエフェクト">
+                      <div className="hana-chat-sticker-panel-head">
+                        <strong>スタンプ・エフェクト</strong>
+                        <button type="button" onClick={() => setStickerOpen(false)} aria-label="閉じる">×</button>
+                      </div>
+                      <div className="hana-chat-effect-picker">
+                        <button
+                          type="button"
+                          className="hana-chat-effect-shortcut is-flower"
+                          title="花びら"
+                          aria-label="花びら"
+                          disabled={busy}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onPointerDown={(event) => event.preventDefault()}
+                          onClick={() => { void playStandaloneEffect({ kind: 'flower', emoji: defaultReaction }) }}
+                        >
+                          {defaultReaction}
+                        </button>
+                        <button
+                          type="button"
+                          className="hana-chat-effect-shortcut is-party"
+                          title="パーティー"
+                          aria-label="パーティー"
+                          disabled={busy}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onPointerDown={(event) => event.preventDefault()}
+                          onClick={() => { void playStandaloneEffect({ kind: 'party', emoji: CHAT_PARTY_REACTION }) }}
+                        >
+                          {CHAT_PARTY_REACTION}
+                        </button>
+                        {EMOTION_MOMENTS.map((moment) => (
+                          <button
+                            key={moment.id}
+                            type="button"
+                            className={`hana-chat-effect-shortcut is-${moment.theme}`}
+                            title={moment.label}
+                            aria-label={moment.label}
+                            disabled={busy}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onPointerDown={(event) => event.preventDefault()}
+                            onClick={() => { void playStandaloneEffect({ kind: 'moment', momentId: moment.id }) }}
+                          >
+                            {moment.emoji}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="hana-chat-sticker-tabs" role="tablist" aria-label="スタンプの種類">
+                        {HANA_STICKER_SETS.map((set) => (
+                          <button
+                            key={set.id}
+                            type="button"
+                            role="tab"
+                            aria-selected={set.id === activeStickerSet.id}
+                            className={`hana-chat-sticker-tab${set.id === activeStickerSet.id ? ' is-active' : ''}`}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onPointerDown={(event) => event.preventDefault()}
+                            onClick={() => {
+                              setStickerSetId(set.id)
+                              writeStickerSet(set.id, { asOwner: actingAsOwner })
+                            }}
+                          >
+                            <HanaSticker id={set.items[0].id} size={20} title="" />
+                            <span>{set.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="hana-chat-sticker-grid">
+                        {activeStickerSet.items.map((sticker) => (
+                          <button
+                            key={sticker.id}
+                            type="button"
+                            role="menuitem"
+                            className="hana-chat-sticker-item"
+                            title={sticker.label}
+                            disabled={busy}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onPointerDown={(event) => event.preventDefault()}
+                            onClick={() => { void handleSendSticker(sticker) }}
+                          >
+                            <HanaSticker id={sticker.id} size={54} title="" />
+                            <span>{sticker.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+            {canUseReactions && effectThreadId && !editingId && !draft.trim() ? (
               <button
                 type="button"
-                className="hana-chat-image-trigger"
-                title="写真を送る"
-                aria-label="写真を送る"
-                disabled={busy}
+                className="hana-chat-composer-action is-camera"
+                title="写真を送る（複数可）"
+                aria-label="写真を送る（複数可）"
+                disabled={busy || (actingAsOwner && !activeThreadId)}
                 onMouseDown={(event) => event.preventDefault()}
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={() => imageInputRef.current?.click()}
               >
-                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
+                <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false">
                   <path
-                    fill="currentColor"
-                    d="M9 3 7.2 5H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.2L15 3H9zm3 5.5A4.5 4.5 0 1 1 7.5 13 4.5 4.5 0 0 1 12 8.5zm0 2A2.5 2.5 0 1 0 14.5 13 2.5 2.5 0 0 0 12 10.5z"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M4 8.2A2.2 2.2 0 0 1 6.2 6h1.1l1-1.5A1.4 1.4 0 0 1 9.45 3.8h5.1a1.4 1.4 0 0 1 1.15.7l1 1.5h1.1A2.2 2.2 0 0 1 20 8.2v7.6A2.2 2.2 0 0 1 17.8 18H6.2A2.2 2.2 0 0 1 4 15.8V8.2Z"
                   />
+                  <circle cx="12" cy="12" r="2.6" fill="none" stroke="currentColor" strokeWidth="1.7" />
                 </svg>
               </button>
-              <div className="hana-chat-sticker" ref={stickerRef}>
-                <button
-                  type="button"
-                  className={`hana-chat-sticker-trigger${stickerOpen ? ' is-open' : ''}`}
-                  title={`${activeStickerSet.label}スタンプ`}
-                  aria-label={`${activeStickerSet.label}スタンプ`}
-                  aria-expanded={stickerOpen}
-                  disabled={busy}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onPointerDown={(event) => event.preventDefault()}
-                  onClick={() => setStickerOpen((prev) => !prev)}
-                >
-                  <HanaSticker id={activeStickerSet.items[0].id} size={26} title="" />
-                </button>
-                {stickerOpen ? (
-                  <div className="hana-chat-sticker-panel" role="menu" aria-label="スタンプ">
-                    <div className="hana-chat-sticker-panel-head">
-                      <strong>スタンプ</strong>
-                      <button type="button" onClick={() => setStickerOpen(false)} aria-label="閉じる">×</button>
-                    </div>
-                    <div className="hana-chat-sticker-tabs" role="tablist" aria-label="スタンプの種類">
-                      {HANA_STICKER_SETS.map((set) => (
-                        <button
-                          key={set.id}
-                          type="button"
-                          role="tab"
-                          aria-selected={set.id === activeStickerSet.id}
-                          className={`hana-chat-sticker-tab${set.id === activeStickerSet.id ? ' is-active' : ''}`}
-                          onMouseDown={(event) => event.preventDefault()}
-                          onPointerDown={(event) => event.preventDefault()}
-                          onClick={() => {
-                            setStickerSetId(set.id)
-                            writeStickerSet(set.id, { asOwner: actingAsOwner })
-                          }}
-                        >
-                          <HanaSticker id={set.items[0].id} size={20} title="" />
-                          <span>{set.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                    <div className="hana-chat-sticker-grid">
-                      {activeStickerSet.items.map((sticker) => (
-                        <button
-                          key={sticker.id}
-                          type="button"
-                          role="menuitem"
-                          className="hana-chat-sticker-item"
-                          title={sticker.label}
-                          disabled={busy}
-                          onMouseDown={(event) => event.preventDefault()}
-                          onPointerDown={(event) => event.preventDefault()}
-                          onClick={() => { void handleSendSticker(sticker) }}
-                        >
-                          <HanaSticker id={sticker.id} size={54} title="" />
-                          <span>{sticker.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
+            ) : (
+              <button
+                type="submit"
+                className="hana-chat-composer-action is-send"
+                disabled={busy || !draft.trim() || (actingAsOwner && !activeThreadId)}
+                title={editingId ? '更新' : '送る'}
+                aria-label={busy ? '送信中' : editingId ? '更新' : '送る'}
+                onMouseDown={(event) => event.preventDefault()}
+                onPointerDown={(event) => event.preventDefault()}
+              >
+                {busy ? (
+                  <span aria-hidden="true">…</span>
+                ) : (
+                  <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false">
+                    <path
+                      fill="currentColor"
+                      d="M4.2 19.6 20.5 12 4.2 4.4l-.05 5.9L14.8 12l-10.65 1.7.05 5.9Z"
+                    />
+                  </svg>
+                )}
+              </button>
+            )}
+          </form>
+          {bottomChromePx > 0 && stickerDockMode ? (
+            <div
+              className={`hana-chat-bottom-chrome${stickerOpen ? ' has-dock' : ''}`}
+              style={{
+                height: bottomChromePx,
+                flex: `0 0 ${bottomChromePx}px`,
+              }}
+              aria-hidden={!stickerOpen}
+            >
+              {stickerOpen && canUseReactions && effectThreadId ? (
+            <div
+              className="hana-chat-sticker-dock"
+              ref={stickerRef}
+              role="menu"
+              aria-label="スタンプとエフェクト"
+            >
+              <div className="hana-chat-sticker-panel-head">
+                <strong>スタンプ・エフェクト</strong>
               </div>
-              <div className="hana-chat-effect-bar-items">
+              <div className="hana-chat-effect-picker">
                 <button
                   type="button"
                   className="hana-chat-effect-shortcut is-flower"
@@ -3193,106 +4125,48 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   </button>
                 ))}
               </div>
-            </div>
-          ) : null}
-
-          {replyTo || editingId ? (
-            <div className="hana-chat-composer-context">
-              <div>
-                <strong>{editingId ? 'メッセージを編集' : '返信先'}</strong>
-                <span>
-                  {editingId
-                    ? '内容を直して更新できます'
-                    : `${labelForRole(replyTo?.sender || replyTo?.role)}: ${String(replyTo?.text || '').slice(0, 60)}`}
-                </span>
+              <div className="hana-chat-sticker-tabs" role="tablist" aria-label="スタンプの種類">
+                {HANA_STICKER_SETS.map((set) => (
+                  <button
+                    key={set.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={set.id === activeStickerSet.id}
+                    className={`hana-chat-sticker-tab${set.id === activeStickerSet.id ? ' is-active' : ''}`}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      setStickerSetId(set.id)
+                      writeStickerSet(set.id, { asOwner: actingAsOwner })
+                    }}
+                  >
+                    <HanaSticker id={set.items[0].id} size={20} title="" />
+                    <span>{set.label}</span>
+                  </button>
+                ))}
               </div>
-              <button type="button" onClick={clearComposerExtras} aria-label="キャンセル">×</button>
+              <div className="hana-chat-sticker-grid">
+                {activeStickerSet.items.map((sticker) => (
+                  <button
+                    key={sticker.id}
+                    type="button"
+                    role="menuitem"
+                    className="hana-chat-sticker-item"
+                    title={sticker.label}
+                    disabled={busy}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => { void handleSendSticker(sticker) }}
+                  >
+                    <HanaSticker id={sticker.id} size={54} title="" />
+                    <span>{sticker.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+              ) : null}
             </div>
           ) : null}
-
-          <form className="hana-chat-composer" ref={composerRef} onSubmit={handleSend}>
-            <label className="sr-only" htmlFor="hana-chat-input">
-              メッセージ
-            </label>
-            <textarea
-              ref={inputRef}
-              id="hana-chat-input"
-              rows={1}
-              value={draft}
-              onChange={(event) => {
-                setDraft(event.target.value)
-                resizeComposer()
-              }}
-              onKeyDown={(event) => {
-                if (event.key !== 'Enter') return
-                // Phones/tablets: leave Enter as newline (send via the button).
-                if (!desktopKeyboard) return
-                // IME composition (Japanese etc.): let Enter confirm the candidate.
-                if (event.isComposing || event.keyCode === 229) return
-
-                const sendWithModifier = event.shiftKey || event.ctrlKey || event.metaKey
-                const shouldSend = enterToSend
-                  ? !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey
-                  : sendWithModifier
-
-                if (!shouldSend) return
-                event.preventDefault()
-                if (!busy && draft.trim()) {
-                  event.currentTarget.form?.requestSubmit?.()
-                }
-              }}
-              onFocus={() => {
-                keyboardPinnedRef.current = true
-                syncPanelViewportRef.current({ forceKeyboard: true, revealComposer: true, immediate: true })
-                window.setTimeout(() => {
-                  syncPanelViewportRef.current({ forceKeyboard: true, force: true, revealComposer: true })
-                }, 120)
-                window.setTimeout(() => {
-                  syncPanelViewportRef.current({ forceKeyboard: true, force: true, revealComposer: true })
-                }, 360)
-              }}
-              onBlur={() => {
-                window.setTimeout(() => {
-                  if (!open) return
-                  if (document.activeElement === inputRef.current) return
-                  // After send, reclaim focus so the soft keyboard stays open.
-                  if (retainComposerFocusRef.current) {
-                    try {
-                      inputRef.current?.focus({ preventScroll: true })
-                    } catch {
-                      inputRef.current?.focus()
-                    }
-                    return
-                  }
-                  keyboardPinnedRef.current = false
-                  syncPanelViewportRef.current({ immediate: true })
-                }, 0)
-              }}
-              placeholder={
-                editingId
-                  ? '編集して更新…'
-                  : replyTo
-                    ? '返信を書く…'
-                    : actingAsOwner
-                      ? 'ゲストに返信…'
-                      : channel === 'human'
-                        ? 'はなに送る…'
-                        : 'はなちゃんに話しかける…'
-              }
-              maxLength={2000}
-              disabled={actingAsOwner && !activeThreadId}
-              autoComplete="off"
-              enterKeyHint={enterSendsMessage ? 'send' : 'enter'}
-            />
-            <button
-              type="submit"
-              disabled={busy || !draft.trim()}
-              onMouseDown={(event) => event.preventDefault()}
-              onPointerDown={(event) => event.preventDefault()}
-            >
-              {busy ? '…' : editingId ? '更新' : '送る'}
-            </button>
-          </form>
         </section>
       ) : null}
       {previewImage ? (

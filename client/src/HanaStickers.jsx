@@ -417,10 +417,21 @@ function normalizeStickerQuery(value) {
  * Vietnamese composer text. A match offers the same phrase drawn by every
  * character (はな, かいと, いぬ, ねこ, くま, うさぎ) before related expressions,
  * so the row reads like a real choice of stamps.
+ *
+ * Only fires for short single-token drafts (stamp search). Once the user keeps
+ * typing a longer message or hits newline, suggestions hide.
  */
 export function suggestHanaStickers(value, limit = 8) {
+  const raw = String(value || '')
+  // Newline / multi-line = composing a message, not searching stamps.
+  if (/[\r\n]/.test(raw)) return []
+  const trimmed = raw.trim()
+  if (!trimmed) return []
+  // Past a short keyword length = no longer stamp-search intent.
+  if (trimmed.length > 14) return []
+
   const query = normalizeStickerQuery(value)
-  if (query.length < 2) return []
+  if (query.length < 2 || query.length > 18) return []
 
   const matched = MAINICHI_BASE
     .map((item) => {
@@ -428,9 +439,12 @@ export function suggestHanaStickers(value, limit = 8) {
       const score = aliases.reduce((best, alias) => {
         if (!alias) return best
         if (query === alias) return Math.max(best, 4)
-        if (query.endsWith(alias) || query.startsWith(alias)) return Math.max(best, 3)
-        if (query.includes(alias)) return Math.max(best, 2)
-        if (alias.startsWith(query) && query.length >= 3) return Math.max(best, 1)
+        if (query.startsWith(alias) || alias.startsWith(query)) {
+          // Allow tiny suffix/prefix only while still near the keyword.
+          if (Math.abs(query.length - alias.length) <= 2) return Math.max(best, 3)
+          if (alias.startsWith(query) && query.length >= 3) return Math.max(best, 1)
+          return best
+        }
         return best
       }, 0)
       return { item, score }
@@ -1593,14 +1607,19 @@ const DAILY_TYPE = {
 
 function DailyStickerArt({ sticker }) {
   const phrase = String(sticker.phrase || sticker.label || '')
-  const splitAt = phrase.length > 7 ? Math.ceil(phrase.length / 2) : 0
+  // Wrap earlier so 6–8 char phrases (おやすみなさい) never overflow the 150px viewBox.
+  const splitAt = phrase.length > 5 ? Math.ceil(phrase.length / 2) : 0
   const lines = splitAt ? [phrase.slice(0, splitAt), phrase.slice(splitAt)] : [phrase]
   const isSide = ['side', 'point', 'run'].includes(sticker.pose)
   const isBig = ['big', 'jump', 'banzai', 'dance'].includes(sticker.pose)
   const type = DAILY_TYPE[sticker.typeStyle] || DAILY_TYPE.round
   const textX = isSide ? 112 : 75
   const textY = isSide ? (lines.length > 1 ? 28 : 38) : (lines.length > 1 ? 19 : 27)
-  const fontSize = isBig ? (lines.length > 1 ? 20 : 25) : (lines.length > 1 ? 16 : 19)
+  const baseFont = isBig ? (lines.length > 1 ? 20 : 25) : (lines.length > 1 ? 16 : 19)
+  const maxChars = Math.max(1, ...lines.map((line) => Array.from(line).length))
+  const textBudget = isSide ? 72 : 132
+  const fontSize = Math.max(11, Math.min(baseFont, textBudget / maxChars))
+  const strokeWidth = Math.max(3.5, Math.min(isBig ? 7 : 5.5, fontSize * 0.32))
   const characterTransform = isSide
     ? 'translate(1 32) scale(.72)'
     : isBig
@@ -1625,7 +1644,7 @@ function DailyStickerArt({ sticker }) {
         fontWeight={type.weight}
         fontSize={fontSize}
         stroke="#fffaf5"
-        strokeWidth={isBig ? 7 : 5.5}
+        strokeWidth={strokeWidth}
         strokeLinejoin="round"
         paintOrder="stroke"
         transform={sticker.typeStyle === 'hand' ? `rotate(-3 ${textX} ${textY})` : undefined}

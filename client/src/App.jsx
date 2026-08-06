@@ -2,15 +2,28 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { createPortal } from 'react-dom'
 import './App.css'
 import hanachanArt from './assets/hanachan.svg'
+import { AVATAR_PRESETS, getAvatarPresetSrc } from './avatarPresets'
 import { clearBookBookmark, getAllBookBookmarks, getBookBookmark } from './bookProgress'
+import { requestChatCardShare } from './chatCardShare'
 import DailyKotoba from './DailyKotoba'
 import {
+  ACCOUNT_INACTIVE_LOGIN_MESSAGE,
+  addMediaComment,
   CHAT_PRESENCE_MODES,
+  clearUserAvatar,
+  deleteMediaComment,
   deleteMediaItem,
   ensureDefaultChatAccounts,
+  evaluateAccountLogin,
   findChatAccountByPassKey,
   getFirebaseErrorMessage,
   getMaxUploadBytes,
+  guestMayAccessAlbum,
+  guestMayAccessImage,
+  guestMayAccessPlaylist,
+  guestMayAccessTrack,
+  isAccountLoginAllowed,
+  isProtectedOwnerAccount,
   loadMediaBlobUrl,
   loadMediaBytes,
   MAX_BOOK_FILE_SIZE,
@@ -18,17 +31,27 @@ import {
   normalizeChatPresenceMode,
   recordAccessVisit,
   resolveAvatarSrc,
+  resolvePushUserKey,
   resolveSessionProfile,
   savePushToken,
+  saveSharedPhotoAlbums,
   saveSharedPlaylists,
   saveSharedSpaces,
   setChatProfileStatus,
+  setUserAvatarPreset,
   sortMediaItems,
   subscribeChatAccounts,
   subscribeChatProfile,
+  subscribeMediaComments,
+  subscribeSiteAppearance,
   subscribeToMediaItems,
+  subscribeToSharedPhotoAlbums,
   subscribeToSharedPlaylists,
   subscribeToSharedSpaces,
+  syncIdleAccountStatuses,
+  toggleMediaLike,
+  touchAccountAccess,
+  updateMediaCaption,
   updateMediaCover,
   updateMediaJacket,
   updateMediaJacketStyle,
@@ -60,6 +83,8 @@ import {
 import { pickPostcardLyric } from './lyrics'
 import LyricsPanel from './LyricsPanel'
 import { blobToThumbnailUrl, mapPool } from './mediaPerf'
+import NatsuAtmosphere from './NatsuAtmosphere'
+import { SITE_THEME_DEFAULT } from './siteTheme'
 import {
   appendTodayRecordHistory,
   formatTodayDateLabel,
@@ -85,6 +110,7 @@ import {
   saveListFilter,
 } from './userPlaylists'
 import VinylPlayer from './VinylPlayer'
+import {ensureWebPush, registerAppServiceWorker, bindForegroundPush} from './webPush'
 
 const BookReader = lazy(() => import('./BookReader'))
 
@@ -322,6 +348,15 @@ function RenameIcon() {
   )
 }
 
+function LogoutIcon() {
+  return (
+    <svg className="action-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"/>
+      <path d="M15 12H9m6 0-3-3m3 3-3 3" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  )
+}
+
 function SpinnerIcon() {
   return (
     <svg className="action-icon action-icon--spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -363,6 +398,8 @@ function App() {
   const [authRole, setAuthRole] = useState(() => readStoredAuthRole())
   const [guestKey, setGuestKey] = useState(() => readStoredGuestKey())
   const [sessionAvatarUrl, setSessionAvatarUrl] = useState('')
+  const [sessionAvatarPresetId, setSessionAvatarPresetId] = useState('')
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
   const [sessionStatus, setSessionStatus] = useState('auto')
   const [statusMenuOpen, setStatusMenuOpen] = useState(false)
   const [avatarUploading, setAvatarUploading] = useState(false)
@@ -385,15 +422,47 @@ function App() {
     }
   }, [])
 
+  // Auto-inactivate accounts idle for 5+ days; stamp missing lastAccessAt.
+  useEffect(() => {
+    if (!chatAccounts.length) return
+    void syncIdleAccountStatuses(chatAccounts)
+  }, [chatAccounts])
+
+  // Service worker first: the Badging API needs one, and it receives push.
+  useEffect(() => {
+    void registerAppServiceWorker()
+  }, [])
+
+  // Web: register FCM under the stable account key (not the login passKey).
+  useEffect(() => {
+    if (!isLoggedIn || !guestKey) return
+    const pushKey = resolvePushUserKey(authRole, guestKey)
+    if (!pushKey) return
+    bindForegroundPush()
+    void ensureWebPush(pushKey)
+  }, [isLoggedIn, guestKey, authRole])
+
+  // Refresh lastAccessAt while the session is alive (also covers restored sessions).
+  useEffect(() => {
+    if (!isLoggedIn || !guestKey) return
+    const account = findChatAccountByPassKey(guestKey, chatAccounts)
+      || chatAccounts.find((item) => item.key === guestKey)
+    if (!account?.key) return
+    if (!isAccountLoginAllowed(account) && !isProtectedOwnerAccount(account.key)) return
+    void touchAccountAccess(account.key)
+  }, [isLoggedIn, guestKey])
+
   // Capacitor only: persist FCM token for the logged-in chat account.
   useEffect(() => {
     if (!isLoggedIn || !guestKey) return undefined
+    const pushKey = resolvePushUserKey(authRole, guestKey)
+    if (!pushKey) return undefined
 
     const persist = (token, platform) => {
       const value = String(token || '').trim()
       if (!value) return
       savePushToken({
-        userKey: guestKey,
+        userKey: pushKey,
         token: value,
         platform: platform || window.__HANA_CAPACITOR__?.platform || 'native',
       }).catch((err) => {
@@ -417,21 +486,53 @@ function App() {
     }
     window.addEventListener('hana-push-token', onToken)
     return () => window.removeEventListener('hana-push-token', onToken)
-  }, [isLoggedIn, guestKey])
+  }, [isLoggedIn, guestKey, authRole])
 
   const sessionProfile = useMemo(
     () => resolveSessionProfile(authRole, guestKey),
     [authRole, guestKey, chatAccounts],
   )
 
-  const sessionAvatarSrc = useMemo(
+  const isOwner = authRole === 'owner'
+
+  const sessionAccount = useMemo(() => {
+    if (isOwner) return { role: 'owner', allowedPlaylistIds: null, allowedAlbumIds: null }
+    const account = findChatAccountByPassKey(guestKey, chatAccounts)
+      || chatAccounts.find((entry) => entry.role === 'guest' && entry.key === guestKey)
+    return account || { role: 'guest', allowedPlaylistIds: null, allowedAlbumIds: null }
+  }, [isOwner, guestKey, chatAccounts])
+
+  // Kick inactive sessions (admin stop or idle auto-stop).
+  useEffect(() => {
+    if (!isLoggedIn) return
+    const account = findChatAccountByPassKey(guestKey, chatAccounts)
+      || chatAccounts.find((item) => item.key === guestKey)
+    if (!account) return
+    if (isProtectedOwnerAccount(account.key)) return
+    if (isAccountLoginAllowed(account)) return
+    try {
+      window.localStorage.removeItem(AUTH_KEY)
+      window.localStorage.removeItem(AUTH_ROLE_KEY)
+      window.localStorage.removeItem(AUTH_GUEST_KEY)
+    } catch {
+      /* ignore */
+    }
+    setIsLoggedIn(false)
+    setAuthRole('guest')
+    setGuestKey('')
+    setPassword('')
+    setError(ACCOUNT_INACTIVE_LOGIN_MESSAGE)
+  }, [isLoggedIn, guestKey, chatAccounts])
+
+const sessionAvatarSrc = useMemo(
     () => resolveAvatarSrc(
       sessionProfile.id,
       sessionProfile.displayName,
       sessionAvatarUrl,
       sessionProfile.id === 'hana' ? hanachanArt : '',
+      getAvatarPresetSrc(sessionAvatarPresetId),
     ),
-    [sessionProfile, sessionAvatarUrl],
+    [sessionProfile, sessionAvatarUrl, sessionAvatarPresetId],
   )
   const sessionStatusMode = useMemo(
     () => CHAT_PRESENCE_MODES.find((mode) => mode.id === sessionStatus) || CHAT_PRESENCE_MODES[0],
@@ -456,6 +557,10 @@ function App() {
   const [playlistMode, setPlaylistMode] = useState(true)
   const [favoriteIds, setFavoriteIds] = useState(() => loadFavoriteIds())
   const [customPlaylists, setCustomPlaylists] = useState(() => loadCustomPlaylists())
+  const accessiblePlaylists = useMemo(() => {
+    if (isOwner) return customPlaylists
+    return customPlaylists.filter((playlist) => guestMayAccessPlaylist(sessionAccount, playlist.id))
+  }, [isOwner, customPlaylists, sessionAccount])
   const [playlistSyncReady, setPlaylistSyncReady] = useState(false)
   const [customSpaces, setCustomSpaces] = useState([])
   const [spacesSyncReady, setSpacesSyncReady] = useState(false)
@@ -475,6 +580,16 @@ function App() {
   const [coverPreviewUrl, setCoverPreviewUrl] = useState(null)
   const [jacketPreviewUrl, setJacketPreviewUrl] = useState(null)
   const [libraryThumbUrls, setLibraryThumbUrls] = useState({})
+  const [photoAlbums, setPhotoAlbums] = useState([])
+  const [albumSyncReady, setAlbumSyncReady] = useState(false)
+  const [albumFilter, setAlbumFilter] = useState('all')
+  const [creatingAlbum, setCreatingAlbum] = useState(false)
+  const [albumNameDraft, setAlbumNameDraft] = useState('')
+  const [assignAlbumImageId, setAssignAlbumImageId] = useState(null)
+  const [albumMenuPos, setAlbumMenuPos] = useState(null)
+  const [viewerComments, setViewerComments] = useState([])
+  const [commentDraft, setCommentDraft] = useState('')
+  const [captionDraft, setCaptionDraft] = useState({ caption: '', location: '', event: '' })
   const [libraryViewerItemId, setLibraryViewerItemId] = useState(null)
   const [librarySlideshowIndex, setLibrarySlideshowIndex] = useState(0)
   const [librarySlideshowPaused, setLibrarySlideshowPaused] = useState(false)
@@ -506,6 +621,14 @@ function App() {
   const [todayShuffleRemaining, setTodayShuffleRemaining] = useState(() => getTodayShuffleRemaining())
   const ambientBoot = useMemo(() => loadAmbientSettings(), [])
   const [listeningSpaceOpen, setListeningSpaceOpen] = useState(false)
+  const [siteThemeId, setSiteThemeId] = useState(SITE_THEME_DEFAULT)
+
+  useEffect(() => {
+    return subscribeSiteAppearance(
+      (appearance) => setSiteThemeId(appearance?.themeId || SITE_THEME_DEFAULT),
+      () => setSiteThemeId(SITE_THEME_DEFAULT),
+    )
+  }, [])
   const [listeningSpaceId, setListeningSpaceId] = useState(() => loadSavedListeningSpaceId())
   const [ambientEnabled, setAmbientEnabled] = useState(() => ambientBoot.enabled)
   const [ambientVolume, setAmbientVolume] = useState(() => ambientBoot.volume)
@@ -538,6 +661,7 @@ function App() {
   const mediaRef = useRef(null)
   const initialLocalPlaylistsRef = useRef(loadCustomPlaylists())
   const remotePlaylistsHashRef = useRef('')
+  const remoteAlbumsHashRef = useRef('')
   const remoteSpacesHashRef = useRef('')
   
   // Có cần autoplay sau khi đổi bài không
@@ -564,6 +688,19 @@ function App() {
     [playableItems],
   )
 
+  /** Guest 「すべて」 pool: excludes tracks in any non-allowed playlist. */
+  const accessiblePlayableItems = useMemo(() => {
+    if (isOwner) return playableItems
+    return playableItems.filter((item) => (
+      guestMayAccessTrack(sessionAccount, item.id, customPlaylists)
+    ))
+  }, [isOwner, playableItems, sessionAccount, customPlaylists])
+
+  const accessiblePlayableIdSet = useMemo(
+    () => new Set(accessiblePlayableItems.map((item) => item.id)),
+    [accessiblePlayableItems],
+  )
+
   const mediaCounts = useMemo(() => {
     let audio = 0
     let video = 0
@@ -571,16 +708,21 @@ function App() {
     let book = 0
     let totalSize = 0
     for (const item of items) {
+      if (item.kind === 'audio' || item.kind === 'video') {
+        if (!accessiblePlayableIdSet.has(item.id)) continue
+        totalSize += item.size || 0
+        if (item.kind === 'audio') audio += 1
+        else video += 1
+        continue
+      }
       totalSize += item.size || 0
-      if (item.kind === 'audio') audio += 1
-      else if (item.kind === 'video') video += 1
       // Only count images in the shared library; jacket/cover/space
       // background uploads are private assets.
-      else if (item.kind === 'image' && item.inLibrary !== false) image += 1
+      if (item.kind === 'image' && item.inLibrary !== false) image += 1
       else if (item.kind === 'book') book += 1
     }
     return { audio, video, image, book, totalSize }
-  }, [items])
+  }, [items, accessiblePlayableIdSet])
 
   const playlistLiveCounts = useMemo(() => {
     const map = {}
@@ -591,15 +733,15 @@ function App() {
   }, [customPlaylists, playableIdSet])
 
   const favoriteLiveCount = useMemo(
-    () => favoriteIds.filter((id) => playableIdSet.has(id)).length,
-    [favoriteIds, playableIdSet],
+    () => favoriteIds.filter((id) => accessiblePlayableIdSet.has(id)).length,
+    [favoriteIds, accessiblePlayableIdSet],
   )
 
   const todayBaseItem = useMemo(() => {
     if (!isLoggedIn || !todayOpen || skipTodayFromDeepLinkRef.current) return null
     if (!playlistSyncReady) return null
-    return pickTodayAudioItem(playableItems, customPlaylists)
-  }, [isLoggedIn, todayOpen, playableItems, customPlaylists, playlistSyncReady])
+    return pickTodayAudioItem(accessiblePlayableItems, accessiblePlaylists)
+  }, [isLoggedIn, todayOpen, accessiblePlayableItems, accessiblePlaylists, playlistSyncReady])
 
   const todayItem = useMemo(() => {
     if (!todayOverrideId) return todayBaseItem
@@ -634,8 +776,8 @@ function App() {
 
   const activePlaylistName = useMemo(() => {
     if (listFilter === 'all' || listFilter === 'favorites') return ''
-    return customPlaylists.find((playlist) => playlist.id === listFilter)?.name || ''
-  }, [listFilter, customPlaylists])
+    return accessiblePlaylists.find((playlist) => playlist.id === listFilter)?.name || ''
+  }, [listFilter, accessiblePlaylists])
 
   const todaySpaceId = useMemo(
     () =>
@@ -673,22 +815,42 @@ function App() {
   const favoriteIdSet = useMemo(() => new Set(favoriteIds), [favoriteIds])
 
   const visiblePlayableItems = useMemo(() => {
-    if (listFilter === 'all') return playableItems
+    if (listFilter === 'all') return accessiblePlayableItems
     if (listFilter === 'favorites') {
-      return playableItems.filter((item) => favoriteIdSet.has(item.id))
+      return accessiblePlayableItems.filter((item) => favoriteIdSet.has(item.id))
     }
-    const playlist = customPlaylists.find((entry) => entry.id === listFilter)
-    if (!playlist) return playableItems
+    const playlist = accessiblePlaylists.find((entry) => entry.id === listFilter)
+    if (!playlist) return accessiblePlayableItems
     const order = new Map(playlist.trackIds.map((id, index) => [id, index]))
     return playableItems
       .filter((item) => order.has(item.id))
       .sort((a, b) => order.get(a.id) - order.get(b.id))
-  }, [playableItems, listFilter, favoriteIdSet, customPlaylists])
+  }, [accessiblePlayableItems, playableItems, listFilter, favoriteIdSet, accessiblePlaylists])
 
-  const imageItems = useMemo(
+  const accessibleAlbums = useMemo(() => {
+    if (isOwner) return photoAlbums
+    return photoAlbums.filter((album) => guestMayAccessAlbum(sessionAccount, album.id))
+  }, [isOwner, photoAlbums, sessionAccount])
+
+  const allLibraryImages = useMemo(
     () => items.filter((item) => item.kind === 'image' && item.inLibrary !== false),
     [items],
   )
+
+  const accessibleImageItems = useMemo(() => {
+    if (isOwner) return allLibraryImages
+    return allLibraryImages.filter((img) => guestMayAccessImage(sessionAccount, img.id, photoAlbums))
+  }, [isOwner, allLibraryImages, sessionAccount, photoAlbums])
+
+  const imageItems = useMemo(() => {
+    if (albumFilter === 'all') return accessibleImageItems
+    const album = accessibleAlbums.find((entry) => entry.id === albumFilter)
+    if (!album) return accessibleImageItems
+    const order = new Map(album.imageIds.map((id, index) => [id, index]))
+    return accessibleImageItems
+      .filter((item) => order.has(item.id))
+      .sort((a, b) => order.get(a.id) - order.get(b.id))
+  }, [albumFilter, accessibleImageItems, accessibleAlbums])
 
   const bookItems = useMemo(
     () => items.filter((item) => item.kind === 'book'),
@@ -797,17 +959,24 @@ function App() {
 
   useEffect(() => {
     if (listFilter === 'all' || listFilter === 'favorites') return
-    if (!customPlaylists.some((playlist) => playlist.id === listFilter)) {
+    if (!accessiblePlaylists.some((playlist) => playlist.id === listFilter)) {
       setListFilter('all')
     }
-  }, [listFilter, customPlaylists])
+  }, [listFilter, accessiblePlaylists])
 
   useEffect(() => {
     if (uploadTargetPlaylistId === 'all') return
-    if (!customPlaylists.some((playlist) => playlist.id === uploadTargetPlaylistId)) {
+    if (!accessiblePlaylists.some((playlist) => playlist.id === uploadTargetPlaylistId)) {
       setUploadTargetPlaylistId('all')
     }
-  }, [uploadTargetPlaylistId, customPlaylists])
+  }, [uploadTargetPlaylistId, accessiblePlaylists])
+
+  useEffect(() => {
+    if (albumFilter === 'all') return
+    if (!accessibleAlbums.some((album) => album.id === albumFilter)) {
+      setAlbumFilter('all')
+    }
+  }, [albumFilter, accessibleAlbums])
 
   useEffect(() => {
     if (!playlistMenuItemId) return undefined
@@ -832,6 +1001,29 @@ function App() {
     }
   }, [playlistMenuItemId])
 
+  useEffect(() => {
+    if (!assignAlbumImageId) return undefined
+    const onPointerDown = (event) => {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      if (target.closest('.album-add-wrap') || target.closest('.album-add-menu')) return
+      setAssignAlbumImageId(null)
+      setAlbumMenuPos(null)
+    }
+    const onRepositionClose = () => {
+      setAssignAlbumImageId(null)
+      setAlbumMenuPos(null)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    window.addEventListener('resize', onRepositionClose)
+    window.addEventListener('scroll', onRepositionClose, true)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('resize', onRepositionClose)
+      window.removeEventListener('scroll', onRepositionClose, true)
+    }
+  }, [assignAlbumImageId])
+
   const toggleFavorite = useCallback((itemId) => {
     setFavoriteIds((current) => (
       current.includes(itemId)
@@ -841,6 +1033,7 @@ function App() {
   }, [])
 
   const createCustomPlaylist = useCallback((name, initialTrackId = null) => {
+    if (!isOwner) return null
     const trimmed = String(name || '').trim().slice(0, 40)
     if (!trimmed) return null
     const playlist = {
@@ -850,7 +1043,7 @@ function App() {
     }
     setCustomPlaylists((current) => [...current, playlist])
     return playlist.id
-  }, [])
+  }, [isOwner])
 
   const submitCreatePlaylistForUpload = () => {
     const id = createCustomPlaylist(uploadPlaylistNameDraft)
@@ -862,6 +1055,7 @@ function App() {
   }
 
   const renameCustomPlaylist = useCallback((playlistId, name) => {
+    if (!isOwner) return
     const trimmed = String(name || '').trim().slice(0, 40)
     if (!trimmed) return
     setCustomPlaylists((current) =>
@@ -869,14 +1063,79 @@ function App() {
         playlist.id === playlistId ? { ...playlist, name: trimmed } : playlist
       )),
     )
-  }, [])
+  }, [isOwner])
 
   const deleteCustomPlaylist = useCallback((playlistId) => {
+    if (!isOwner) return
     setCustomPlaylists((current) => current.filter((playlist) => playlist.id !== playlistId))
     setListFilter((current) => (current === playlistId ? 'all' : current))
+  }, [isOwner])
+
+  const createPhotoAlbum = useCallback((name) => {
+    if (!isOwner) return null
+    const trimmed = String(name || '').trim().slice(0, 40)
+    if (!trimmed) return null
+    const now = new Date().toISOString()
+    const album = {
+      id: typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `album-${Date.now()}`,
+      name: trimmed,
+      imageIds: [],
+      createdAt: now,
+      updatedAt: now,
+    }
+    setPhotoAlbums((current) => [...current, album])
+    return album.id
+  }, [isOwner])
+
+  const submitCreateAlbum = () => {
+    const id = createPhotoAlbum(albumNameDraft)
+    if (!id) return
+    setAlbumNameDraft('')
+    setCreatingAlbum(false)
+    setAlbumFilter(id)
+  }
+
+  const deletePhotoAlbum = useCallback((albumId) => {
+    if (!isOwner) return
+    setPhotoAlbums((current) => current.filter((album) => album.id !== albumId))
+    setAlbumFilter((current) => (current === albumId ? 'all' : current))
+  }, [isOwner])
+
+  const toggleImageInAlbum = useCallback((albumId, imageId) => {
+    if (!isOwner) return
+    setPhotoAlbums((current) =>
+      current.map((album) => {
+        if (album.id !== albumId) return album
+        const exists = album.imageIds.includes(imageId)
+        const now = new Date().toISOString()
+        return {
+          ...album,
+          imageIds: exists
+            ? album.imageIds.filter((id) => id !== imageId)
+            : [...album.imageIds, imageId],
+          updatedAt: now,
+        }
+      }),
+    )
+  }, [isOwner])
+
+  const openAlbumAssignMenu = useCallback((event, imageId) => {
+    event.stopPropagation()
+    const rect = event.currentTarget.getBoundingClientRect()
+    const spaceBelow = window.innerHeight - rect.bottom
+    const openUp = spaceBelow < 220
+    setAssignAlbumImageId(imageId)
+    setAlbumMenuPos({
+      left: Math.min(rect.left, window.innerWidth - 240),
+      top: openUp ? undefined : rect.bottom + 6,
+      bottom: openUp ? window.innerHeight - rect.top + 6 : undefined,
+    })
   }, [])
 
   const reorderCustomPlaylists = useCallback((fromId, toId) => {
+    if (!isOwner) return
     if (!fromId || !toId || fromId === toId) return
     setCustomPlaylists((current) => {
       const fromIndex = current.findIndex((playlist) => playlist.id === fromId)
@@ -887,9 +1146,10 @@ function App() {
       next.splice(toIndex, 0, moved)
       return next
     })
-  }, [])
+  }, [isOwner])
 
   const toggleTrackInPlaylist = useCallback((playlistId, trackId) => {
+    if (!guestMayAccessPlaylist(sessionAccount, playlistId)) return
     setCustomPlaylists((current) =>
       current.map((playlist) => {
         if (playlist.id !== playlistId) return playlist
@@ -902,10 +1162,11 @@ function App() {
         }
       }),
     )
-  }, [])
+  }, [sessionAccount])
 
   const addTracksToPlaylist = useCallback((playlistId, trackIds) => {
     if (!playlistId || playlistId === 'all' || !Array.isArray(trackIds) || trackIds.length === 0) return
+    if (!guestMayAccessPlaylist(sessionAccount, playlistId)) return
     setCustomPlaylists((current) =>
       current.map((playlist) => {
         if (playlist.id !== playlistId) return playlist
@@ -916,7 +1177,7 @@ function App() {
         return { ...playlist, trackIds: next }
       }),
     )
-  }, [])
+  }, [sessionAccount])
 
   const ensureMediaUrl = useCallback(async (itemId, mimeType, hint = null) => {
     const cached = mediaUrlCacheRef.current.get(itemId)
@@ -1082,6 +1343,14 @@ function App() {
     })
   }, [ensureMediaUrl])
 
+  // The hero stays on screen for a while, so fetch today's audio URL up front:
+  // playback can then start inside the tap itself, which is the only moment
+  // mobile browsers accept.
+  useEffect(() => {
+    if (!showTodayHero || todayItem?.kind !== 'audio') return
+    prefetchMediaUrl(todayItem)
+  }, [showTodayHero, todayItem, prefetchMediaUrl])
+
   const selectItem = useCallback((itemId, autoPlay = false) => {
 
     mediaReadyRef.current = false
@@ -1160,6 +1429,28 @@ function App() {
     skipTodayHero()
     setPlaylistMode(true)
     selectItem(todayItem.id, true)
+
+    // Waiting for the download + canplay event loses the tap's permission on
+    // iOS, so play straight away when the prefetched URL is already here.
+    const cachedUrl = mediaUrlCacheRef.current.get(todayItem.id)
+    const media = mediaRef.current
+    if (!cachedUrl || !media) return
+
+    setPreviewUrl(cachedUrl)
+    setLoadingPreview(false)
+    if (media.src !== cachedUrl) {
+      media.src = cachedUrl
+      media.load()
+    }
+    const playPromise = media.play()
+    if (!playPromise) return
+    playPromise
+      .then(() => {
+        shouldAutoPlayRef.current = false
+      })
+      .catch(() => {
+        // Blocked anyway — handleMediaCanPlay retries once the audio is ready.
+      })
   }, [todayItem, todaySpaceId, skipTodayHero, selectItem, resetPlayerPanelPosition])
 
   const resumePlaybackSoon = useCallback(() => {
@@ -1278,13 +1569,13 @@ function App() {
   const shuffleTodayRecord = useCallback(() => {
     if (!todayItem || todayShuffleRemaining <= 0) return
     const excludeIds = Array.from(new Set([...todayPickedIds, todayItem.id]))
-    const next = pickTodayAudioItem(playableItems, customPlaylists, { excludeIds })
+    const next = pickTodayAudioItem(accessiblePlayableItems, accessiblePlaylists, { excludeIds })
     if (!next || next.id === todayItem.id) return
     if (!useTodayShuffle()) return
     setTodayShuffleRemaining(getTodayShuffleRemaining())
     setTodayOverrideId(next.id)
     setTodayPickedIds((current) => Array.from(new Set([...current, next.id])))
-  }, [todayItem, todayShuffleRemaining, todayPickedIds, playableItems, customPlaylists])
+  }, [todayItem, todayShuffleRemaining, todayPickedIds, accessiblePlayableItems, accessiblePlaylists])
 
   const pickFromTodayHistory = useCallback(
     (itemId) => {
@@ -1734,14 +2025,17 @@ const playPrevious = useCallback(() => {
   useEffect(() => {
     if (!isLoggedIn) {
       setSessionAvatarUrl('')
+      setSessionAvatarPresetId('')
       setSessionStatus('auto')
       return undefined
     }
     setSessionAvatarUrl('')
+    setSessionAvatarPresetId('')
     return subscribeChatProfile(
       sessionProfile.id,
       (profile) => {
         setSessionAvatarUrl(profile?.avatarUrl || '')
+        setSessionAvatarPresetId(profile?.avatarPresetId || '')
         setSessionStatus(normalizeChatPresenceMode(profile?.status))
       },
       () => {},
@@ -1848,6 +2142,71 @@ const playPrevious = useCallback(() => {
         setError(getFirebaseErrorMessage(syncError))
       })
   }, [customPlaylists, isLoggedIn, playlistSyncReady])
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setPhotoAlbums([])
+      setAlbumSyncReady(false)
+      remoteAlbumsHashRef.current = ''
+      return undefined
+    }
+
+    const unsubscribe = subscribeToSharedPhotoAlbums(
+      (remoteAlbums) => {
+        const remoteHash = JSON.stringify(remoteAlbums)
+        remoteAlbumsHashRef.current = remoteHash
+        setPhotoAlbums(remoteAlbums)
+        setAlbumSyncReady(true)
+      },
+      (loadError) => {
+        console.error(loadError)
+        setError(getFirebaseErrorMessage(loadError))
+        setAlbumSyncReady(true)
+      },
+    )
+
+    return unsubscribe
+  }, [isLoggedIn])
+
+  useEffect(() => {
+    if (!isLoggedIn || !albumSyncReady || !isOwner) return
+    const localHash = JSON.stringify(photoAlbums)
+    if (localHash === remoteAlbumsHashRef.current) return
+
+    saveSharedPhotoAlbums(photoAlbums)
+      .then(() => {
+        remoteAlbumsHashRef.current = localHash
+      })
+      .catch((syncError) => {
+        console.error(syncError)
+        setError(getFirebaseErrorMessage(syncError))
+      })
+  }, [photoAlbums, isLoggedIn, albumSyncReady, isOwner])
+
+  useEffect(() => {
+    if (!libraryViewerItemId) {
+      setViewerComments([])
+      return undefined
+    }
+    return subscribeMediaComments(
+      libraryViewerItemId,
+      setViewerComments,
+      (loadError) => console.error(loadError),
+    )
+  }, [libraryViewerItemId])
+
+  useEffect(() => {
+    if (!libraryViewerItem) {
+      setCommentDraft('')
+      setCaptionDraft({ caption: '', location: '', event: '' })
+      return
+    }
+    setCaptionDraft({
+      caption: libraryViewerItem.caption || '',
+      location: libraryViewerItem.location || '',
+      event: libraryViewerItem.event || '',
+    })
+  }, [libraryViewerItem])
 
   useEffect(() => {
     if (!isLoggedIn) {
@@ -2113,14 +2472,25 @@ const playPrevious = useCallback(() => {
     }
   }, [])
 
-  const handleLogin = (event) => {
+  const handleLogin = async (event) => {
     event.preventDefault()
     const normalized = normalizeLoginPassword(password)
-    const account = findChatAccountByPassKey(normalized)
+    const account = findChatAccountByPassKey(normalized, chatAccounts)
 
-    if (account) {
-      const role = account.role === 'owner' ? 'owner' : 'guest'
-      const nextGuestKey = account.passKey || account.key
+    if (!account) {
+      setError('パスワードが違います。')
+      return
+    }
+
+    try {
+      const verdict = await evaluateAccountLogin(account)
+      if (!verdict.ok) {
+        setIsLoggedIn(false)
+        setError(ACCOUNT_INACTIVE_LOGIN_MESSAGE)
+        return
+      }
+      const role = verdict.account.role === 'owner' ? 'owner' : 'guest'
+      const nextGuestKey = verdict.account.passKey || verdict.account.key
       try {
         window.localStorage.setItem(AUTH_KEY, 'true')
         window.localStorage.setItem(AUTH_ROLE_KEY, role)
@@ -2132,10 +2502,13 @@ const playPrevious = useCallback(() => {
       setGuestKey(nextGuestKey)
       setIsLoggedIn(true)
       setError('')
-      return
+      void touchAccountAccess(verdict.account.key)
+      // Safari only allows Notification.requestPermission inside this click stack.
+      void ensureWebPush(verdict.account.key, { requestPermission: true })
+    } catch (loginError) {
+      console.error(loginError)
+      setError(getFirebaseErrorMessage(loginError) || loginError?.message || 'ログインに失敗しました。')
     }
-
-    setError('パスワードが違います。')
   }
 
   const handleLogout = () => {
@@ -2150,6 +2523,8 @@ const playPrevious = useCallback(() => {
     setAuthRole('guest')
     setGuestKey('')
     setSessionAvatarUrl('')
+    setSessionAvatarPresetId('')
+    setAvatarPickerOpen(false)
     setPassword('')
     setError('')
   }
@@ -2165,10 +2540,86 @@ const playPrevious = useCallback(() => {
         displayName: sessionProfile.displayName,
       })
       setSessionAvatarUrl(url)
+      setSessionAvatarPresetId('')
+      setAvatarPickerOpen(false)
     } catch (avatarError) {
       setError(getFirebaseErrorMessage(avatarError) || avatarError?.message || 'アバターの更新に失敗しました。')
     } finally {
       setAvatarUploading(false)
+    }
+  }
+
+  const handleSelectAvatarPreset = async (presetId) => {
+    if (!isLoggedIn) return
+    setAvatarUploading(true)
+    setError('')
+    try {
+      await setUserAvatarPreset(sessionProfile.id, presetId)
+      setSessionAvatarPresetId(presetId)
+      setSessionAvatarUrl('')
+      setAvatarPickerOpen(false)
+    } catch (avatarError) {
+      setError(getFirebaseErrorMessage(avatarError) || avatarError?.message || 'アバターの更新に失敗しました。')
+    } finally {
+      setAvatarUploading(false)
+    }
+  }
+
+  const handleClearAvatar = async () => {
+    if (!isLoggedIn) return
+    setAvatarUploading(true)
+    setError('')
+    try {
+      await clearUserAvatar(sessionProfile.id)
+      setSessionAvatarPresetId('')
+      setSessionAvatarUrl('')
+      setAvatarPickerOpen(false)
+    } catch (avatarError) {
+      setError(getFirebaseErrorMessage(avatarError) || avatarError?.message || 'アバターの更新に失敗しました。')
+    } finally {
+      setAvatarUploading(false)
+    }
+  }
+
+  const handleToggleImageLike = async (imageId) => {
+    try {
+      await toggleMediaLike(imageId, sessionProfile.id)
+    } catch (likeError) {
+      setError(getFirebaseErrorMessage(likeError) || likeError?.message || 'いいねに失敗しました。')
+    }
+  }
+
+  const handleSaveViewerCaption = async () => {
+    if (!libraryViewerItem) return
+    try {
+      await updateMediaCaption(libraryViewerItem.id, captionDraft)
+    } catch (captionError) {
+      setError(getFirebaseErrorMessage(captionError) || captionError?.message || '保存に失敗しました。')
+    }
+  }
+
+  const handleAddViewerComment = async (event) => {
+    event.preventDefault()
+    if (!libraryViewerItemId || !commentDraft.trim()) return
+    try {
+      await addMediaComment(libraryViewerItemId, {
+        text: commentDraft,
+        authorKey: sessionProfile.id,
+        authorName: sessionProfile.displayName,
+      })
+      setCommentDraft('')
+    } catch (commentError) {
+      setError(getFirebaseErrorMessage(commentError) || commentError?.message || 'コメントに失敗しました。')
+    }
+  }
+
+  const handleDeleteViewerComment = async (commentId, authorKey) => {
+    if (!libraryViewerItemId) return
+    if (!isOwner && authorKey !== sessionProfile.id) return
+    try {
+      await deleteMediaComment(libraryViewerItemId, commentId)
+    } catch (commentError) {
+      setError(getFirebaseErrorMessage(commentError) || commentError?.message || '削除に失敗しました。')
     }
   }
 
@@ -2217,7 +2668,7 @@ const playPrevious = useCallback(() => {
     const targetPlaylistId = uploadTargetPlaylistId
     const targetExists =
       targetPlaylistId === 'all' ||
-      customPlaylists.some((playlist) => playlist.id === targetPlaylistId)
+      accessiblePlaylists.some((playlist) => playlist.id === targetPlaylistId)
     const playlistForUpload = targetExists ? targetPlaylistId : 'all'
 
     setUploading(true)
@@ -2378,7 +2829,7 @@ const playPrevious = useCallback(() => {
     }
   }
 
-  const canReorderList = listFilter === 'all' || (listFilter !== 'favorites' && customPlaylists.some((p) => p.id === listFilter))
+  const canReorderList = listFilter === 'all' || (listFilter !== 'favorites' && accessiblePlaylists.some((p) => p.id === listFilter))
 
   const submitCreatePlaylist = () => {
     const id = createCustomPlaylist(playlistNameDraft, pendingPlaylistTrackId)
@@ -2694,6 +3145,7 @@ const playPrevious = useCallback(() => {
       className={`app-shell${!isLoggedIn ? ' app-shell--gate' : ''}${showTodayHero ? ' app-shell--today' : ''}${listeningSpaceOpen ? ' app-shell--listening-space' : ''}${listeningSpaceOpen && !playerExpanded ? ' is-player-compact-view' : ''}`}
       style={shellSpaceStyle}
     >
+      <NatsuAtmosphere active={siteThemeId === 'natsu'} />
       {!isLoggedIn ? (
         <section className="login-card" aria-labelledby="login-brand-title">
           <div className="login-hero" aria-hidden="true">
@@ -2701,7 +3153,9 @@ const playPrevious = useCallback(() => {
             <span className="login-hero-petal" />
             <span className="login-hero-petal is-2" />
           </div>
-          <p className="login-kicker">Hana Mediabox</p>
+          <p className="login-kicker">
+            {siteThemeId === 'natsu' ? '夏・盆・花火大会' : 'Hana Mediabox'}
+          </p>
           <h1 id="login-brand-title">はなメディボ</h1>
           <p className="lead">
             はなの小さな箱。音楽、本、写真、好きなリスト——一緒に味わって、一緒に分かちあう。
@@ -2767,7 +3221,7 @@ const playPrevious = useCallback(() => {
                   <button
                     type="button"
                     className="session-user-avatar-btn"
-                    onClick={() => avatarInputRef.current?.click()}
+                    onClick={() => setAvatarPickerOpen(true)}
                     disabled={avatarUploading}
                     aria-label="アバターを変更"
                   >
@@ -2819,18 +3273,15 @@ const playPrevious = useCallback(() => {
                   onChange={handleAvatarPick}
                 />
               </div>
-              {listeningSpaceOpen && !focusMode ? (
-                <button
-                  type="button"
-                  className="secondary-button space-home-btn is-active"
-                  onClick={() => handleFocusModeChange(true)}
-                  title="景色だけに集中する"
-                >
-                  景色に集中
-                </button>
-              ) : null}
-              <button type="button" className="secondary-button" onClick={handleLogout}>
-                ログアウト
+              <button
+                type="button"
+                className="icon-button icon-button--logout"
+                onClick={handleLogout}
+                aria-label="ログアウト"
+                title="ログアウト"
+                data-tooltip="ログアウト"
+              >
+                <LogoutIcon />
               </button>
             </div>
           </header>
@@ -2872,7 +3323,7 @@ const playPrevious = useCallback(() => {
                       ? '__new__'
                       : (
                     uploadTargetPlaylistId === 'all' ||
-                    customPlaylists.some((playlist) => playlist.id === uploadTargetPlaylistId)
+                    accessiblePlaylists.some((playlist) => playlist.id === uploadTargetPlaylistId)
                       ? uploadTargetPlaylistId
                       : 'all'
                       )
@@ -2881,6 +3332,7 @@ const playPrevious = useCallback(() => {
                   onChange={(event) => {
                     const value = event.target.value
                     if (value === '__new__') {
+                      if (!isOwner) return
                       setUploadCreatingPlaylist(true)
                       setUploadPlaylistNameDraft('')
                       return
@@ -2891,15 +3343,15 @@ const playPrevious = useCallback(() => {
                   }}
                 >
                   <option value="all">すべて（再生リスト）</option>
-                  {customPlaylists.map((playlist) => (
+                  {accessiblePlaylists.map((playlist) => (
                     <option key={playlist.id} value={playlist.id}>
                       {playlist.name}
                     </option>
                   ))}
-                  <option value="__new__">新しいプレイリスト…</option>
+                  {isOwner ? <option value="__new__">新しいプレイリスト…</option> : null}
                 </select>
               </label>
-              {uploadCreatingPlaylist ? (
+              {isOwner && uploadCreatingPlaylist ? (
                 <form
                   className="upload-playlist-new-form"
                   onSubmit={(event) => {
@@ -2998,44 +3450,74 @@ const playPrevious = useCallback(() => {
                         {focusMode ? (
                           <button
                             type="button"
-                            className="secondary-button player-expand-btn"
+                            className="space-icon-btn player-expand-btn"
                             onClick={togglePlayerExpanded}
+                            aria-label={playerExpanded ? '景色を広く見る' : 'プレイヤーを開く'}
                             title={playerExpanded ? '景色を広く見る' : 'プレイヤーを開く'}
                           >
-                            {playerExpanded ? '景色を見る' : 'プレイヤーを開く'}
+                            {playerExpanded ? (
+                              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+                                <path fill="currentColor" d="M7 14H5v5h5v-2H7v-3zm12 0h-2v3h-3v2h5v-5zM7 7h3V5H5v5h2V7zm12-2h-5v2h3v3h2V5z" />
+                              </svg>
+                            ) : (
+                              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+                                <path fill="currentColor" d="M3 5h8v2H5v6H3V5zm10 0h8v8h-2V7h-6V5zM3 13h2v4h6v2H3v-6zm16 0h2v6h-8v-2h6v-4z" />
+                              </svg>
+                            )}
                           </button>
                         ) : null}
                         <button
                           type="button"
-                          className={`secondary-button space-home-btn${focusMode ? '' : ' is-active'}`}
+                          className={`space-icon-btn space-home-btn${focusMode ? '' : ' is-active'}`}
                           onClick={() => {
                             handleFocusModeChange(!focusMode)
                             if (focusMode) setSpaceSettingsOpen(false)
                           }}
+                          aria-label={
+                            focusMode
+                              ? 'メディボに入る'
+                              : '景色に集中'
+                          }
                           title={
                             focusMode
                               ? 'メディボの画面に戻って操作する'
                               : '景色だけに集中する'
                           }
                         >
-                          {focusMode ? 'メディボに入る' : '景色に集中'}
+                          {focusMode ? (
+                            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+                              <path fill="currentColor" d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z" />
+                            </svg>
+                          ) : (
+                            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+                              <path fill="currentColor" d="M2 18h20l-7.2-9.4-3.3 4.3L9.2 10 2 18zm14.5-10a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z" />
+                            </svg>
+                          )}
                         </button>
                         <button
                           type="button"
-                          className={`secondary-button space-settings-btn${spaceSettingsOpen ? ' is-active' : ''}`}
+                          className={`space-icon-btn space-settings-btn${spaceSettingsOpen ? ' is-active' : ''}`}
                           onClick={() => setSpaceSettingsOpen((current) => !current)}
+                          aria-label={spaceSettingsOpen ? '場所の設定を閉じる' : '場所設定'}
                           title={spaceSettingsOpen ? '場所の設定を閉じる' : '場所の設定を開く'}
                         >
-                          {spaceSettingsOpen ? '設定を閉じる' : '場所設定'}
+                          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+                            <path
+                              fill="currentColor"
+                              d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.2 7.2 0 0 0-1.63-.94l-.36-2.54A.49.49 0 0 0 14 2h-4a.49.49 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.55-1.63.94l-2.39-.96a.49.49 0 0 0-.59.22L2.63 8.87a.49.49 0 0 0 .12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.75 14.52a.49.49 0 0 0-.12.61l1.92 3.32c.13.23.4.32.64.22l2.39-.96c.5.39 1.04.71 1.63.94l.36 2.54c.05.24.25.41.48.41h4c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.55 1.63-.94l2.39.96c.24.1.51 0 .64-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"
+                            />
+                          </svg>
                         </button>
                         <button
                           type="button"
-                          className="icon-button listening-space-close"
+                          className="space-icon-btn listening-space-close"
                           onClick={closeListeningSpace}
                           aria-label="場所を閉じる"
                           title="場所を閉じる"
                         >
-                          ×
+                          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+                            <path fill="currentColor" d="M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7 4.3 4.3l6.3 6.3 6.3-6.3z" />
+                          </svg>
                         </button>
                       </div>
                     </div>
@@ -3074,20 +3556,6 @@ const playPrevious = useCallback(() => {
                       >
                         聴く場所
                       </button>
-                    </div>
-                  ) : null}
-
-                  {listeningSpaceOpen && !focusMode && selectedItem.kind === 'audio' ? (
-                    <div className="player-space-access">
-                      <button
-                        type="button"
-                        className="secondary-button space-home-btn is-active"
-                        onClick={() => handleFocusModeChange(true)}
-                        title="景色だけに集中する"
-                      >
-                        景色に集中
-                      </button>
-                      <p className="player-space-hint">聴く場所は開いたままです。景色だけ見たいときはここから戻れます。</p>
                     </div>
                   ) : null}
 
@@ -3260,12 +3728,12 @@ const playPrevious = useCallback(() => {
                     <span className="list-filter-count">{favoriteLiveCount}</span>
                   ) : null}
                 </button>
-                {customPlaylists.map((playlist) => (
+                {accessiblePlaylists.map((playlist) => (
                   <button
                     key={playlist.id}
                     type="button"
                     role="tab"
-                    draggable
+                    draggable={isOwner}
                     aria-selected={listFilter === playlist.id}
                     className={[
                       'list-filter-tab',
@@ -3275,16 +3743,22 @@ const playPrevious = useCallback(() => {
                     ].join('')}
                     onClick={() => setListFilter(playlist.id)}
                     onDoubleClick={() => {
+                      if (!isOwner) return
                       setRenamingPlaylistId(playlist.id)
                       setPlaylistNameDraft(playlist.name)
                     }}
                     onDragStart={(event) => {
+                      if (!isOwner) {
+                        event.preventDefault()
+                        return
+                      }
                       setDragPlaylistId(playlist.id)
                       setDragOverPlaylistId(playlist.id)
                       event.dataTransfer.effectAllowed = 'move'
                       event.dataTransfer.setData('text/plain', playlist.id)
                     }}
                     onDragOver={(event) => {
+                      if (!isOwner) return
                       event.preventDefault()
                       event.dataTransfer.dropEffect = 'move'
                       if (dragOverPlaylistId !== playlist.id) {
@@ -3292,6 +3766,7 @@ const playPrevious = useCallback(() => {
                       }
                     }}
                     onDrop={(event) => {
+                      if (!isOwner) return
                       event.preventDefault()
                       const fromId = event.dataTransfer.getData('text/plain') || dragPlaylistId
                       reorderCustomPlaylists(fromId, playlist.id)
@@ -3302,7 +3777,7 @@ const playPrevious = useCallback(() => {
                       setDragPlaylistId(null)
                       setDragOverPlaylistId(null)
                     }}
-                    title="ダブルクリックで名前変更"
+                    title={isOwner ? 'ダブルクリックで名前変更' : playlist.name}
                   >
                     {playlist.name}
                     {(playlistLiveCounts[playlist.id] || 0) > 0 ? (
@@ -3310,6 +3785,7 @@ const playPrevious = useCallback(() => {
                     ) : null}
                   </button>
                 ))}
+                {isOwner ? (
                 <button
                   type="button"
                   className="list-filter-tab list-filter-tab--add"
@@ -3324,9 +3800,10 @@ const playPrevious = useCallback(() => {
                 >
                   ＋
                 </button>
+                ) : null}
               </div>
 
-              {creatingPlaylist || renamingPlaylistId ? (
+              {isOwner && (creatingPlaylist || renamingPlaylistId) ? (
                 <form
                   className="playlist-name-form"
                   onSubmit={(event) => {
@@ -3392,15 +3869,17 @@ const playPrevious = useCallback(() => {
                 <p className="playlist-hint">この端末のお気に入りです。ハートで追加・解除できます。</p>
               ) : listFilter !== 'all' ? (
                 <p className="playlist-hint">
-                  この端末だけのプレイリストです。＋で曲を追加、ドラッグで並び替え。
-                  {listFilter !== 'favorites' ? (
+                  {isOwner
+                    ? '共有プレイリストです。＋で曲を追加、ドラッグで並び替え。ゲストへの公開は管理画面で設定できます。'
+                    : '共有プレイリストです。'}
+                  {isOwner && listFilter !== 'favorites' ? (
                     <>
                       {' '}
                       <button
                         type="button"
                         className="playlist-inline-action"
                         onClick={() => {
-                          const playlist = customPlaylists.find((entry) => entry.id === listFilter)
+                          const playlist = accessiblePlaylists.find((entry) => entry.id === listFilter)
                           if (!playlist) return
                           setRenamingPlaylistId(playlist.id)
                           setPlaylistNameDraft(playlist.name)
@@ -3865,13 +4344,103 @@ const playPrevious = useCallback(() => {
                 </div>
               ) : null}
 
-              {imageItems.length > 0 ? (
+              {allLibraryImages.length > 0 ? (
                 <div className="cover-library">
                   <div className="list-header image-library-header">
                     <h3>フォトライブラリ</h3>
-                    <span className="image-library-count">{imageItems.length}枚の思い出</span>
+                    <span className="image-library-count">
+                      {accessibleImageItems.length}枚の思い出
+                      {!isOwner && allLibraryImages.length > accessibleImageItems.length
+                        ? ` · 全${allLibraryImages.length}枚`
+                        : ''}
+                    </span>
                   </div>
 
+                  <div className="photo-album-tabs" role="tablist" aria-label="アルバムフィルター">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={albumFilter === 'all'}
+                      className={`photo-album-tab${albumFilter === 'all' ? ' is-active' : ''}`}
+                      onClick={() => setAlbumFilter('all')}
+                    >
+                      すべて
+                    </button>
+                    {accessibleAlbums.map((album) => (
+                      <button
+                        key={album.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={albumFilter === album.id}
+                        className={`photo-album-tab${albumFilter === album.id ? ' is-active' : ''}`}
+                        onClick={() => setAlbumFilter(album.id)}
+                      >
+                        {album.name}
+                        {(album.imageIds?.length || 0) > 0 ? (
+                          <span className="list-filter-count">{album.imageIds.length}</span>
+                        ) : null}
+                      </button>
+                    ))}
+                    {isOwner ? (
+                      <button
+                        type="button"
+                        className="photo-album-tab photo-album-tab--add"
+                        onClick={() => {
+                          setCreatingAlbum(true)
+                          setAlbumNameDraft('')
+                        }}
+                        title="アルバムを追加"
+                        aria-label="アルバムを追加"
+                      >
+                        ＋
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {isOwner && creatingAlbum ? (
+                    <form
+                      className="playlist-name-form photo-album-form"
+                      onSubmit={(event) => {
+                        event.preventDefault()
+                        submitCreateAlbum()
+                      }}
+                    >
+                      <input
+                        type="text"
+                        value={albumNameDraft}
+                        onChange={(event) => setAlbumNameDraft(event.target.value)}
+                        placeholder="アルバム名"
+                        maxLength={40}
+                        autoFocus
+                      />
+                      <button type="submit" className="primary-button">作成</button>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => {
+                          setCreatingAlbum(false)
+                          setAlbumNameDraft('')
+                        }}
+                      >
+                        キャンセル
+                      </button>
+                    </form>
+                  ) : null}
+
+                  {isOwner && albumFilter !== 'all' ? (
+                    <button
+                      type="button"
+                      className="secondary-button photo-album-delete-btn"
+                      onClick={() => deletePhotoAlbum(albumFilter)}
+                    >
+                      アルバムを削除
+                    </button>
+                  ) : null}
+
+                  {accessibleImageItems.length === 0 ? (
+                    <p className="cover-library-hint">表示できる写真がありません</p>
+                  ) : (
+                    <>
                   {librarySlideshowItem ? (
                     <div
                       className="photo-showroom"
@@ -3951,6 +4520,9 @@ const playPrevious = useCallback(() => {
                       const inUse = selectedItem?.coverId === item.id
                       const thumbUrl = libraryThumbUrls[item.id] || null
                       const shape = getLibraryTileShape(index)
+                      const likedBy = Array.isArray(item.likedBy) ? item.likedBy : []
+                      const liked = likedBy.includes(sessionProfile.id)
+                      const likeCount = Number(item.likeCount) || likedBy.length || 0
                       return (
                         <li
                           key={item.id}
@@ -3972,11 +4544,39 @@ const playPrevious = useCallback(() => {
                               <span className="image-library-loading" aria-hidden="true" />
                             )}
                             {inUse ? <span className="image-library-badge">使用中</span> : null}
+                            {likeCount > 0 ? (
+                              <span className="image-library-like-badge">{likeCount}</span>
+                            ) : null}
                           </button>
+                          <button
+                            type="button"
+                            className={`icon-button image-library-like${liked ? ' is-liked' : ''}`}
+                            aria-label={liked ? 'いいねを取り消す' : 'いいね'}
+                            title={liked ? 'いいねを取り消す' : 'いいね'}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              void handleToggleImageLike(item.id)
+                            }}
+                          >
+                            <HeartIcon filled={liked} />
+                          </button>
+                          {isOwner ? (
+                            <div className="album-add-wrap">
+                              <button
+                                type="button"
+                                className="secondary-button image-library-album-btn"
+                                onClick={(event) => openAlbumAssignMenu(event, item.id)}
+                              >
+                                アルバムへ
+                              </button>
+                            </div>
+                          ) : null}
                         </li>
                       )
                     })}
                   </ul>
+                    </>
+                  )}
                 </div>
               ) : null}
             </aside>
@@ -3988,12 +4588,15 @@ const playPrevious = useCallback(() => {
 
       {/* The audio element lives outside the player card so the card can
           switch between floating / inline layouts without interrupting playback. */}
-      {isLoggedIn && selectedItem?.kind === 'audio' && !loadingPreview && previewUrl ? (
+      {/* Kept mounted even before a track is picked: autoplay needs a media
+          element that already exists when the user taps. */}
+      {isLoggedIn && (!selectedItem || selectedItem.kind === 'audio') ? (
         <audio
           ref={mediaRef}
           className="sr-only"
           preload="auto"
-          src={previewUrl}
+          src={!loadingPreview && previewUrl ? previewUrl : undefined}
+          onCanPlay={handleMediaCanPlay}
           onCanPlayThrough={handleMediaCanPlay}
           onLoadedMetadata={handleMediaDuration}
           onDurationChange={handleMediaDuration}
@@ -4034,6 +4637,7 @@ const playPrevious = useCallback(() => {
           customSpaces={customSpaces}
           onClose={closeListeningPostcard}
           onListen={postcardMode === 'welcome' ? handleWelcomeListen : null}
+          onSendToChat={postcardMode === 'share' ? requestChatCardShare : null}
           onShareFile={
             postcardMode === 'share'
               ? () => {
@@ -4054,6 +4658,7 @@ const playPrevious = useCallback(() => {
             pdfUrl={readingBookUrl}
             pdfData={readingBookBytes}
             initialPage={readingBookStartPage}
+            isOwner={isOwner}
             onClose={closeBook}
             onProgressChange={handleBookProgress}
           />
@@ -4116,22 +4721,150 @@ const playPrevious = useCallback(() => {
               )}
             </div>
 
-            <div className="image-viewer-footer">
+            <div className="image-viewer-sheet">
               <div className="image-viewer-info">
                 <strong>{getDisplayName(libraryViewerItem.name)}</strong>
                 <span>
                   {libraryViewerIndex + 1} / {imageItems.length} · {formatSize(libraryViewerItem.size)}
                 </span>
               </div>
-              <div className="image-viewer-actions">
+
+              {(libraryViewerItem.caption || libraryViewerItem.location || libraryViewerItem.event || isOwner) ? (
+                <div className="image-viewer-meta">
+                  {isOwner ? (
+                    <>
+                      <label className="image-viewer-field">
+                        <span>キャプション</span>
+                        <textarea
+                          value={captionDraft.caption}
+                          onChange={(event) => setCaptionDraft((current) => ({
+                            ...current,
+                            caption: event.target.value,
+                          }))}
+                          rows={2}
+                          maxLength={280}
+                          placeholder="思い出のメモ…"
+                        />
+                      </label>
+                      <label className="image-viewer-field">
+                        <span>場所</span>
+                        <input
+                          type="text"
+                          value={captionDraft.location}
+                          onChange={(event) => setCaptionDraft((current) => ({
+                            ...current,
+                            location: event.target.value,
+                          }))}
+                          maxLength={80}
+                          placeholder="場所"
+                        />
+                      </label>
+                      <label className="image-viewer-field">
+                        <span>イベント</span>
+                        <input
+                          type="text"
+                          value={captionDraft.event}
+                          onChange={(event) => setCaptionDraft((current) => ({
+                            ...current,
+                            event: event.target.value,
+                          }))}
+                          maxLength={80}
+                          placeholder="イベント"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => void handleSaveViewerCaption()}
+                      >
+                        保存
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      {libraryViewerItem.caption ? (
+                        <p className="image-viewer-caption">{libraryViewerItem.caption}</p>
+                      ) : null}
+                      {libraryViewerItem.location ? (
+                        <p className="image-viewer-location">📍 {libraryViewerItem.location}</p>
+                      ) : null}
+                      {libraryViewerItem.event ? (
+                        <p className="image-viewer-event">🎉 {libraryViewerItem.event}</p>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              ) : null}
+
+              <div className="image-viewer-social">
                 <button
                   type="button"
-                  className="secondary-button"
-                  disabled={coverBusy || selectedItem?.kind !== 'audio' || selectedItem?.coverId === libraryViewerItem.id}
-                  onClick={() => void handleAssignCoverFromLibrary(libraryViewerItem.id)}
+                  className={`icon-button image-viewer-like${
+                    (Array.isArray(libraryViewerItem.likedBy)
+                      ? libraryViewerItem.likedBy
+                      : []
+                    ).includes(sessionProfile.id) ? ' is-liked' : ''
+                  }`}
+                  onClick={() => void handleToggleImageLike(libraryViewerItem.id)}
+                  aria-label="いいね"
                 >
-                  {selectedItem?.coverId === libraryViewerItem.id ? 'ラベル使用中' : 'ラベルに設定'}
+                  <HeartIcon
+                    filled={(Array.isArray(libraryViewerItem.likedBy)
+                      ? libraryViewerItem.likedBy
+                      : []
+                    ).includes(sessionProfile.id)}
+                  />
+                  <span>{Number(libraryViewerItem.likeCount) || 0}</span>
                 </button>
+              </div>
+
+              <div className="image-viewer-comments">
+                <h4>コメント</h4>
+                <ul className="image-viewer-comment-list">
+                  {viewerComments.map((comment) => (
+                    <li key={comment.id} className="image-viewer-comment">
+                      <div className="image-viewer-comment-head">
+                        <strong>{comment.authorName || comment.authorKey}</strong>
+                        {(isOwner || comment.authorKey === sessionProfile.id) ? (
+                          <button
+                            type="button"
+                            className="icon-button danger"
+                            aria-label="コメントを削除"
+                            onClick={() => void handleDeleteViewerComment(comment.id, comment.authorKey)}
+                          >
+                            ×
+                          </button>
+                        ) : null}
+                      </div>
+                      <p>{comment.text}</p>
+                    </li>
+                  ))}
+                </ul>
+                <form className="image-viewer-comment-form" onSubmit={handleAddViewerComment}>
+                  <input
+                    type="text"
+                    value={commentDraft}
+                    onChange={(event) => setCommentDraft(event.target.value)}
+                    placeholder="コメントを書く…"
+                    maxLength={400}
+                  />
+                  <button type="submit" className="primary-button" disabled={!commentDraft.trim()}>
+                    送信
+                  </button>
+                </form>
+              </div>
+
+              <div className="image-viewer-actions">
+                {isOwner ? (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={coverBusy || selectedItem?.kind !== 'audio' || selectedItem?.coverId === libraryViewerItem.id}
+                    onClick={() => void handleAssignCoverFromLibrary(libraryViewerItem.id)}
+                  >
+                    {selectedItem?.coverId === libraryViewerItem.id ? 'ラベル使用中' : 'ラベルに設定'}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="secondary-button image-viewer-delete"
@@ -4187,10 +4920,10 @@ const playPrevious = useCallback(() => {
                 bottom: playlistMenuPos.bottom,
               }}
             >
-              {customPlaylists.length === 0 ? (
+              {accessiblePlaylists.length === 0 ? (
                 <p className="playlist-add-empty">まだプレイリストがありません</p>
               ) : (
-                customPlaylists.map((playlist) => {
+                accessiblePlaylists.map((playlist) => {
                   const inPlaylist = playlist.trackIds.includes(playlistMenuItemId)
                   return (
                     <button
@@ -4209,6 +4942,7 @@ const playPrevious = useCallback(() => {
                   )
                 })
               )}
+              {isOwner ? (
               <button
                 type="button"
                 className="playlist-add-option playlist-add-option--new"
@@ -4223,10 +4957,122 @@ const playPrevious = useCallback(() => {
               >
                 新しいプレイリスト…
               </button>
+              ) : null}
             </div>,
             document.body,
           )
         : null}
+      {avatarPickerOpen ? (
+        <div
+          className="avatar-picker-overlay"
+          role="presentation"
+          onClick={() => setAvatarPickerOpen(false)}
+        >
+          <div
+            className="avatar-picker-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-label="アバターを選ぶ"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="avatar-picker-head">
+              <h3>アバターを選ぶ</h3>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="閉じる"
+                onClick={() => setAvatarPickerOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="avatar-picker-grid">
+              {AVATAR_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className={`avatar-picker-option${sessionAvatarPresetId === preset.id ? ' is-active' : ''}`}
+                  onClick={() => void handleSelectAvatarPreset(preset.id)}
+                  disabled={avatarUploading}
+                  title={preset.label}
+                >
+                  <img src={preset.src} alt={preset.label} />
+                  <span>{preset.label}</span>
+                </button>
+              ))}
+            </div>
+            <div className="avatar-picker-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={avatarUploading}
+                onClick={() => avatarInputRef.current?.click()}
+              >
+                写真をアップロード
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={avatarUploading}
+                onClick={() => void handleClearAvatar()}
+              >
+                イニシャルに戻す
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {assignAlbumImageId && albumMenuPos
+        ? createPortal(
+            <div
+              className="album-add-menu album-add-menu--portal"
+              role="menu"
+              style={{
+                left: albumMenuPos.left,
+                top: albumMenuPos.top,
+                bottom: albumMenuPos.bottom,
+              }}
+            >
+              {accessibleAlbums.length === 0 ? (
+                <p className="playlist-add-empty">まだアルバムがありません</p>
+              ) : (
+                accessibleAlbums.map((album) => {
+                  const inAlbum = album.imageIds.includes(assignAlbumImageId)
+                  return (
+                    <button
+                      key={album.id}
+                      type="button"
+                      role="menuitemcheckbox"
+                      aria-checked={inAlbum}
+                      className={`playlist-add-option${inAlbum ? ' is-in' : ''}`}
+                      onClick={() => toggleImageInAlbum(album.id, assignAlbumImageId)}
+                    >
+                      <span>{album.name}</span>
+                      <span aria-hidden="true">{inAlbum ? '✓' : '+'}</span>
+                    </button>
+                  )
+                })
+              )}
+              {isOwner ? (
+                <button
+                  type="button"
+                  className="playlist-add-option playlist-add-option--new"
+                  onClick={() => {
+                    setAssignAlbumImageId(null)
+                    setAlbumMenuPos(null)
+                    setCreatingAlbum(true)
+                    setAlbumNameDraft('')
+                  }}
+                >
+                  新しいアルバム…
+                </button>
+              ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
+
       {isLoggedIn ? <HanaChat appRole={authRole} guestKey={guestKey} /> : null}
     </div>
   )

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import hanachanArt from './assets/hanachan.svg'
+import { getAvatarPresetSrc } from './avatarPresets'
 import {
     addChatReminder,
     dueChatReminders,
@@ -1630,7 +1631,14 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const avatarSrcForProfile = (profileId, displayName) => {
     const id = String(profileId || '').trim().toLowerCase() || 'guest'
     const fallback = id === OWNER_PROFILE.key || id === 'hana' ? hanachanArt : ''
-    return resolveAvatarSrc(id, displayName || id, chatProfiles[id]?.avatarUrl || '', fallback)
+    const profile = chatProfiles[id] || {}
+    return resolveAvatarSrc(
+      id,
+      displayName || id,
+      profile.avatarUrl || '',
+      fallback,
+      getAvatarPresetSrc(profile.avatarPresetId),
+    )
   }
 
   const avatarSrcForMessage = (message) => {

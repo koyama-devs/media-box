@@ -11,9 +11,9 @@
   gap: 6px;
   min-height: 34px;
   padding: 0 11px;
-  border: 1px solid rgba(148, 163, 184, 0.24);
+  border: 1px solid rgba(232, 154, 170, 0.28);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 248, 240, 0.08);
   color: inherit;
   font: inherit;
   font-size: 0.78rem;
@@ -21,8 +21,8 @@
 }
 
 .hana-call-buttons button:hover:not(:disabled) {
-  background: rgba(99, 102, 241, 0.18);
-  border-color: rgba(129, 140, 248, 0.45);
+  background: rgba(232, 154, 170, 0.2);
+  border-color: rgba(232, 154, 170, 0.5);
 }
 
 .hana-call-buttons button:disabled {
@@ -31,10 +31,11 @@
 }
 
 .hana-call-buttons svg,
-.hana-call-actions svg {
-  width: 17px;
-  height: 17px;
+.hana-call-fab svg {
+  width: 18px;
+  height: 18px;
   fill: currentColor;
+  flex: 0 0 auto;
 }
 
 .hana-call-buttons.is-compact button {
@@ -43,10 +44,23 @@
   border-radius: 50%;
 }
 
-.hana-call-inline-error {
+.hana-call-toast-error {
+  position: fixed;
+  left: 50%;
+  bottom: max(24px, env(safe-area-inset-bottom, 0px));
+  z-index: 2147483646;
+  transform: translateX(-50%);
   margin: 0;
-  color: #fca5a5;
-  font-size: 0.75rem;
+  max-width: min(92vw, 420px);
+  padding: 12px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  background: rgba(40, 12, 16, 0.94);
+  color: #fecaca;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  text-align: center;
 }
 
 .hana-call-overlay {
@@ -57,31 +71,87 @@
   place-items: center;
   padding: 18px;
   box-sizing: border-box;
-  background: rgba(3, 6, 14, 0.82);
-  backdrop-filter: blur(16px);
-  color: #f8fafc;
-  font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  background: rgba(18, 10, 12, 0.72);
+  backdrop-filter: blur(18px) saturate(1.1);
+  color: #fff8f0;
+  font-family: 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', Georgia, serif;
+  animation: hana-call-fade-in 0.28s ease;
+}
+
+@keyframes hana-call-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .hana-call-stage {
   position: relative;
-  width: min(100%, 760px);
-  min-height: min(680px, calc(100vh - 36px));
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 24px;
+  width: min(100%, 420px);
+  min-height: min(720px, calc(100vh - 36px));
+  border: 1px solid rgba(255, 248, 240, 0.12);
+  border-radius: 28px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   background:
-    radial-gradient(circle at 50% 20%, rgba(99, 102, 241, 0.3), transparent 45%),
-    linear-gradient(160deg, #151b2a, #080b12);
-  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.55);
+    radial-gradient(ellipse 80% 50% at 50% 18%, rgba(232, 154, 170, 0.28), transparent 55%),
+    radial-gradient(ellipse 70% 45% at 80% 80%, rgba(196, 92, 74, 0.18), transparent 50%),
+    linear-gradient(165deg, #2a1816 0%, #140d0e 48%, #0c0809 100%);
+  box-shadow:
+    0 30px 90px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 248, 240, 0.08);
 }
 
 .hana-call-stage.is-video {
-  background: #05070c;
+  width: min(100%, 760px);
+  background: #0a0708;
+}
+
+.hana-call-ambient {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.hana-call-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(40px);
+  opacity: 0.45;
+  animation: hana-call-orb-drift 12s ease-in-out infinite;
+}
+
+.hana-call-orb.is-a {
+  width: 180px;
+  height: 180px;
+  left: -40px;
+  top: 18%;
+  background: rgba(232, 154, 170, 0.55);
+}
+
+.hana-call-orb.is-b {
+  width: 220px;
+  height: 220px;
+  right: -60px;
+  bottom: 22%;
+  background: rgba(196, 92, 74, 0.35);
+  animation-delay: -4s;
+}
+
+.hana-call-orb.is-c {
+  width: 120px;
+  height: 120px;
+  left: 40%;
+  bottom: 8%;
+  background: rgba(255, 200, 180, 0.25);
+  animation-delay: -7s;
+}
+
+@keyframes hana-call-orb-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(12px, -18px) scale(1.08); }
 }
 
 .hana-call-remote-video {
@@ -98,16 +168,71 @@
 
 .hana-call-local-video {
   position: absolute;
-  z-index: 2;
+  z-index: 4;
   right: 18px;
-  top: 18px;
-  width: min(28%, 180px);
+  top: max(64px, calc(18px + env(safe-area-inset-top, 0px)));
+  width: min(28%, 148px);
   aspect-ratio: 3 / 4;
   object-fit: cover;
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  border: 1px solid rgba(255, 248, 240, 0.28);
   border-radius: 16px;
-  background: #111827;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+  background: #1a1012;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+
+.hana-call-local-video.is-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.hana-call-topbar {
+  position: absolute;
+  z-index: 5;
+  top: max(16px, env(safe-area-inset-top, 0px));
+  left: 18px;
+  right: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.hana-call-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 248, 240, 0.18);
+  background: rgba(20, 12, 14, 0.45);
+  color: rgba(255, 248, 240, 0.78);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.hana-call-pill.is-live {
+  border-color: rgba(232, 154, 170, 0.55);
+  color: #ffd6de;
+  box-shadow: 0 0 0 1px rgba(232, 154, 170, 0.15);
+}
+
+.hana-call-timer,
+.hana-call-secure {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: rgba(255, 248, 240, 0.72);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.5);
+}
+
+.hana-call-timer {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #fff8f0;
 }
 
 .hana-call-info {
@@ -117,105 +242,266 @@
   flex-direction: column;
   align-items: center;
   text-align: center;
-  padding: 24px;
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.8);
+  padding: 24px 24px 140px;
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.55);
 }
 
 .hana-call-stage.is-video .hana-call-info {
   margin-top: auto;
   width: 100%;
   box-sizing: border-box;
-  padding-bottom: 120px;
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+  padding-bottom: 140px;
+  background: linear-gradient(transparent, rgba(10, 6, 7, 0.78));
+}
+
+.hana-call-avatar-wrap {
+  position: relative;
+  width: 132px;
+  height: 132px;
+  margin-bottom: 22px;
+  display: grid;
+  place-items: center;
+}
+
+.hana-call-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid rgba(232, 154, 170, 0.35);
+  opacity: 0;
+}
+
+.hana-call-avatar-wrap.is-pulse .hana-call-ring.is-outer {
+  animation: hana-call-ring-pulse 2.4s ease-out infinite;
+}
+
+.hana-call-avatar-wrap.is-pulse .hana-call-ring.is-inner {
+  animation: hana-call-ring-pulse 2.4s ease-out infinite 0.55s;
+}
+
+@keyframes hana-call-ring-pulse {
+  0% {
+    transform: scale(0.92);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
 }
 
 .hana-call-avatar {
+  position: relative;
+  z-index: 1;
   display: grid;
   place-items: center;
-  width: 96px;
-  height: 96px;
-  margin-bottom: 18px;
+  width: 104px;
+  height: 104px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.35);
-  background: linear-gradient(145deg, #818cf8, #4f46e5);
-  color: #fff;
-  font-size: 2.1rem;
+  border: 2px solid rgba(255, 248, 240, 0.42);
+  background:
+    linear-gradient(145deg, #f0c9bc, #e89aaa 55%, #c45c4a);
+  color: #fff8f0;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 2.35rem;
   font-weight: 700;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
-.hana-call-stage.is-video .hana-call-avatar,
-.hana-call-overlay.is-connected .hana-call-stage.is-video .hana-call-info {
+.hana-call-stage.is-video .hana-call-avatar-wrap {
+  display: none;
+}
+
+.hana-call-overlay.is-connected .hana-call-stage.is-video .hana-call-info h2,
+.hana-call-overlay.is-connected .hana-call-stage.is-video .hana-call-status,
+.hana-call-overlay.is-connected .hana-call-stage.is-video .hana-call-hint {
   display: none;
 }
 
 .hana-call-info h2 {
   margin: 0;
-  font-size: 1.5rem;
-  font-weight: 650;
+  font-size: 1.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
-.hana-call-info p {
+.hana-call-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+  color: rgba(255, 248, 240, 0.78);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.92rem;
+  font-weight: 500;
+}
+
+.hana-call-status.is-busy {
+  color: #ffd6de;
+}
+
+.hana-call-hint {
   margin: 8px 0 0;
-  color: rgba(226, 232, 240, 0.78);
+  color: rgba(255, 248, 240, 0.5);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.75rem;
 }
 
-.hana-call-info .hana-call-error {
+.hana-call-error {
+  margin: 12px 0 0;
+  max-width: 28ch;
   color: #fecaca;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.hana-call-dots {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 2px;
+}
+
+.hana-call-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+  animation: hana-call-dot 1.2s ease-in-out infinite;
+}
+
+.hana-call-dots i:nth-child(2) { animation-delay: 0.15s; }
+.hana-call-dots i:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes hana-call-dot {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-2px); }
 }
 
 .hana-call-actions {
   position: absolute;
-  z-index: 5;
+  z-index: 6;
   left: 50%;
-  bottom: 30px;
+  bottom: max(28px, env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: center;
-  gap: 14px;
+  gap: 16px;
   width: max-content;
-  max-width: calc(100% - 28px);
+  max-width: calc(100% - 24px);
 }
 
-.hana-call-actions button {
+.hana-call-fab {
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 10px;
   min-width: 76px;
-  height: 48px;
-  padding: 0 17px;
+  padding: 0;
   border: none;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.16);
-  color: #fff;
+  background: transparent;
+  color: #fff8f0;
   font: inherit;
-  font-size: 0.82rem;
-  font-weight: 600;
-  backdrop-filter: blur(12px);
   cursor: pointer;
 }
 
-.hana-call-actions button.is-off {
+.hana-call-fab .hana-call-fab-face {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 18px;
+  background: rgba(255, 248, 240, 0.14);
+  border: 1px solid rgba(255, 248, 240, 0.18);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.hana-call-fab svg {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  fill: currentColor;
+  flex: 0 0 auto;
+}
+
+.hana-call-fab svg.is-hangup {
+  transform: rotate(135deg);
+}
+
+.hana-call-fab span {
+  font-family: "Hiragino Maru Gothic ProN", "Yu Gothic UI", "Segoe UI", sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  opacity: 0.92;
+}
+
+.hana-call-fab:hover .hana-call-fab-face,
+.hana-call-fab:focus-visible .hana-call-fab-face {
+  transform: translateY(-2px) scale(1.04);
+}
+
+.hana-call-fab.is-tool .hana-call-fab-face {
+  border-radius: 16px;
+  background: rgba(255, 248, 240, 0.16);
+}
+
+.hana-call-fab.is-tool.is-off .hana-call-fab-face {
   background: rgba(251, 191, 36, 0.3);
+  border-color: rgba(251, 191, 36, 0.45);
   color: #fef3c7;
 }
 
-.hana-call-actions button.is-decline {
-  background: #ef4444;
+.hana-call-fab.is-decline .hana-call-fab-face {
+  background: linear-gradient(160deg, #fb7185, #e11d48);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #fff;
 }
 
-.hana-call-actions button.is-accept {
-  background: #22c55e;
+.hana-call-fab.is-accept .hana-call-fab-face {
+  width: 68px;
+  height: 68px;
+  border-radius: 22px;
+  background: linear-gradient(160deg, #4ade80, #16a34a);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #fff;
+  animation: hana-call-accept-glow 1.6s ease-in-out infinite;
 }
+
+.hana-call-fab.is-accept svg {
+  width: 30px;
+  height: 30px;
+}
+
+@keyframes hana-call-accept-glow {
+  0%, 100% { box-shadow: 0 10px 28px rgba(22, 163, 74, 0.35); }
+  50% { box-shadow: 0 14px 40px rgba(74, 222, 128, 0.7); }
+}
+
+.hana-call-overlay.is-ringing .hana-call-fab.is-accept .hana-call-fab-face {
+  width: 72px;
+  height: 72px;
+}
+
+
 
 @media (max-width: 600px) {
   .hana-call-overlay {
     padding: 0;
   }
 
-  .hana-call-stage {
+  .hana-call-stage,
+  .hana-call-stage.is-video {
     width: 100%;
     min-height: 100dvh;
     border: none;
@@ -223,12 +509,27 @@
   }
 
   .hana-call-local-video {
-    top: max(14px, env(safe-area-inset-top));
+    top: max(58px, calc(12px + env(safe-area-inset-top)));
     right: 14px;
     width: 30%;
   }
 
   .hana-call-actions {
-    bottom: max(24px, env(safe-area-inset-bottom));
+    bottom: max(22px, env(safe-area-inset-bottom));
+    gap: 12px;
+  }
+
+  .hana-call-fab {
+    width: 68px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hana-call-orb,
+  .hana-call-avatar-wrap.is-pulse .hana-call-ring,
+  .hana-call-dots i,
+  .hana-call-fab.is-accept svg,
+  .hana-call-overlay {
+    animation: none !important;
   }
 }

@@ -80,3 +80,48 @@ h2 {
 h3 {
   font-size: 1.1rem;
 }
+
+/* ─── Summer / 花火大会 site theme ─── */
+html[data-site-theme='natsu'] {
+  --bg-base: #070e1c;
+  --bg-elevated: #0d1628;
+  --bg-surface: #121c30;
+  --bg-surface-hover: #18243a;
+  --border: rgba(245, 194, 107, 0.18);
+  --border-strong: rgba(255, 107, 74, 0.32);
+  --text-primary: #f8f5ef;
+  --text-secondary: #b7c0d4;
+  --text-muted: #7d8aa3;
+  --blue-400: #7dd3fc;
+  --blue-500: #38bdf8;
+  --blue-600: #0ea5e9;
+  --blue-700: #0284c7;
+  --blue-glow: rgba(245, 194, 107, 0.22);
+  --shadow-card: 0 24px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(245, 194, 107, 0.1);
+  --shadow-glow: 0 0 48px rgba(255, 107, 74, 0.14);
+  --natsu-gold: #f5c26b;
+  --natsu-ember: #ff6b4a;
+  --natsu-lantern: #ffb347;
+  --natsu-night: #07101f;
+  --natsu-indigo: #1a2744;
+}
+
+/* Soft base glow — detailed fireworks live in NatsuAtmosphere */
+html[data-site-theme='natsu'] body {
+  background:
+    radial-gradient(ellipse 78% 48% at 50% -10%, rgba(255, 70, 40, 0.22), transparent 60%),
+    radial-gradient(ellipse 52% 40% at 10% 16%, rgba(255, 200, 80, 0.14), transparent 55%),
+    radial-gradient(ellipse 46% 34% at 92% 12%, rgba(80, 160, 255, 0.14), transparent 52%),
+    linear-gradient(180deg, #040912 0%, #0a1428 42%, #07101f 100%);
+}
+
+html[data-site-theme='natsu'] body::before,
+html[data-site-theme='natsu'] body::after {
+  content: none;
+  display: none;
+}
+
+html[data-site-theme='natsu'] #root {
+  position: relative;
+  z-index: 1;
+}

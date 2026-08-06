@@ -78,6 +78,18 @@ Các bước đó sẽ thêm code **opt-in** (functions / rules) — làm khi b�
 - `appId` / applicationId / bundleId: `app.hanamediabox.mobile`
 - Tên hiển thị: `Hana Mediabox`
 
+## Xuất APK (có timestamp trên tên file)
+
+```bash
+cd mobile
+npm run apk              # debug → apk-out/hana-mediabox-1.0-debug-YYYYMMDD-HHMMSS.apk
+npm run apk:release      # release
+npm run apk:sync         # build client + sync + debug APK
+```
+
+Build từ Android Studio cũng ra tên stamped trong  
+`android/app/build/outputs/apk/{debug|release}/`.
+
 ## Lưu ý
 
 - Thư mục `www/` là generated — đừng sửa tay; sửa bridge ở `native-bridge/`.

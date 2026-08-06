@@ -1,5 +1,4 @@
 // Firebase initialization — Firestore + Auth + Storage (large PDFs)
-import { getAnalytics } from 'firebase/analytics'
 import { initializeApp } from 'firebase/app'
 import {
     getAuth,
@@ -28,6 +27,7 @@ import {
     serverTimestamp,
     setDoc,
     updateDoc,
+    where,
     writeBatch,
 } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions'
@@ -54,11 +54,11 @@ const firebaseConfig = {
 }
 
 const app = initializeApp(firebaseConfig)
-let analytics
+let analytics = null
 try {
-  analytics = getAnalytics(app)
+  /* analytics intentionally disabled to avoid hard crash if submodule missing */
 } catch (e) {
-  // analytics may fail in non-browser envs — ignore
+  // ignore
 }
 
 // Android WebView (Capacitor) often fails Firestore's WebChannel streams,
@@ -78,7 +78,14 @@ const MEDIA_COLLECTION = 'media-items'
 const ACCESS_LOGS_COLLECTION = 'access-logs'
 const SHARED_STATE_COLLECTION = 'shared-state'
 const SHARED_PLAYLISTS_DOC = 'playlists'
+const SHARED_PHOTO_ALBUMS_DOC = 'photo-albums'
 const SHARED_SPACES_DOC = 'spaces'
+const SHARED_CHAT_DOC = 'chat'
+const SHARED_APPEARANCE_DOC = 'site-appearance'
+/** Default edit/delete window after the partner has read the message. */
+export const DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES = 5
+/** Max minutes an admin can configure for the edit window. */
+const MAX_MESSAGE_EDIT_WINDOW_MINUTES = 7 * 24 * 60
 const CHAT_THREADS_COLLECTION = 'chatThreads'
 const CHAT_PROFILES_COLLECTION = 'chatProfiles'
 const PUSH_TOKENS_COLLECTION = 'pushTokens'
@@ -93,7 +100,7 @@ export const GUEST_PROFILES = {
   gabusan: { key: 'gabusan', displayName: 'ガブリエル', addressAs: 'ガブさん' },
 }
 
-/** Owner session identity (password `hana`). Seed default. */
+/** Owner session identity. Seed default (passKey starts as key). */
 export const OWNER_PROFILE = {
   key: 'hana',
   displayName: 'はな',
@@ -131,6 +138,12 @@ function accountFromDefault(def) {
     role: def.role,
     roleLabel: def.roleLabel || (def.role === 'owner' ? 'オーナー' : 'ゲスト'),
     avatarUrl: '',
+    avatarPresetId: '',
+    allowedPlaylistIds: null,
+    allowedAlbumIds: null,
+    accountActive: true,
+    lastAccessAt: null,
+    inactiveReason: null,
     updatedAt: null,
   }
 }
@@ -157,6 +170,115 @@ export function isValidAccountKey(value) {
   return key.length >= 2 && key.length <= 24 && /^[a-z0-9][a-z0-9_-]*$/.test(key)
 }
 
+/**
+ * null = every custom playlist (backward compatible default).
+ * [] = no custom playlists (すべて / お気に入り only).
+ * string[] = only those playlist ids.
+ */
+export function normalizeAllowedPlaylistIds(raw) {
+  if (raw == null) return null
+  if (!Array.isArray(raw)) return null
+  return [...new Set(
+    raw.map((id) => String(id || '').trim()).filter(Boolean),
+  )]
+}
+
+export function guestMayAccessPlaylist(account, playlistId) {
+  if (!account || account.role === 'owner') return true
+  const allowed = normalizeAllowedPlaylistIds(account.allowedPlaylistIds)
+  if (allowed == null) return true
+  return allowed.includes(String(playlistId || ''))
+}
+
+/**
+ * Library-track ACL for 「すべて」 / お気に入り / today pick.
+ * Restricted guests hide any track that belongs to a non-allowed playlist.
+ * Tracks not in any custom playlist remain visible.
+ */
+export function guestMayAccessTrack(account, trackId, playlists = []) {
+  if (!account || account.role === 'owner') return true
+  const allowed = normalizeAllowedPlaylistIds(account.allowedPlaylistIds)
+  if (allowed == null) return true
+  const id = String(trackId || '')
+  if (!id) return false
+  const allowedSet = new Set(allowed)
+  for (const playlist of playlists || []) {
+    if (!(playlist?.trackIds || []).includes(id)) continue
+    if (!allowedSet.has(playlist.id)) return false
+  }
+  return true
+}
+
+/**
+ * null = every photo album (default).
+ * [] = no albums.
+ * string[] = only those album ids.
+ */
+export function normalizeAllowedAlbumIds(raw) {
+  if (raw == null) return null
+  if (!Array.isArray(raw)) return null
+  return [...new Set(
+    raw.map((id) => String(id || '').trim()).filter(Boolean),
+  )]
+}
+
+export function guestMayAccessAlbum(account, albumId) {
+  if (!account || account.role === 'owner') return true
+  const allowed = normalizeAllowedAlbumIds(account.allowedAlbumIds)
+  if (allowed == null) return true
+  return allowed.includes(String(albumId || ''))
+}
+
+/** Hide images that only live in non-allowed albums; unassigned stay visible. */
+export function guestMayAccessImage(account, imageId, albums = []) {
+  if (!account || account.role === 'owner') return true
+  const allowed = normalizeAllowedAlbumIds(account.allowedAlbumIds)
+  if (allowed == null) return true
+  const id = String(imageId || '')
+  if (!id) return false
+  const allowedSet = new Set(allowed)
+  for (const album of albums || []) {
+    if (!(album?.imageIds || []).includes(id)) continue
+    if (!allowedSet.has(album.id)) return false
+  }
+  return true
+}
+
+/** Idle auto-inactivate threshold (5 days). */
+export const ACCOUNT_IDLE_MS = 5 * 24 * 60 * 60 * 1000
+
+/** Default owner account that cannot be inactivated. */
+export const PROTECTED_OWNER_KEY = OWNER_PROFILE.key
+
+/** Shown on the login gate whenever an account is inactive. */
+export const ACCOUNT_INACTIVE_LOGIN_MESSAGE =
+  '長期間アクセスがなかったため、システムがアカウントを停止しました。管理者に連絡して処理してもらってください。'
+
+export function isProtectedOwnerAccount(key) {
+  return normalizeAccountKey(key) === PROTECTED_OWNER_KEY
+}
+
+export function parseAccountAccessMs(account) {
+  const raw = account?.lastAccessAt || account?.lastAccessAtIso || null
+  if (!raw) return null
+  const ms = Date.parse(raw)
+  return Number.isFinite(ms) ? ms : null
+}
+
+export function isAccountLoginAllowed(account) {
+  if (!account) return false
+  if (isProtectedOwnerAccount(account.key)) return true
+  return account.accountActive !== false
+}
+
+export function isAccountIdlePastThreshold(account, nowMs = Date.now()) {
+  if (!account || isProtectedOwnerAccount(account.key)) return false
+  if (account.accountActive === false) return false
+  const accessMs = parseAccountAccessMs(account)
+  if (accessMs == null) return false
+  return nowMs - accessMs >= ACCOUNT_IDLE_MS
+}
+
 function serializeChatAccount(id, data = {}) {
   const key = normalizeAccountKey(id)
   const role = data?.role === 'owner' ? 'owner' : data?.role === 'guest' ? 'guest' : ''
@@ -173,6 +295,28 @@ function serializeChatAccount(id, data = {}) {
     roleLabel: String(data?.roleLabel || '').trim()
       || (role === 'owner' ? 'オーナー' : 'ゲスト'),
     avatarUrl: String(data?.avatarUrl || ''),
+    avatarPresetId: String(data?.avatarPresetId || '').trim(),
+    allowedPlaylistIds: data?.role === 'owner'
+      ? null
+      : normalizeAllowedPlaylistIds(
+        Object.prototype.hasOwnProperty.call(data || {}, 'allowedPlaylistIds')
+          ? data.allowedPlaylistIds
+          : null,
+      ),
+    allowedAlbumIds: data?.role === 'owner'
+      ? null
+      : normalizeAllowedAlbumIds(
+        Object.prototype.hasOwnProperty.call(data || {}, 'allowedAlbumIds')
+          ? data.allowedAlbumIds
+          : null,
+      ),
+    accountActive: data?.accountActive === false ? false : true,
+    lastAccessAt: data?.lastAccessAt?.toDate?.()?.toISOString?.()
+      || data?.lastAccessAtIso
+      || null,
+    inactiveReason: data?.inactiveReason === 'idle' || data?.inactiveReason === 'admin'
+      ? data.inactiveReason
+      : null,
     updatedAt: data?.updatedAt?.toDate?.()?.toISOString?.() || data?.updatedAtIso || null,
   }
 }
@@ -187,6 +331,11 @@ export function listGuestProfiles(accounts = chatAccountsCache) {
       passKey: account.passKey,
       role: 'guest',
       roleLabel: account.roleLabel || 'ゲスト',
+      allowedPlaylistIds: normalizeAllowedPlaylistIds(account.allowedPlaylistIds),
+      allowedAlbumIds: normalizeAllowedAlbumIds(account.allowedAlbumIds),
+      accountActive: account.accountActive !== false,
+      lastAccessAt: account.lastAccessAt || null,
+      inactiveReason: account.inactiveReason || null,
     }))
 }
 
@@ -206,9 +355,9 @@ export function listOwnerProfiles(accounts = chatAccountsCache) {
 export function findChatAccountByPassKey(passKey, accounts = chatAccountsCache) {
   const needle = normalizeAccountKey(passKey)
   if (!needle) return null
-  return (accounts || []).find((account) => (
-    account.passKey === needle || account.key === needle
-  )) || null
+  // Login must match passKey only — account.key is a stable id and must not
+  // keep working after the password is changed in admin.
+  return (accounts || []).find((account) => account.passKey === needle) || null
 }
 
 export function getGuestProfile(guestKey) {
@@ -223,6 +372,12 @@ export function getGuestProfile(guestKey) {
       displayName: live.displayName,
       addressAs: live.addressAs,
       passKey: live.passKey,
+      role: 'guest',
+      allowedPlaylistIds: normalizeAllowedPlaylistIds(
+        Object.prototype.hasOwnProperty.call(live, 'allowedPlaylistIds')
+          ? live.allowedPlaylistIds
+          : null,
+      ),
     }
   }
   return GUEST_PROFILES[key] || null
@@ -256,6 +411,7 @@ export function resolveSessionProfile(authRole, guestKey = '') {
       addressAs: guest.addressAs,
       role: 'guest',
       roleLabel: 'ゲスト',
+      allowedPlaylistIds: guest.allowedPlaylistIds ?? null,
     }
   }
   return {
@@ -265,6 +421,7 @@ export function resolveSessionProfile(authRole, guestKey = '') {
     addressAs: 'ゲスト',
     role: 'guest',
     roleLabel: 'ゲスト',
+    allowedPlaylistIds: null,
   }
 }
 
@@ -321,9 +478,11 @@ export function getDefaultAvatarDataUrl(profileId, displayName = '') {
 }
 
 /** Prefer custom URL, else cached, else optional fallback (e.g. Hana art), else initials. */
-export function resolveAvatarSrc(profileId, displayName, customUrl = '', fallbackUrl = '') {
+export function resolveAvatarSrc(profileId, displayName, customUrl = '', fallbackUrl = '', presetSrc = '') {
   const url = String(customUrl || getCachedAvatarUrl(profileId) || '').trim()
-  if (url) return url
+  if (url && !url.startsWith('preset:')) return url
+  const preset = String(presetSrc || '').trim()
+  if (preset) return preset
   const fallback = String(fallbackUrl || '').trim()
   if (fallback) return fallback
   return getDefaultAvatarDataUrl(profileId, displayName)
@@ -340,6 +499,7 @@ function serializeChatProfile(id, data) {
     passKey: account.passKey,
     roleLabel: account.roleLabel,
     avatarUrl: account.avatarUrl,
+    avatarPresetId: account.avatarPresetId,
     status: normalizeChatPresenceMode(data?.status),
     updatedAt: account.updatedAt,
   }
@@ -364,14 +524,18 @@ export async function ensureDefaultChatAccounts() {
       }, { merge: true })
       return
     }
+    const nowIso = new Date().toISOString()
     await setDoc(ref, {
       role: def.role,
       roleLabel: def.roleLabel,
       passKey: def.passKey || def.key,
       displayName: def.displayName,
       addressAs: def.addressAs,
+      accountActive: true,
+      lastAccessAt: serverTimestamp(),
+      lastAccessAtIso: nowIso,
       updatedAt: serverTimestamp(),
-      updatedAtIso: new Date().toISOString(),
+      updatedAtIso: nowIso,
     }, { merge: true })
   }))
 }
@@ -401,7 +565,7 @@ export function subscribeChatAccounts(onData, onError) {
 
 /**
  * Create or update a guest/owner account.
- * @param {{ key: string, passKey?: string, displayName: string, addressAs?: string, role: 'guest'|'owner', roleLabel?: string }} payload
+ * @param {{ key: string, passKey?: string, displayName: string, addressAs?: string, role: 'guest'|'owner', roleLabel?: string, allowedPlaylistIds?: string[]|null }} payload
  * @param {{ isNew?: boolean }} [options]
  */
 export async function upsertChatAccount(payload, options = {}) {
@@ -435,12 +599,36 @@ export async function upsertChatAccount(payload, options = {}) {
   }
 
   const nowIso = new Date().toISOString()
+  const allowedPlaylistIds = role === 'owner'
+    ? null
+    : (Object.prototype.hasOwnProperty.call(payload || {}, 'allowedPlaylistIds')
+      ? normalizeAllowedPlaylistIds(payload.allowedPlaylistIds)
+      : (existing.exists()
+        ? normalizeAllowedPlaylistIds(existing.data()?.allowedPlaylistIds)
+        : null))
+  const allowedAlbumIds = role === 'owner'
+    ? null
+    : (Object.prototype.hasOwnProperty.call(payload || {}, 'allowedAlbumIds')
+      ? normalizeAllowedAlbumIds(payload.allowedAlbumIds)
+      : (existing.exists()
+        ? normalizeAllowedAlbumIds(existing.data()?.allowedAlbumIds)
+        : null))
+
   await setDoc(ref, {
     role,
     roleLabel,
     passKey,
     displayName,
     addressAs,
+    ...(role === 'guest' ? { allowedPlaylistIds, allowedAlbumIds } : {}),
+    ...(options.isNew || !existing.exists()
+      ? {
+        accountActive: true,
+        lastAccessAt: serverTimestamp(),
+        lastAccessAtIso: nowIso,
+        inactiveReason: null,
+      }
+      : {}),
     updatedAt: serverTimestamp(),
     updatedAtIso: nowIso,
   }, { merge: true })
@@ -451,7 +639,142 @@ export async function upsertChatAccount(payload, options = {}) {
     passKey,
     displayName,
     addressAs,
+    allowedPlaylistIds,
+    allowedAlbumIds,
     avatarUrl: existing.exists() ? existing.data()?.avatarUrl : '',
+    avatarPresetId: existing.exists() ? existing.data()?.avatarPresetId : '',
+    updatedAtIso: nowIso,
+  })
+}
+
+/** Update only a guest's playlist access list (admin matrix). */
+export async function touchAccountAccess(accountKey) {
+  const key = normalizeAccountKey(accountKey)
+  if (!key) return null
+  const nowIso = new Date().toISOString()
+  await setDoc(doc(db, CHAT_PROFILES_COLLECTION, key), {
+    lastAccessAt: serverTimestamp(),
+    lastAccessAtIso: nowIso,
+    updatedAt: serverTimestamp(),
+    updatedAtIso: nowIso,
+  }, { merge: true })
+  return nowIso
+}
+
+/**
+ * Admin (or idle enforcer) toggle. Protected owner "hana" cannot be inactivated.
+ * Reactivating refreshes lastAccessAt so the idle timer restarts.
+ */
+export async function setAccountActiveState(accountKey, active, options = {}) {
+  const key = normalizeAccountKey(accountKey)
+  if (!isValidAccountKey(key)) throw new Error('ユーザーが見つかりません。')
+  if (isProtectedOwnerAccount(key) && !active) {
+    throw new Error('デフォルトオーナー「hana」は停止できません。')
+  }
+  const nowIso = new Date().toISOString()
+  const by = options.by === 'idle' ? 'idle' : 'admin'
+  if (active) {
+    await setDoc(doc(db, CHAT_PROFILES_COLLECTION, key), {
+      accountActive: true,
+      inactiveReason: null,
+      lastAccessAt: serverTimestamp(),
+      lastAccessAtIso: nowIso,
+      updatedAt: serverTimestamp(),
+      updatedAtIso: nowIso,
+    }, { merge: true })
+  } else {
+    await setDoc(doc(db, CHAT_PROFILES_COLLECTION, key), {
+      accountActive: false,
+      inactiveReason: by,
+      updatedAt: serverTimestamp(),
+      updatedAtIso: nowIso,
+    }, { merge: true })
+  }
+  return serializeChatAccount(key, {
+    ...(chatAccountsCache.find((item) => item.key === key) || {}),
+    accountActive: active,
+    inactiveReason: active ? null : by,
+    lastAccessAt: active ? nowIso : (chatAccountsCache.find((item) => item.key === key)?.lastAccessAt || null),
+  })
+}
+
+/**
+ * Stamp missing lastAccessAt, or auto-inactivate idle accounts.
+ * Safe to call often (idempotent).
+ */
+export async function syncIdleAccountStatuses(accounts = chatAccountsCache) {
+  const now = Date.now()
+  const jobs = []
+  for (const account of accounts || []) {
+    if (!account?.key || isProtectedOwnerAccount(account.key)) continue
+    if (account.accountActive === false) continue
+    const accessMs = parseAccountAccessMs(account)
+    if (accessMs == null) {
+      jobs.push(touchAccountAccess(account.key))
+      continue
+    }
+    if (now - accessMs >= ACCOUNT_IDLE_MS) {
+      jobs.push(setAccountActiveState(account.key, false, { by: 'idle' }))
+    }
+  }
+  if (jobs.length) await Promise.allSettled(jobs)
+}
+
+/**
+ * Login gate helper: may auto-inactivate then report whether login is allowed.
+ * @returns {Promise<{ ok: true, account } | { ok: false, reason: 'inactive'|'missing' }>}
+ */
+export async function evaluateAccountLogin(account) {
+  if (!account) return { ok: false, reason: 'missing' }
+  if (isProtectedOwnerAccount(account.key)) return { ok: true, account }
+  if (account.accountActive === false) return { ok: false, reason: 'inactive' }
+  if (isAccountIdlePastThreshold(account)) {
+    await setAccountActiveState(account.key, false, { by: 'idle' })
+    return { ok: false, reason: 'inactive' }
+  }
+  return { ok: true, account }
+}
+
+export async function setGuestPlaylistAccess(guestKey, playlistIds) {
+  const key = normalizeAccountKey(guestKey)
+  if (!isValidAccountKey(key)) throw new Error('ゲストIDが不正です。')
+  const ref = doc(db, CHAT_PROFILES_COLLECTION, key)
+  const snap = await getDoc(ref)
+  if (!snap.exists() || snap.data()?.role !== 'guest') {
+    throw new Error('ゲストが見つかりません。')
+  }
+  const allowedPlaylistIds = normalizeAllowedPlaylistIds(playlistIds)
+  const nowIso = new Date().toISOString()
+  await setDoc(ref, {
+    allowedPlaylistIds,
+    updatedAt: serverTimestamp(),
+    updatedAtIso: nowIso,
+  }, { merge: true })
+  return serializeChatAccount(key, {
+    ...snap.data(),
+    allowedPlaylistIds,
+    updatedAtIso: nowIso,
+  })
+}
+
+export async function setGuestAlbumAccess(guestKey, albumIds) {
+  const key = normalizeAccountKey(guestKey)
+  if (!isValidAccountKey(key)) throw new Error('ゲストIDが不正です。')
+  const ref = doc(db, CHAT_PROFILES_COLLECTION, key)
+  const snap = await getDoc(ref)
+  if (!snap.exists() || snap.data()?.role !== 'guest') {
+    throw new Error('ゲストが見つかりません。')
+  }
+  const allowedAlbumIds = normalizeAllowedAlbumIds(albumIds)
+  const nowIso = new Date().toISOString()
+  await setDoc(ref, {
+    allowedAlbumIds,
+    updatedAt: serverTimestamp(),
+    updatedAtIso: nowIso,
+  }, { merge: true })
+  return serializeChatAccount(key, {
+    ...snap.data(),
+    allowedAlbumIds,
     updatedAtIso: nowIso,
   })
 }
@@ -582,6 +905,7 @@ export async function uploadUserAvatar(profileId, file, meta = {}) {
     doc(db, CHAT_PROFILES_COLLECTION, id),
     {
       avatarUrl,
+      avatarPresetId: '',
       ...(displayName ? { displayName } : {}),
       updatedAt: serverTimestamp(),
       updatedAtIso: nowIso,
@@ -591,6 +915,48 @@ export async function uploadUserAvatar(profileId, file, meta = {}) {
   setCachedAvatarUrl(id, avatarUrl)
   return avatarUrl
 }
+
+/** Pick a built-in character avatar; clears uploaded avatarUrl. */
+export async function setUserAvatarPreset(profileId, presetId) {
+  const id = String(profileId || '').trim().toLowerCase()
+  if (!id) throw new Error('プロフィールIDがありません。')
+  const preset = String(presetId || '').trim()
+  const nowIso = new Date().toISOString()
+  await setDoc(
+    doc(db, CHAT_PROFILES_COLLECTION, id),
+    {
+      avatarPresetId: preset,
+      avatarUrl: '',
+      updatedAt: serverTimestamp(),
+      updatedAtIso: nowIso,
+    },
+    { merge: true },
+  )
+  setCachedAvatarUrl(id, '')
+  return preset
+}
+
+/** Clear custom avatar + preset → back to initials. */
+export async function clearUserAvatar(profileId) {
+  const id = String(profileId || '').trim().toLowerCase()
+  if (!id) throw new Error('プロフィールIDがありません。')
+  const nowIso = new Date().toISOString()
+  await setDoc(
+    doc(db, CHAT_PROFILES_COLLECTION, id),
+    {
+      avatarUrl: '',
+      avatarPresetId: '',
+      updatedAt: serverTimestamp(),
+      updatedAtIso: nowIso,
+    },
+    { merge: true },
+  )
+  setCachedAvatarUrl(id, '')
+}
+
+export const CHAT_MAX_IMAGE_BYTES = 8 * 1024 * 1024
+export const CHAT_MAX_VIDEO_BYTES = 50 * 1024 * 1024
+export const CHAT_MAX_FILE_BYTES = 25 * 1024 * 1024
 
 /**
  * Compress and upload a chat image to Storage; returns the download URL.
@@ -603,7 +969,7 @@ export async function uploadChatImage(threadId, file) {
   if (!file || !String(file.type || '').startsWith('image/')) {
     throw new Error('画像ファイルを選んでください。')
   }
-  if (file.size > 8 * 1024 * 1024) {
+  if (file.size > CHAT_MAX_IMAGE_BYTES) {
     throw new Error('画像は8MB以下にしてください。')
   }
 
@@ -612,6 +978,67 @@ export async function uploadChatImage(threadId, file) {
   const objectRef = storageRef(storage, `chat-images/${tid}/${stamp}.jpg`)
   await uploadBytes(objectRef, blob, { contentType: 'image/jpeg' })
   return getDownloadURL(objectRef)
+}
+
+export function classifyChatAttachment(fileOrMime) {
+  const mime = String(
+    typeof fileOrMime === 'string' ? fileOrMime : fileOrMime?.type || '',
+  ).trim().toLowerCase()
+  if (mime.startsWith('image/')) return 'image'
+  if (mime.startsWith('video/')) return 'video'
+  return 'file'
+}
+
+export function formatChatFileSize(bytes) {
+  const n = Math.max(0, Number(bytes) || 0)
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`
+  return `${(n / (1024 * 1024)).toFixed(n < 10 * 1024 * 1024 ? 1 : 0)} MB`
+}
+
+function sanitizeChatUploadFileName(name = 'file') {
+  const base = String(name).split(/[/\\]/).pop() || 'file'
+  return base.replace(/[^\w.\-()\u3040-\u30ff\u3400-\u9fff]+/g, '_').slice(0, 120) || 'file'
+}
+
+/**
+ * Upload an image, video, or arbitrary file for chat.
+ * Images are still JPEG-compressed; video/files are stored as-is under chat-files/.
+ */
+export async function uploadChatAttachment(threadId, file) {
+  const tid = String(threadId || '').trim()
+  if (!tid) throw new Error('スレッドがありません。')
+  if (!file) throw new Error('ファイルを選んでください。')
+
+  const kind = classifyChatAttachment(file)
+  const fileName = sanitizeChatUploadFileName(file.name || (kind === 'video' ? 'video' : 'file'))
+  const fileMime = String(file.type || 'application/octet-stream')
+  const fileSize = Math.max(0, Number(file.size) || 0)
+
+  if (kind === 'image') {
+    if (fileSize > CHAT_MAX_IMAGE_BYTES) throw new Error('画像は8MB以下にしてください。')
+    const url = await uploadChatImage(tid, file)
+    return {
+      url,
+      kind: 'image',
+      fileName: `${fileName.replace(/\.[^.]+$/, '') || 'image'}.jpg`,
+      fileMime: 'image/jpeg',
+      fileSize,
+    }
+  }
+
+  if (kind === 'video' && fileSize > CHAT_MAX_VIDEO_BYTES) {
+    throw new Error('動画は50MB以下にしてください。')
+  }
+  if (kind === 'file' && fileSize > CHAT_MAX_FILE_BYTES) {
+    throw new Error('ファイルは25MB以下にしてください。')
+  }
+
+  const stamp = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  const objectRef = storageRef(storage, `chat-files/${tid}/${stamp}_${fileName}`)
+  await uploadBytes(objectRef, file, { contentType: fileMime })
+  const url = await getDownloadURL(objectRef)
+  return { url, kind, fileName, fileMime, fileSize }
 }
 
 /** Resolve a friendly guest display name from thread id / guestKey / stored label. */
@@ -915,7 +1342,7 @@ export function normalizeChatEffect(value) {
   return /^[a-z0-9_-]+$/.test(id) ? id : ''
 }
 
-/** HTTPS download URL for a chat image message (Firebase Storage). */
+/** HTTPS download URL for a chat image/file message (Firebase Storage). */
 export function normalizeChatImageUrl(value) {
   const url = String(value || '').trim()
   if (!url || url.length > 2048) return ''
@@ -923,8 +1350,44 @@ export function normalizeChatImageUrl(value) {
   return url
 }
 
+export function normalizeChatFileName(value) {
+  return String(value || '').trim().slice(0, 180)
+}
+
+export function normalizeChatFileMime(value) {
+  return String(value || '').trim().toLowerCase().slice(0, 120)
+}
+
+export function normalizeChatFileKind(value, mime = '') {
+  const kind = String(value || '').trim().toLowerCase()
+  if (kind === 'image' || kind === 'video' || kind === 'file') return kind
+  return classifyChatAttachment(mime)
+}
+
+/** Resolve display attachment from a serialized chat message (legacy imageUrl supported). */
+export function getChatMessageAttachment(message) {
+  if (!message || message.deleted) return null
+  const fileUrl = normalizeChatImageUrl(message.fileUrl)
+  const imageUrl = normalizeChatImageUrl(message.imageUrl)
+  const url = fileUrl || imageUrl
+  if (!url) return null
+  const fileMime = normalizeChatFileMime(message.fileMime) || (imageUrl && !fileUrl ? 'image/*' : '')
+  const kind = normalizeChatFileKind(message.fileKind, fileMime || (imageUrl ? 'image/' : ''))
+  return {
+    url,
+    kind,
+    fileName: normalizeChatFileName(message.fileName) || (kind === 'image' ? '写真' : kind === 'video' ? '動画' : 'ファイル'),
+    fileMime,
+    fileSize: Math.max(0, Number(message.fileSize) || 0),
+  }
+}
+
 function serializeChatMessage(id, data) {
   const deleted = Boolean(data?.deleted)
+  const imageUrl = deleted ? '' : normalizeChatImageUrl(data?.imageUrl)
+  const fileUrl = deleted ? '' : normalizeChatImageUrl(data?.fileUrl)
+  const fileMime = deleted ? '' : normalizeChatFileMime(data?.fileMime)
+  const fileKind = deleted ? '' : normalizeChatFileKind(data?.fileKind, fileMime || (imageUrl ? 'image/' : ''))
   return {
     id,
     text: deleted ? '（削除されたメッセージ）' : String(data?.text || ''),
@@ -932,12 +1395,30 @@ function serializeChatMessage(id, data) {
     sticker: deleted ? '' : normalizeChatSticker(data?.sticker),
     effect: deleted ? '' : normalizeChatEffect(data?.effect),
     effectEmoji: deleted ? '' : String(data?.effectEmoji || '').slice(0, 8),
-    imageUrl: deleted ? '' : normalizeChatImageUrl(data?.imageUrl),
+    imageUrl,
+    fileUrl,
+    fileName: deleted ? '' : normalizeChatFileName(data?.fileName),
+    fileMime,
+    fileKind: deleted ? '' : fileKind,
+    fileSize: deleted ? 0 : Math.max(0, Number(data?.fileSize) || 0),
     sender: data?.sender === 'hana' ? 'hana' : 'guest',
     createdAt: data?.createdAt?.toDate?.()?.toISOString?.() || data?.createdAtIso || null,
+    createdAtIso: data?.createdAtIso ? String(data.createdAtIso) : null,
+    clientId: data?.clientId ? String(data.clientId).slice(0, 64) : null,
     editedAt: data?.editedAt?.toDate?.()?.toISOString?.() || data?.editedAtIso || null,
     deleted,
     reactions: normalizeChatReactions(data?.reactions),
+    kind: data?.kind === 'call-log' ? 'call-log' : (data?.kind ? String(data.kind) : ''),
+    callLog: data?.callLog && typeof data.callLog === 'object'
+      ? {
+          callId: String(data.callLog.callId || ''),
+          status: String(data.callLog.status || ''),
+          durationSec: Math.max(0, Number(data.callLog.durationSec) || 0),
+          callerRole: data.callLog.callerRole === 'hana' ? 'hana' : 'guest',
+          endedBy: data.callLog.endedBy === 'hana' || data.callLog.endedBy === 'guest' ? data.callLog.endedBy : '',
+          answeredAtIso: data.callLog.answeredAtIso ? String(data.callLog.answeredAtIso) : null,
+        }
+      : null,
     replyTo: data?.replyToId
       ? {
           id: String(data.replyToId),
@@ -946,6 +1427,21 @@ function serializeChatMessage(id, data) {
         }
       : null,
   }
+}
+
+/** Stable chronological sort for chat bubbles (avoids Firestore auto-id reordering). */
+export function sortChatMessages(rows = []) {
+  return [...rows].sort((a, b) => {
+    // Prefer createdAtIso (client clock at send): serverTimestamp can resolve out of
+    // order when messages are sent in quick succession, which flips bubble order.
+    const ta = Date.parse(a?.createdAtIso || a?.createdAt || '') || 0
+    const tb = Date.parse(b?.createdAtIso || b?.createdAt || '') || 0
+    if (ta !== tb) return ta - tb
+    const ca = String(a?.clientId || '')
+    const cb = String(b?.clientId || '')
+    if (ca && cb && ca !== cb) return ca.localeCompare(cb)
+    return String(a?.id || '').localeCompare(String(b?.id || ''))
+  })
 }
 
 function serializeChatThread(id, data) {
@@ -1191,15 +1687,17 @@ export function subscribeChatMessages(threadId, onData, onError) {
     onData?.([])
     return () => {}
   }
-  // Sort client-side: orderBy('createdAt') silently drops docs missing that field.
+  // Must orderBy newest-first. limit(N) alone returns arbitrary/oldest docs,
+  // so new sends never appear in the bubble list (push/preview still work).
   const messagesRef = collection(db, CHAT_THREADS_COLLECTION, threadId, 'messages')
   return onSnapshot(
-    query(messagesRef, limit(200)),
+    query(messagesRef, orderBy('createdAtIso', 'desc'), limit(300)),
     (snap) => {
-      const rows = snap.docs
-        .map((document) => serializeChatMessage(document.id, document.data()))
-        .filter((message) => !message.deleted)
-        .sort((a, b) => String(a.createdAt || a.id || '').localeCompare(String(b.createdAt || b.id || '')))
+      const rows = sortChatMessages(
+        snap.docs
+          .map((document) => serializeChatMessage(document.id, document.data()))
+          .filter((message) => !message.deleted),
+      )
       onData?.(rows)
     },
     (error) => onError?.(error),
@@ -1250,6 +1748,131 @@ export async function updateChatCall(threadId, callId, patch) {
     },
     { merge: true },
   )
+}
+
+function formatCallDurationLabel(totalSeconds) {
+  const sec = Math.max(0, Math.floor(Number(totalSeconds) || 0))
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}
+
+/** Japanese call-log text for chat timeline (LINE-style). */
+export function buildChatCallLogText({ status, durationSec = 0 } = {}) {
+  const st = String(status || '').trim()
+  const dur = Math.max(0, Math.floor(Number(durationSec) || 0))
+  if (st === 'ended' && dur > 0) return `通話 ${formatCallDurationLabel(dur)}`
+  if (st === 'ended') return '通話をキャンセル'
+  if (st === 'missed') return '不在着信'
+  if (st === 'rejected') return '通話を拒否'
+  if (st === 'failed') return '通話に失敗'
+  return '通話'
+}
+
+/**
+ * Write / upsert a call log bubble into the chat thread.
+ * Uses a stable message id so both peers can call this safely.
+ */
+export async function postChatCallLog({
+  threadId,
+  callId,
+  status,
+  callerRole,
+  endedBy,
+  durationSec = 0,
+  answeredAtIso = null,
+}) {
+  const tid = String(threadId || '').trim()
+  const cid = String(callId || '').trim()
+  const st = String(status || '').trim()
+  if (!tid || !cid || !st) return null
+
+  const dur = Math.max(0, Math.floor(Number(durationSec) || 0))
+  const text = buildChatCallLogText({ status: st, durationSec: dur })
+  const senderRole = endedBy === 'hana' || endedBy === 'guest'
+    ? endedBy
+    : (callerRole === 'hana' ? 'hana' : 'guest')
+  const nowIso = new Date().toISOString()
+  const messageId = `calllog-${cid}`.slice(0, 64)
+
+  const threadRef = doc(db, CHAT_THREADS_COLLECTION, tid)
+  const messageRef = doc(db, CHAT_THREADS_COLLECTION, tid, 'messages', messageId)
+  const callRef = chatCallRef(tid, cid)
+
+  const [messageSnap, callSnap] = await Promise.all([getDoc(messageRef), getDoc(callRef)])
+  if (callSnap.exists() && callSnap.data()?.logPosted && messageSnap.exists()) {
+    // Already logged — only upgrade duration text if we now know a longer call.
+    const prevDur = Math.max(0, Number(messageSnap.data()?.callLog?.durationSec) || 0)
+    if (dur > prevDur) {
+      await setDoc(messageRef, {
+        text,
+        callLog: {
+          callId: cid,
+          status: st,
+          durationSec: dur,
+          callerRole: callerRole === 'hana' ? 'hana' : 'guest',
+          endedBy: endedBy === 'hana' || endedBy === 'guest' ? endedBy : '',
+          answeredAtIso: answeredAtIso ? String(answeredAtIso) : null,
+        },
+      }, { merge: true })
+      await setDoc(threadRef, { lastText: text.slice(0, 160) }, { merge: true })
+    }
+    return messageId
+  }
+
+  const isNew = !messageSnap.exists()
+  await setDoc(messageRef, {
+    text,
+    sender: senderRole,
+    createdAt: messageSnap.exists() ? (messageSnap.data()?.createdAt || serverTimestamp()) : serverTimestamp(),
+    createdAtIso: messageSnap.exists() ? (messageSnap.data()?.createdAtIso || nowIso) : nowIso,
+    deleted: false,
+    clientId: messageId,
+    kind: 'call-log',
+    callLog: {
+      callId: cid,
+      status: st,
+      durationSec: dur,
+      callerRole: callerRole === 'hana' ? 'hana' : 'guest',
+      endedBy: endedBy === 'hana' || endedBy === 'guest' ? endedBy : '',
+      answeredAtIso: answeredAtIso ? String(answeredAtIso) : null,
+    },
+  }, { merge: true })
+
+  await setDoc(
+    threadRef,
+    {
+      lastText: text.slice(0, 160),
+      updatedAt: serverTimestamp(),
+      updatedAtIso: nowIso,
+      ...(isNew
+        ? (senderRole === 'guest'
+          ? {
+              unreadByHana: true,
+              unreadCountHana: increment(1),
+            }
+          : {
+              unreadByGuest: true,
+              unreadCountGuest: increment(1),
+            })
+        : {}),
+    },
+    { merge: true },
+  )
+
+  await setDoc(
+    callRef,
+    {
+      logPosted: true,
+      durationSec: dur,
+      status: st,
+      updatedAt: serverTimestamp(),
+      updatedAtIso: nowIso,
+    },
+    { merge: true },
+  )
+
+  return messageId
 }
 
 export function subscribeChatCalls(threadId, onData, onError) {
@@ -1327,10 +1950,10 @@ export async function migrateLegacyGuestThread({
     return canonicalId || legacyThreadId
   }
 
-  // Fast path: if canonical already has any message, keep using the caller's preferred id.
+  // Fast path: canonical already has history — open that, not the legacy id.
   const canonMessagesRef = collection(db, CHAT_THREADS_COLLECTION, canonicalId, 'messages')
   const canonSnap = await getDocs(query(canonMessagesRef, limit(1)))
-  if (!canonSnap.empty) return legacyThreadId
+  if (!canonSnap.empty) return canonicalId
 
   const legacyMessagesRef = collection(db, CHAT_THREADS_COLLECTION, legacyThreadId, 'messages')
   const [legacySnap, legacyThreadSnap] = await Promise.all([
@@ -1392,20 +2015,141 @@ export function subscribeOwnChatThread(threadId, onData, onError) {
   )
 }
 
-/** Admin: watch all guest threads. */
+/** Admin: watch recent threads + every known guest-* (zen must never drop off). */
 export function subscribeChatThreads(onData, onError) {
   const threadsQuery = query(
     collection(db, CHAT_THREADS_COLLECTION),
     orderBy('updatedAt', 'desc'),
-    limit(80),
+    limit(250),
   )
-  return onSnapshot(
+  const knownIds = listGuestProfiles().map((profile) => `guest-${profile.key}`)
+  let mainRows = []
+  const knownRows = new Map()
+
+  const emit = () => {
+    const byId = new Map()
+    mainRows.forEach((row) => byId.set(row.id, row))
+    knownRows.forEach((row, id) => {
+      if (row) byId.set(id, row)
+    })
+    const rows = [...byId.values()].sort((a, b) => (
+      String(b.updatedAt || b.updatedAtIso || '').localeCompare(String(a.updatedAt || a.updatedAtIso || ''))
+    ))
+    onData?.(rows)
+  }
+
+  const unsubMain = onSnapshot(
     threadsQuery,
     (snap) => {
-      onData?.(snap.docs.map((document) => serializeChatThread(document.id, document.data())))
+      mainRows = snap.docs.map((document) => serializeChatThread(document.id, document.data()))
+      emit()
     },
     (error) => onError?.(error),
   )
+
+  const unsubsKnown = knownIds.map((id) => onSnapshot(
+    doc(db, CHAT_THREADS_COLLECTION, id),
+    (snap) => {
+      knownRows.set(id, snap.exists() ? serializeChatThread(snap.id, snap.data()) : null)
+      emit()
+    },
+    () => {},
+  ))
+
+  return () => {
+    unsubMain()
+    unsubsKnown.forEach((unsub) => unsub())
+  }
+}
+
+/** Prefer the thread that actually has history for a known guest (fixes empty guest-zen). */
+export async function resolveGuestThreadWithHistory({
+  guestKey = '',
+  canonicalId = '',
+  guestLabel = '',
+  preferredId = '',
+} = {}) {
+  const key = normalizeAccountKey(guestKey || String(canonicalId || '').replace(/^guest-/, ''))
+  const canon = canonicalId || (key ? `guest-${key}` : '')
+  const label = String(guestLabel || '').trim()
+  const candidates = new Map()
+
+  const consider = (id, data) => {
+    if (!id || !data) return
+    candidates.set(id, serializeChatThread(id, data))
+  }
+
+  const jobs = []
+  if (preferredId) {
+    jobs.push(getDoc(doc(db, CHAT_THREADS_COLLECTION, preferredId)).then((snap) => {
+      if (snap.exists()) consider(snap.id, snap.data())
+    }))
+  }
+  if (canon && canon !== preferredId) {
+    jobs.push(getDoc(doc(db, CHAT_THREADS_COLLECTION, canon)).then((snap) => {
+      if (snap.exists()) consider(snap.id, snap.data())
+    }))
+  }
+  if (key) {
+    jobs.push(
+      getDocs(query(
+        collection(db, CHAT_THREADS_COLLECTION),
+        where('guestKey', '==', key),
+        limit(25),
+      )).then((snap) => {
+        snap.docs.forEach((document) => consider(document.id, document.data()))
+      }).catch(() => {}),
+    )
+  }
+  if (label) {
+    jobs.push(
+      getDocs(query(
+        collection(db, CHAT_THREADS_COLLECTION),
+        where('guestLabel', '==', label),
+        limit(25),
+      )).then((snap) => {
+        snap.docs.forEach((document) => consider(document.id, document.data()))
+      }).catch(() => {}),
+    )
+  }
+  await Promise.all(jobs)
+
+  const rows = [...candidates.values()]
+  if (!rows.length) return preferredId || canon || ''
+
+  // Empty guest-{key} shells often beat UUID threads that still hold history but
+  // lack lastText. Probe messages so real history always wins.
+  await Promise.all(rows.map(async (entry) => {
+    if (String(entry.lastText || '').trim()) {
+      entry._hasMessages = true
+      return
+    }
+    try {
+      const snap = await getDocs(query(
+        collection(db, CHAT_THREADS_COLLECTION, entry.id, 'messages'),
+        limit(1),
+      ))
+      entry._hasMessages = !snap.empty
+    } catch {
+      entry._hasMessages = false
+    }
+  }))
+
+  rows.sort((a, b) => {
+    const score = (entry) => {
+      const hasHistory = (String(entry.lastText || '').trim() || entry._hasMessages) ? 40 : 0
+      // Prefer a legacy UUID that actually has chat over an empty canonical shell.
+      const legacyWithKey = key && entry.guestKey === key && entry.id !== canon && entry._hasMessages ? 12 : 0
+      const keyHit = key && entry.guestKey === key ? 4 : 0
+      const canonHit = canon && entry.id === canon ? 2 : 0
+      const preferredHit = preferredId && entry.id === preferredId ? 1 : 0
+      return hasHistory + legacyWithKey + keyHit + canonHit + preferredHit
+    }
+    const diff = score(b) - score(a)
+    if (diff !== 0) return diff
+    return String(b.updatedAt || b.updatedAtIso || '').localeCompare(String(a.updatedAt || a.updatedAtIso || ''))
+  })
+  return rows[0].id
 }
 
 /**
@@ -1434,6 +2178,17 @@ async function hashPushToken(token) {
 }
 
 /**
+ * Stable account id used for pushTokens.userKey (must match Cloud Functions
+ * lookup: owner → "hana", guest → profile.key). Never use the login passKey.
+ */
+export function resolvePushUserKey(authRole, passOrKey = '') {
+  const profile = resolveSessionProfile(authRole === 'owner' ? 'owner' : 'guest', passOrKey)
+  const key = normalizeAccountKey(profile?.key)
+  if (authRole === 'owner') return key || 'hana'
+  return key || ''
+}
+
+/**
  * Register/update an FCM device token for a chat account key (e.g. zen, hana).
  * Used by the Capacitor shell; safe no-op if token/user missing.
  */
@@ -1454,7 +2209,24 @@ export async function savePushToken({ userKey, token, platform } = {}) {
   return id
 }
 
-export async function sendChatMessage({ threadId, text, sender, guestLabel, guestKey, replyTo, sticker, effect, effectEmoji, imageUrl }) {
+export async function sendChatMessage({
+  threadId,
+  text,
+  sender,
+  guestLabel,
+  guestKey,
+  replyTo,
+  sticker,
+  effect,
+  effectEmoji,
+  imageUrl,
+  fileUrl,
+  fileName,
+  fileMime,
+  fileKind,
+  fileSize,
+  clientId,
+}) {
   const trimmed = String(text || '').trim()
   if (!threadId || !trimmed) return null
   if (trimmed.length > 2000) {
@@ -1469,6 +2241,7 @@ export async function sendChatMessage({ threadId, text, sender, guestLabel, gues
   const nowIso = new Date().toISOString()
   const label = guestLabel || guestLabelFromUid(threadId)
   const key = guestKey || getGuestProfile(String(threadId).replace(/^guest-/, ''))?.key || ''
+  const safeClientId = String(clientId || '').trim().slice(0, 64)
 
   await setDoc(
     threadRef,
@@ -1495,16 +2268,31 @@ export async function sendChatMessage({ threadId, text, sender, guestLabel, gues
   const effectId = normalizeChatEffect(effect)
   const emoji = String(effectEmoji || '').slice(0, 8)
   const image = normalizeChatImageUrl(imageUrl)
+  const file = normalizeChatImageUrl(fileUrl)
+  const mime = normalizeChatFileMime(fileMime)
+  const kind = file || image
+    ? normalizeChatFileKind(fileKind, mime || (image ? 'image/' : ''))
+    : ''
+  const name = normalizeChatFileName(fileName)
+  const size = Math.max(0, Math.floor(Number(fileSize) || 0))
   const payload = {
     text: trimmed,
     sender: role,
     createdAt: serverTimestamp(),
     createdAtIso: nowIso,
     deleted: false,
+    ...(safeClientId ? { clientId: safeClientId } : {}),
     ...(stickerId ? { sticker: stickerId } : {}),
     ...(effectId ? { effect: effectId } : {}),
     ...(effectId && emoji ? { effectEmoji: emoji } : {}),
     ...(image ? { imageUrl: image } : {}),
+    ...(file ? { fileUrl: file } : {}),
+    ...(file || image ? {
+      fileName: name || (kind === 'image' ? '写真' : kind === 'video' ? '動画' : 'ファイル'),
+      fileMime: mime || (image ? 'image/jpeg' : ''),
+      fileKind: kind || 'file',
+      fileSize: size,
+    } : {}),
   }
   if (replyTo?.id) {
     payload.replyToId = String(replyTo.id)
@@ -1548,34 +2336,44 @@ export async function deleteChatMessage({ threadId, messageId }) {
   const messageRef = doc(db, CHAT_THREADS_COLLECTION, threadId, 'messages', messageId)
   const messageSnap = await getDoc(messageRef)
   const imageUrl = String(messageSnap.data()?.imageUrl || '').trim()
+  const fileUrl = String(messageSnap.data()?.fileUrl || '').trim()
 
+  // Remove the doc first so listeners drop the bubble immediately.
   await deleteDoc(messageRef)
 
-  // Remove an uploaded image as well, so deleting an image message leaves no
-  // orphaned file behind. A missing/legacy object must not block deletion.
-  if (imageUrl) {
+  // Preview + storage cleanup can finish in the background.
+  void (async () => {
     try {
-      await deleteObject(storageRef(storage, imageUrl))
+      const remainingSnap = await getDocs(
+        query(
+          collection(db, CHAT_THREADS_COLLECTION, threadId, 'messages'),
+          orderBy('createdAtIso', 'desc'),
+          limit(1),
+        ),
+      )
+      const latest = remainingSnap.docs[0]
+        ? serializeChatMessage(remainingSnap.docs[0].id, remainingSnap.docs[0].data())
+        : null
+      await setDoc(
+        doc(db, CHAT_THREADS_COLLECTION, threadId),
+        {
+          lastText: String(latest?.text || '').slice(0, 160),
+        },
+        { merge: true },
+      )
     } catch {
-      /* ignore */
+      /* ignore preview refresh */
     }
-  }
 
-  const remainingSnap = await getDocs(
-    query(collection(db, CHAT_THREADS_COLLECTION, threadId, 'messages'), limit(200)),
-  )
-  const latest = remainingSnap.docs
-    .map((item) => serializeChatMessage(item.id, item.data()))
-    .filter((item) => !item.deleted)
-    .sort((a, b) => String(b.createdAt || b.id || '').localeCompare(String(a.createdAt || a.id || '')))[0]
-
-  await setDoc(
-    doc(db, CHAT_THREADS_COLLECTION, threadId),
-    {
-      lastText: String(latest?.text || '').slice(0, 160),
-    },
-    { merge: true },
-  )
+    for (const url of [imageUrl, fileUrl]) {
+      if (!url) continue
+      try {
+        await deleteObject(storageRef(storage, url))
+      } catch {
+        /* ignore */
+      }
+    }
+  })()
 }
 
 /**
@@ -1583,6 +2381,29 @@ export async function deleteChatMessage({ threadId, messageId }) {
  * reactorId should be a stable profile key (`hana`, `hiro`, `zen`, `gabusan`, …).
  * @param {'toggle'|'increment'|'set'} [mode]
  */
+export function applyReactionLocally(reactions, emoji, reactorId, mode = 'toggle') {
+  const em = String(emoji || '').trim()
+  const rid = String(reactorId || '').trim().toLowerCase()
+  if (!em || !rid || em.length > 8) return reactions || {}
+  const next = { ...(reactions || {}) }
+  const counts = { ...(next[em] || {}) }
+  const mine = Number(counts[rid]) || 0
+
+  if (mode === 'increment') {
+    counts[rid] = Math.min(99, mine + 1)
+  } else if (mode === 'set') {
+    counts[rid] = 1
+  } else if (mine > 0) {
+    delete counts[rid]
+  } else {
+    counts[rid] = 1
+  }
+
+  if (Object.keys(counts).length) next[em] = counts
+  else delete next[em]
+  return next
+}
+
 export async function reactToChatMessage({
   threadId,
   messageId,
@@ -1592,31 +2413,30 @@ export async function reactToChatMessage({
 }) {
   const em = String(emoji || '').trim()
   const rid = String(reactorId || '').trim().toLowerCase()
-  if (!threadId || !messageId || !em || !rid) return
-  if (em.length > 8) return
+  if (!threadId || !messageId || !em || !rid) {
+    throw new Error('リアクションできません（対象が不正です）。')
+  }
+  if (em.length > 8) {
+    throw new Error('この絵文字は使えません。')
+  }
 
   const messageRef = doc(db, CHAT_THREADS_COLLECTION, threadId, 'messages', messageId)
   const snap = await getDoc(messageRef)
-  if (!snap.exists()) return
-
-  const reactions = normalizeChatReactions(snap.data()?.reactions)
-  const counts = { ...(reactions[em] || {}) }
-  const mine = Number(counts[rid]) || 0
-
-  if (mode === 'increment') {
-    counts[rid] = Math.min(99, mine + 1)
-  } else if (mode === 'set') {
-    counts[rid] = 1
-  } else {
-    // toggle: clear all of mine, or set to 1
-    if (mine > 0) delete counts[rid]
-    else counts[rid] = 1
+  if (!snap.exists()) {
+    const error = new Error('メッセージが見つかりません（まだ送信中かも）。')
+    error.code = 'chat/reaction-missing'
+    throw error
   }
 
-  if (Object.keys(counts).length) reactions[em] = counts
-  else delete reactions[em]
+  const reactions = applyReactionLocally(
+    normalizeChatReactions(snap.data()?.reactions),
+    em,
+    rid,
+    mode,
+  )
 
   await updateDoc(messageRef, { reactions: reactionsToFirestore(reactions) })
+  return reactions
 }
 
 /** @deprecated Prefer reactToChatMessage — kept for call-site compatibility. */
@@ -1809,7 +2629,7 @@ export async function analyzeGuestMessageForOwner(payload) {
         vi: String(item?.vi || '').trim(),
       }))
       .filter((item) => item.ja)
-      .slice(0, 3)
+      .slice(0, 2)
     : []
   return {
     translationVi: String(data.translationVi || '').trim(),
@@ -1817,6 +2637,61 @@ export async function analyzeGuestMessageForOwner(payload) {
     replies,
     reason: data.reason || null,
   }
+}
+
+/**
+ * Owner-only private assist for a book page (never stored in Firestore).
+ * @param {{ text: string, title?: string, page?: number }} payload
+ */
+export async function analyzeBookPageForOwner(payload) {
+  const callable = httpsCallable(functions, 'analyzeBookPageForOwner', { timeout: 120_000 })
+  const imageBase64 = String(payload?.imageBase64 || '')
+    .replace(/^data:image\/\w+;base64,/, '')
+    .trim()
+  const result = await callable({
+    imageBase64,
+    imageMimeType: String(payload?.imageMimeType || 'image/jpeg').slice(0, 64) || 'image/jpeg',
+    text: String(payload?.text || '').trim().slice(0, 4000),
+    title: String(payload?.title || '').trim().slice(0, 80),
+    page: Math.max(0, Math.floor(Number(payload?.page) || 0)),
+  })
+  const data = result?.data || {}
+  return {
+    translationVi: String(data.translationVi || '').trim(),
+    readingHiragana: String(data.readingHiragana || '').trim(),
+    reason: data.reason || null,
+  }
+}
+
+/** Admin: recent Firebase Hosting releases on the live channel. */
+export async function fetchHostingReleases() {
+  const callable = httpsCallable(functions, 'getHostingReleases')
+  const result = await callable({})
+  const data = result?.data || {}
+  return {
+    site: String(data.site || 'hana-mediabox'),
+    liveHostingVersionId: data.liveHostingVersionId ? String(data.liveHostingVersionId) : null,
+    releases: Array.isArray(data.releases)
+      ? data.releases.map((item) => ({
+        hostingVersionId: String(item?.hostingVersionId || ''),
+        releaseName: item?.releaseName || null,
+        releaseTime: item?.releaseTime || null,
+        type: item?.type || null,
+        isLive: Boolean(item?.isLive),
+        fileCount: item?.fileCount == null ? null : Number(item.fileCount),
+      })).filter((item) => item.hostingVersionId)
+      : [],
+  }
+}
+
+/** Admin: promote a Hosting version to live (instant rollback). */
+export async function rollbackHostingRelease({ hostingVersionId, appVersion } = {}) {
+  const callable = httpsCallable(functions, 'rollbackHostingRelease')
+  const result = await callable({
+    hostingVersionId: String(hostingVersionId || '').trim() || null,
+    appVersion: String(appVersion || '').trim() || null,
+  })
+  return result?.data || { ok: false }
 }
 
 export async function completeAdminRedirectLogin() {
@@ -2098,6 +2973,45 @@ export async function saveSharedPlaylists(playlists) {
   )
 }
 
+function normalizePhotoAlbums(albums) {
+  if (!Array.isArray(albums)) return []
+  return albums
+    .filter((item) => item && typeof item === 'object')
+    .map((item) => ({
+      id: String(item.id || ''),
+      name: String(item.name || 'Untitled').slice(0, 40),
+      imageIds: Array.isArray(item.imageIds)
+        ? item.imageIds.filter((id) => typeof id === 'string')
+        : [],
+      createdAt: item.createdAt || null,
+      updatedAt: item.updatedAt || null,
+    }))
+    .filter((item) => item.id)
+}
+
+export function subscribeToSharedPhotoAlbums(onData, onError) {
+  return onSnapshot(
+    doc(db, SHARED_STATE_COLLECTION, SHARED_PHOTO_ALBUMS_DOC),
+    (snapshot) => {
+      const data = snapshot.data() || {}
+      const albums = normalizePhotoAlbums(data.albums)
+      onData(albums, snapshot.exists())
+    },
+    onError,
+  )
+}
+
+export async function saveSharedPhotoAlbums(albums) {
+  await setDoc(
+    doc(db, SHARED_STATE_COLLECTION, SHARED_PHOTO_ALBUMS_DOC),
+    {
+      albums: normalizePhotoAlbums(albums),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  )
+}
+
 function normalizeSharedSpaces(spaces) {
   if (!Array.isArray(spaces)) return []
   return spaces
@@ -2146,6 +3060,177 @@ export async function saveSharedSpaces(spaces) {
   )
 }
 
+/**
+ * Normalize the admin-configured edit/delete window.
+ * - positive minutes → that many minutes after read
+ * - 0 → unlimited
+ * - missing / invalid → default 5 minutes
+ */
+export function normalizeMessageEditWindowMinutes(value) {
+  if (value === 0 || value === '0') return 0
+  const n = Math.floor(Number(value))
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES
+  return Math.min(n, MAX_MESSAGE_EDIT_WINDOW_MINUTES)
+}
+
+export function messageEditWindowMsFromMinutes(minutes) {
+  const n = normalizeMessageEditWindowMinutes(minutes)
+  if (n === 0) return Infinity
+  return n * 60 * 1000
+}
+
+function normalizeChatAppSettings(data = {}) {
+  return {
+    messageEditWindowMinutes: normalizeMessageEditWindowMinutes(data?.messageEditWindowMinutes),
+    /** Default on: missing field keeps はな専用 available. */
+    ownerAssistEnabled: data?.ownerAssistEnabled !== false,
+  }
+}
+
+export function subscribeChatAppSettings(onData, onError) {
+  return onSnapshot(
+    doc(db, SHARED_STATE_COLLECTION, SHARED_CHAT_DOC),
+    (snapshot) => {
+      onData(normalizeChatAppSettings(snapshot.data() || {}), snapshot.exists())
+    },
+    onError,
+  )
+}
+
+export async function saveChatAppSettings(patch = {}) {
+  const next = {
+    updatedAt: serverTimestamp(),
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'messageEditWindowMinutes')) {
+    next.messageEditWindowMinutes = normalizeMessageEditWindowMinutes(patch.messageEditWindowMinutes)
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'ownerAssistEnabled')) {
+    next.ownerAssistEnabled = patch.ownerAssistEnabled !== false
+  }
+  await setDoc(
+    doc(db, SHARED_STATE_COLLECTION, SHARED_CHAT_DOC),
+    next,
+    { merge: true },
+  )
+  return {
+    ...(Object.prototype.hasOwnProperty.call(next, 'messageEditWindowMinutes')
+      ? { messageEditWindowMinutes: next.messageEditWindowMinutes }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(next, 'ownerAssistEnabled')
+      ? { ownerAssistEnabled: next.ownerAssistEnabled }
+      : {}),
+  }
+}
+
+function normalizeSiteAppearance(data = {}) {
+  const raw = String(data?.themeId || '').trim()
+  const allowed = new Set(['default', 'natsu'])
+  return {
+    themeId: allowed.has(raw) ? raw : 'default',
+  }
+}
+
+/** Site-wide theme (Admin). Everyone can read; writes go through Admin UI. */
+export function subscribeSiteAppearance(onData, onError) {
+  return onSnapshot(
+    doc(db, SHARED_STATE_COLLECTION, SHARED_APPEARANCE_DOC),
+    (snapshot) => {
+      onData(normalizeSiteAppearance(snapshot.data() || {}), snapshot.exists())
+    },
+    onError,
+  )
+}
+
+export async function saveSiteAppearance(patch = {}) {
+  const themeId = normalizeSiteAppearance(patch).themeId
+  await setDoc(
+    doc(db, SHARED_STATE_COLLECTION, SHARED_APPEARANCE_DOC),
+    {
+      themeId,
+      updatedAt: serverTimestamp(),
+      updatedAtIso: new Date().toISOString(),
+    },
+    { merge: true },
+  )
+  return { themeId }
+}
+
+const APP_RELEASES_COLLECTION = 'app-releases'
+
+function normalizeAppRelease(id, data = {}) {
+  return {
+    id: String(id || data.version || ''),
+    version: String(data.version || id || ''),
+    notes: String(data.notes || '').trim(),
+    builtAt: data.builtAt || data.createdAtIso || null,
+    previousVersion: data.previousVersion ? String(data.previousVersion) : null,
+    previousHostingVersionId: data.previousHostingVersionId
+      ? String(data.previousHostingVersionId)
+      : null,
+    hostingVersionId: data.hostingVersionId ? String(data.hostingVersionId) : null,
+    createdAt: data.createdAt?.toDate?.()?.toISOString?.() || data.createdAtIso || null,
+  }
+}
+
+export function subscribeAppReleases(onData, onError) {
+  return onSnapshot(
+    query(collection(db, APP_RELEASES_COLLECTION), orderBy('createdAt', 'desc'), limit(40)),
+    (snapshot) => {
+      const releases = snapshot.docs.map((document) => normalizeAppRelease(document.id, document.data()))
+      onData(releases)
+    },
+    onError,
+  )
+}
+
+/** Upsert a release note entry (admin). */
+export async function recordAppRelease(payload = {}) {
+  const version = String(payload.version || '').trim()
+  if (!version) throw new Error('version がありません。')
+  const notes = String(payload.notes || '').trim()
+  if (!notes) throw new Error('リリースノートを入力してください。')
+  const nowIso = new Date().toISOString()
+  const body = {
+    version,
+    notes: notes.slice(0, 2000),
+    builtAt: payload.builtAt || nowIso,
+    previousVersion: payload.previousVersion ? String(payload.previousVersion) : null,
+    previousHostingVersionId: payload.previousHostingVersionId
+      ? String(payload.previousHostingVersionId)
+      : null,
+    hostingVersionId: payload.hostingVersionId ? String(payload.hostingVersionId) : null,
+    createdAt: serverTimestamp(),
+    createdAtIso: nowIso,
+    updatedAt: serverTimestamp(),
+    updatedAtIso: nowIso,
+  }
+  await setDoc(doc(db, APP_RELEASES_COLLECTION, version), body, { merge: true })
+  return normalizeAppRelease(version, { ...body, createdAtIso: nowIso })
+}
+
+export async function fetchLiveVersionInfo() {
+  const response = await fetch(`/version.json?t=${Date.now()}`, {
+    cache: 'no-store',
+    headers: { Accept: 'application/json' },
+  })
+  if (!response.ok) throw new Error(`version fetch ${response.status}`)
+  return response.json()
+}
+
+export async function fetchReleasesHistoryFile() {
+  try {
+    const response = await fetch(`/releases-history.json?t=${Date.now()}`, {
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+    })
+    if (!response.ok) return []
+    const data = await response.json()
+    return Array.isArray(data?.releases) ? data.releases : []
+  } catch {
+    return []
+  }
+}
+
 export async function updateMediaCover(itemId, coverId) {
   await setDoc(
     doc(db, MEDIA_COLLECTION, itemId),
@@ -2190,6 +3275,95 @@ export async function updateMediaLyrics(itemId, lyrics) {
     { lyrics: lyrics || null },
     { merge: true },
   )
+}
+
+export async function updateMediaCaption(itemId, fields = {}) {
+  const id = String(itemId || '').trim()
+  if (!id) throw new Error('画像IDがありません。')
+  const payload = {}
+  if (Object.prototype.hasOwnProperty.call(fields, 'caption')) {
+    payload.caption = String(fields.caption || '').trim().slice(0, 280) || null
+  }
+  if (Object.prototype.hasOwnProperty.call(fields, 'location')) {
+    payload.location = String(fields.location || '').trim().slice(0, 80) || null
+  }
+  if (Object.prototype.hasOwnProperty.call(fields, 'event')) {
+    payload.event = String(fields.event || '').trim().slice(0, 80) || null
+  }
+  if (!Object.keys(payload).length) return
+  await setDoc(doc(db, MEDIA_COLLECTION, id), payload, { merge: true })
+}
+
+export async function toggleMediaLike(mediaId, profileKey) {
+  const id = String(mediaId || '').trim()
+  const key = String(profileKey || '').trim().toLowerCase()
+  if (!id || !key) throw new Error('いいねできません。')
+  const ref = doc(db, MEDIA_COLLECTION, id)
+  const snap = await getDoc(ref)
+  if (!snap.exists()) throw new Error('画像が見つかりません。')
+  const likedBy = Array.isArray(snap.data()?.likedBy)
+    ? snap.data().likedBy.map(String)
+    : []
+  const mine = likedBy.includes(key)
+  const next = mine ? likedBy.filter((entry) => entry !== key) : [...likedBy, key]
+  await setDoc(ref, {
+    likedBy: next,
+    likeCount: next.length,
+  }, { merge: true })
+  return { liked: !mine, likeCount: next.length, likedBy: next }
+}
+
+export function subscribeMediaComments(mediaId, onData, onError) {
+  const id = String(mediaId || '').trim()
+  if (!id) {
+    onData([])
+    return () => {}
+  }
+  return onSnapshot(
+    query(
+      collection(db, MEDIA_COLLECTION, id, 'comments'),
+      orderBy('createdAt', 'asc'),
+      limit(80),
+    ),
+    (snapshot) => {
+      const comments = snapshot.docs.map((document) => {
+        const data = document.data() || {}
+        return {
+          id: document.id,
+          text: String(data.text || ''),
+          authorKey: String(data.authorKey || ''),
+          authorName: String(data.authorName || data.authorKey || ''),
+          createdAt: data.createdAt?.toDate?.()?.toISOString?.()
+            || data.createdAtIso
+            || null,
+        }
+      })
+      onData(comments)
+    },
+    onError,
+  )
+}
+
+export async function addMediaComment(mediaId, { text, authorKey, authorName }) {
+  const id = String(mediaId || '').trim()
+  const body = String(text || '').trim().slice(0, 400)
+  const key = String(authorKey || '').trim().toLowerCase()
+  if (!id || !body || !key) throw new Error('コメントを入力してください。')
+  const nowIso = new Date().toISOString()
+  await addDoc(collection(db, MEDIA_COLLECTION, id, 'comments'), {
+    text: body,
+    authorKey: key,
+    authorName: String(authorName || key).trim() || key,
+    createdAt: serverTimestamp(),
+    createdAtIso: nowIso,
+  })
+}
+
+export async function deleteMediaComment(mediaId, commentId) {
+  const mid = String(mediaId || '').trim()
+  const cid = String(commentId || '').trim()
+  if (!mid || !cid) return
+  await deleteDoc(doc(db, MEDIA_COLLECTION, mid, 'comments', cid))
 }
 
 export async function updatePlaylistOrder(orderedIds) {

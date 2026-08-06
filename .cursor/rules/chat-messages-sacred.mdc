@@ -1,0 +1,29 @@
+---
+description: NEVER break chat message loading — orderBy + limit rules are sacred
+globs: client/src/firebase.js,client/src/HanaChat.jsx,client/src/hana-chat.css,Xmediabox/src/**/*
+alwaysApply: true
+---
+
+# Chat messages — absolute ban
+
+Tin nhắn chat **không được mất** vì chỉnh code. Đây là luật cứng.
+
+## Forbidden (tuyệt đối cấm)
+
+- `subscribeChatMessages` dùng `limit(N)` **không** có `orderBy('createdAtIso', 'desc')` — Firestore trả doc cũ/arbitrary → **tin mới không lên bubble** (push/preview vẫn chạy = bug nguy hiểm).
+- `content-visibility` / `contain` trên `.hana-chat-msg-row` — làm bubble trống.
+- Xóa trắng `setHanaMessages([])` khi mở/đổi thread nếu không restore cache ngay.
+- “Tối ưu perf” chat mà đụng query tin / CSS bubble / gate subscribe khiến list trống.
+- Đổi / “đơn giản hóa” / revert `subscribeChatMessages` khi làm việc không liên quan tin nhắn.
+
+## Required
+
+- Load tin: `query(messagesRef, orderBy('createdAtIso', 'desc'), limit(300))` rồi `sortChatMessages` client-side.
+- Tin mới phải luôn nằm trong snapshot. Mọi tin gửi đi phải có `createdAtIso`.
+- Nếu nghi ngờ thiếu tin cũ (thiếu field): **thêm** fallback, **không** bỏ `orderBy` của query chính.
+
+## Before any chat “perf” or load change
+
+1. Xác nhận tin mới vẫn hiện ngay trong bubble.
+2. Xác nhận đổi guest (zen, gabusan, …) vẫn thấy history.
+3. Không deploy thay đổi load tin nếu chưa kiểm tra 1–2.
