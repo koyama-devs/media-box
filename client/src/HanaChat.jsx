@@ -396,6 +396,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [previewImage, setPreviewImage] = useState(null)
   const listRef = useRef(null)
   const panelRef = useRef(null)
+  const headerRef = useRef(null)
   const inputRef = useRef(null)
   const composerRef = useRef(null)
   const guestMenuRef = useRef(null)
@@ -1444,7 +1445,21 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       panel.style.maxHeight = ''
       panel.style.minHeight = ''
       panel.style.paddingBottom = ''
+      panel.style.removeProperty('--hana-vv-top')
       panel.classList.remove('is-keyboard')
+      const header = headerRef.current
+      if (header) {
+        header.style.removeProperty('top')
+        header.style.removeProperty('transform')
+      }
+      const root = panel.closest('.hana-chat')
+      if (root) {
+        root.style.removeProperty('height')
+        root.style.removeProperty('max-height')
+        root.style.removeProperty('min-height')
+        root.style.removeProperty('top')
+        root.style.removeProperty('bottom')
+      }
       keyboardPinnedRef.current = false
       viewportApplyRef.current = { top: 0, height: 0, width: 0, keyboard: false }
     }
@@ -1471,12 +1486,43 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       return Math.max(baselineLayoutRef.current || 0, inner, fromVv)
     }
 
-    const halfDockPx = () => {
-      const fullH = getFullLayoutH()
-      const half = Math.round(fullH * 0.5)
-      stableChromeHRef.current = half
-      keyboardHeightRef.current = half
-      return half
+    const lockShellHeight = () => {
+      const root = panel.closest('.hana-chat')
+      if (!root) return
+      const h = Math.max(
+        baselineLayoutRef.current || 0,
+        window.innerHeight || 0,
+        Math.round(window.visualViewport?.height || 0),
+      )
+      if (h > 0) baselineLayoutRef.current = Math.max(baselineLayoutRef.current || 0, h)
+      const locked = baselineLayoutRef.current || h
+      root.style.setProperty('height', `${locked}px`, 'important')
+      root.style.setProperty('max-height', `${locked}px`, 'important')
+      root.style.setProperty('min-height', `${locked}px`, 'important')
+      root.style.setProperty('top', '0px', 'important')
+      root.style.setProperty('bottom', 'auto', 'important')
+    }
+
+    /**
+     * Nail the header to the visible screen top.
+     * While typing, match visualViewport.offsetTop so iOS shift does not hide it.
+     * When idle, always force top:0 (完了 must not leave a huge offset).
+     */
+    const pinHeaderFixed = (options = {}) => {
+      const header = headerRef.current
+      if (!header) return
+      const vv = window.visualViewport
+      const inputFocused = document.activeElement === inputRef.current
+      const forceZero = options.forceZero || (!inputFocused && !keyboardPinnedRef.current)
+      const y = forceZero ? 0 : (vv ? Math.round(vv.offsetTop || 0) : 0)
+      header.style.setProperty('position', 'fixed', 'important')
+      header.style.setProperty('top', `${y}px`, 'important')
+      header.style.setProperty('left', '0px', 'important')
+      header.style.setProperty('right', '0px', 'important')
+      header.style.setProperty('width', '100%', 'important')
+      header.style.setProperty('transform', 'translateZ(0)', 'important')
+      header.style.setProperty('transition', 'none', 'important')
+      header.style.setProperty('z-index', '10100', 'important')
     }
 
     const setDockChrome = (px) => {
@@ -1493,18 +1539,19 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       }
     }
 
-    /**
-     * Mid slot: composer fixed at screen mid.
-     * Bottom half = sticker dock OR empty space for the soft keyboard.
-     * Panel height is locked to full screen so a shrunk parent cannot shove
-     * the composer to the top.
-     */
-    const applyMidSlot = () => {
-      const fullH = getFullLayoutH()
-      const half = Math.round(fullH * 0.5)
-      stableChromeHRef.current = half
-      keyboardHeightRef.current = half
-      setDockChrome(half)
+    const pinMessagesToLatest = () => {
+      const list = listRef.current
+      if (!list) return
+      list.scrollTop = list.scrollHeight
+    }
+
+    /** Idle / after 完了: full-screen panel, composer visible at the bottom. */
+    const restoreIdleLayout = () => {
+      const fullH = Math.max(baselineLayoutRef.current || 0, getFullLayoutH())
+      if (fullH > (baselineLayoutRef.current || 0)) baselineLayoutRef.current = fullH
+      setDockChrome(0)
+      lockShellHeight()
+      keyboardPinnedRef.current = false
       panel.style.left = '0px'
       panel.style.right = 'auto'
       panel.style.width = '100%'
@@ -1513,97 +1560,212 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       panel.style.minHeight = '0px'
       panel.style.height = `${fullH}px`
       panel.style.maxHeight = `${fullH}px`
-      panel.style.paddingBottom = '0px'
+      panel.style.paddingBottom = ''
+      panel.style.removeProperty('--hana-vv-top')
       panel.classList.remove('is-keyboard')
-      keyboardPinnedRef.current = false
       viewportApplyRef.current = { top: 0, height: fullH, width: 0, keyboard: false }
+      pinHeaderFixed({ forceZero: true })
+      if (window.scrollY) window.scrollTo(0, 0)
+      pinMessagesToLatest()
+      window.requestAnimationFrame(pinMessagesToLatest)
     }
 
-    let keyboardWasOpen = false
+    /**
+     * Sticker dock mid-slot.
+     * Size the panel to the *visible* viewport while the IME is still
+     * dismissing — using full layout height then puts the composer below the
+     * fold ("tụt xuống sâu"). Expand to full half-screen once the keyboard is gone.
+     */
+    const applyStickerDock = () => {
+      const layoutH = Math.max(
+        baselineLayoutRef.current || 0,
+        window.innerHeight || 0,
+        getFullLayoutH(),
+      )
+      if (layoutH > (baselineLayoutRef.current || 0)) baselineLayoutRef.current = layoutH
+
+      const vv = window.visualViewport
+      const vvTop = vv ? Math.round(vv.offsetTop || 0) : 0
+      const vvH = vv ? Math.max(1, Math.round(vv.height)) : layoutH
+      const vvInset = Math.max(0, layoutH - vvH - vvTop)
+      // Keyboard mostly gone → full-screen mid dock. Otherwise stay inside the
+      // currently visible box so the composer never drops under the fold.
+      const imeBusy = vvInset > 80 || vvTop > 10
+      const boxH = imeBusy
+        ? Math.max(1, Math.min(layoutH, vvH))
+        : layoutH
+      const chrome = Math.max(160, Math.min(Math.round(boxH * 0.5), Math.round(layoutH * 0.5)))
+
+      stableChromeHRef.current = chrome
+      keyboardHeightRef.current = chrome
+      setDockChrome(chrome)
+      lockShellHeight()
+      pinHeaderFixed({ forceZero: true })
+      panel.style.left = '0px'
+      panel.style.right = 'auto'
+      panel.style.width = '100%'
+      panel.style.top = '0px'
+      panel.style.bottom = 'auto'
+      panel.style.minHeight = '0px'
+      panel.style.height = `${boxH}px`
+      panel.style.maxHeight = `${boxH}px`
+      panel.style.paddingBottom = '0px'
+      panel.style.removeProperty('--hana-vv-top')
+      panel.classList.remove('is-keyboard')
+      keyboardPinnedRef.current = false
+      viewportApplyRef.current = { top: 0, height: boxH, width: 0, keyboard: false }
+      if (window.scrollY) window.scrollTo(0, 0)
+      pinMessagesToLatest()
+      window.requestAnimationFrame(pinMessagesToLatest)
+    }
+
+    /**
+     * Typing / IME: shrink panel from layout top (top stays 0).
+     * Height is clamped to the layout screen so 完了 cannot leave a panel taller
+     * than the screen (composer buried below the fold).
+     */
+    const applyVisualKeyboardPin = () => {
+      // Sticker dock wins — never pin-to-keyboard over an open dock.
+      if (stickerDockOpenRef.current) {
+        applyStickerDock()
+        return
+      }
+      const vv = window.visualViewport
+      const inner = window.innerHeight || document.documentElement.clientHeight || 0
+      const layoutH = Math.max(baselineLayoutRef.current || 0, getFullLayoutH())
+      const vvTop = vv ? Math.round(vv.offsetTop || 0) : 0
+      const vvH = vv ? Math.max(1, Math.round(vv.height)) : inner
+      // Clamp: during IME dismiss, offsetTop can linger while height grows,
+      // and offsetTop+vvH would exceed the screen → composer vanishes below.
+      const pinH = Math.max(1, Math.min(layoutH, vvH))
+      lockShellHeight()
+      pinHeaderFixed()
+      const prev = viewportApplyRef.current
+      if (
+        prev.keyboard
+        && prev.top === 0
+        && prev.height === pinH
+        && bottomChromePxRef.current === 0
+      ) {
+        pinMessagesToLatest()
+        return
+      }
+      setDockChrome(0)
+      panel.style.left = '0px'
+      panel.style.right = 'auto'
+      panel.style.width = '100%'
+      panel.style.top = '0px'
+      panel.style.bottom = 'auto'
+      panel.style.minHeight = '0px'
+      panel.style.height = `${pinH}px`
+      panel.style.maxHeight = `${pinH}px`
+      panel.style.paddingBottom = '0px'
+      panel.style.removeProperty('--hana-vv-top')
+      panel.classList.add('is-keyboard')
+      keyboardPinnedRef.current = true
+      keyboardHeightRef.current = Math.max(0, layoutH - pinH)
+      viewportApplyRef.current = { top: 0, height: pinH, width: 0, keyboard: true }
+      if (window.scrollY) window.scrollTo(0, 0)
+      pinMessagesToLatest()
+      window.requestAnimationFrame(pinMessagesToLatest)
+    }
+
+    const halfChromePx = () => {
+      const fullH = Math.max(baselineLayoutRef.current || 0, getFullLayoutH())
+      return Math.round(fullH * 0.5)
+    }
+
+    let keyboardLatched = false
     const applyMobileViewport = () => {
       if (!window.matchMedia('(max-width: 640px), (pointer: coarse)').matches) {
         setDockChrome(0)
         clearInline()
         lockPageScroll(false)
-        keyboardWasOpen = false
+        keyboardLatched = false
         return
       }
 
       lockPageScroll(true)
+      lockShellHeight()
 
       const inner = window.innerHeight || document.documentElement.clientHeight || 0
       const vv = window.visualViewport
       const vvInset = vv
-        ? Math.max(0, inner - vv.height - (vv.offsetTop || 0))
-        : 0
-      const keyboardOpen = vvInset > 80
-      const wasKeyboardOpen = keyboardWasOpen
-      keyboardWasOpen = keyboardOpen
+        ? Math.max(0, Math.max(inner, baselineLayoutRef.current || 0) - vv.height - (vv.offsetTop || 0))
+        : Math.max(0, (baselineLayoutRef.current || 0) - inner)
       const inputFocused = document.activeElement === inputRef.current
-      const wantMid = stickerDockOpenRef.current || inputFocused || keyboardOpen
 
-      if (!wantMid) {
+      if (!keyboardLatched && vvInset > 100) keyboardLatched = true
+      if (keyboardLatched && (vvInset < 40 || (!inputFocused && vvInset < 120))) {
+        keyboardLatched = false
+      }
+      // Sticker dock owns the bottom half — never keep IME latch fighting it.
+      if (stickerDockOpenRef.current) keyboardLatched = false
+      const keyboardOpen = keyboardLatched
+
+      if (!stickerDockOpenRef.current && !inputFocused && !keyboardOpen) {
         baselineLayoutRef.current = Math.max(baselineLayoutRef.current || 0, inner)
-      } else if (keyboardOpen) {
+      } else if (vvInset > 0 && inputFocused && !stickerDockOpenRef.current) {
         const fullH = Math.max(baselineLayoutRef.current || 0, inner + Math.round(vvInset))
         if (fullH > (baselineLayoutRef.current || 0)) baselineLayoutRef.current = fullH
       }
 
-      // Sticker dock open → mid slot with stickers in the bottom half.
       if (stickerDockOpenRef.current) {
-        applyMidSlot()
+        applyStickerDock()
         return
       }
 
-      // 完了: keyboard dismissed → composer back to bottom.
-      if (wasKeyboardOpen && !keyboardOpen) {
-        setDockChrome(0)
-        clearInline()
-        if (inputFocused) {
-          try { inputRef.current?.blur() } catch { /* ignore */ }
-        }
-        return
-      }
-
-      // Typing / keyboard up → same mid slot (empty chrome; IME covers it).
       if (inputFocused || keyboardOpen) {
-        applyMidSlot()
+        applyVisualKeyboardPin()
         return
       }
 
-      setDockChrome(0)
-      clearInline()
+      restoreIdleLayout()
     }
 
     const syncMobileViewport = (options = {}) => {
-      if (options.immediate || options.force || options.forceKeyboard) {
+      const runNow = () => {
         if (viewportDebounceRef.current) {
-          window.clearTimeout(viewportDebounceRef.current)
+          window.cancelAnimationFrame(viewportDebounceRef.current)
           viewportDebounceRef.current = null
         }
         applyMobileViewport()
+      }
+      if (options.immediate || options.force || options.forceKeyboard) {
+        runNow()
         return
       }
-      if (viewportDebounceRef.current) window.clearTimeout(viewportDebounceRef.current)
-      viewportDebounceRef.current = window.setTimeout(() => {
+      if (viewportDebounceRef.current) return
+      viewportDebounceRef.current = window.requestAnimationFrame(() => {
         viewportDebounceRef.current = null
         applyMobileViewport()
-      }, 32)
+      })
     }
 
     if (!baselineLayoutRef.current) {
       baselineLayoutRef.current = window.innerHeight || document.documentElement.clientHeight || 0
     }
+    lockShellHeight()
+    pinHeaderFixed()
     syncMobileViewport({ immediate: true })
     syncPanelViewportRef.current = syncMobileViewport
     const vv = window.visualViewport
+    // Header must track vv.offsetTop with zero delay (not via rAF), or it
+    // visibly flies up then snaps back when the keyboard opens on iOS.
+    vv?.addEventListener('resize', pinHeaderFixed)
+    vv?.addEventListener('scroll', pinHeaderFixed)
     vv?.addEventListener('resize', syncMobileViewport)
     vv?.addEventListener('scroll', syncMobileViewport)
     window.addEventListener('resize', syncMobileViewport)
     window.addEventListener('orientationchange', syncMobileViewport)
     return () => {
       syncPanelViewportRef.current = () => {}
-      if (viewportDebounceRef.current) window.clearTimeout(viewportDebounceRef.current)
+      if (viewportDebounceRef.current) {
+        window.cancelAnimationFrame(viewportDebounceRef.current)
+        viewportDebounceRef.current = null
+      }
+      vv?.removeEventListener('resize', pinHeaderFixed)
+      vv?.removeEventListener('scroll', pinHeaderFixed)
       vv?.removeEventListener('resize', syncMobileViewport)
       vv?.removeEventListener('scroll', syncMobileViewport)
       window.removeEventListener('resize', syncMobileViewport)
@@ -1891,7 +2053,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const halfScreenDockPx = useCallback(() => {
     if (typeof window === 'undefined') return stableChromeHRef.current || 320
     const inner = window.innerHeight || document.documentElement.clientHeight || 0
+    // Prefer baseline (keyboard-closed) so dock height stays half-screen even
+    // when opening stickers while the IME is still dismissing / shrinking innerHeight.
     const fullH = Math.max(baselineLayoutRef.current || 0, inner)
+    if (fullH > (baselineLayoutRef.current || 0)) baselineLayoutRef.current = fullH
     const half = Math.round(fullH * 0.5)
     stableChromeHRef.current = half
     keyboardHeightRef.current = half
@@ -1934,16 +2099,46 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   const openStickerTray = useCallback(() => {
     if (stickerDockMode) {
-      const h = halfScreenDockPx()
       stickerDockOpenRef.current = true
+      keyboardPinnedRef.current = false
+      // Size chrome from the visible viewport first (not full layout) so we do
+      // not bury the composer while the soft keyboard is still dismissing.
+      const vv = typeof window !== 'undefined' ? window.visualViewport : null
+      const layoutH = Math.max(
+        baselineLayoutRef.current || 0,
+        typeof window !== 'undefined' ? (window.innerHeight || 0) : 0,
+      )
+      const vvH = vv ? Math.max(1, Math.round(vv.height)) : layoutH
+      const vvInset = vv
+        ? Math.max(0, layoutH - vv.height - (vv.offsetTop || 0))
+        : 0
+      const boxH = (vvInset > 80 || (vv?.offsetTop || 0) > 10)
+        ? Math.min(layoutH, vvH)
+        : Math.max(layoutH, halfScreenDockPx() * 2)
+      const h = Math.max(160, Math.round(boxH * 0.5))
+      stableChromeHRef.current = h
       flushSync(() => {
         setBottomChromePx(h)
         setStickerOpen(true)
       })
-      panelRef.current?.style.setProperty('--hana-sticker-dock-h', `${h}px`)
-      panelRef.current?.style.setProperty('--hana-bottom-chrome-h', `${h}px`)
-      inputRef.current?.blur()
+      const panel = panelRef.current
+      if (panel) {
+        panel.classList.remove('is-keyboard')
+        panel.style.top = '0px'
+        panel.style.height = `${boxH}px`
+        panel.style.maxHeight = `${boxH}px`
+        panel.style.setProperty('--hana-sticker-dock-h', `${h}px`)
+        panel.style.setProperty('--hana-bottom-chrome-h', `${h}px`)
+      }
+      try { inputRef.current?.blur() } catch { /* ignore */ }
       syncPanelViewportRef.current({ immediate: true, force: true })
+      window.requestAnimationFrame(() => {
+        syncPanelViewportRef.current({ immediate: true, force: true })
+      })
+      window.setTimeout(() => {
+        if (!stickerDockOpenRef.current) return
+        syncPanelViewportRef.current({ immediate: true, force: true })
+      }, 180)
       return
     }
     setStickerOpen(true)
@@ -3051,7 +3246,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               </>
             ) : null}
           </div>
-          <header className="hana-chat-header">
+          <header className="hana-chat-header" ref={headerRef}>
             {!actingAsOwner && channel === 'human' ? (
               <button
                 type="button"
@@ -3838,10 +4033,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 }}
                 onFocus={() => {
                   if (stickerOpen && stickerDockMode) return
-                  if (stickerDockMode && bottomChromePxRef.current <= 0) {
-                    const h = halfScreenDockPx()
-                    flushSync(() => setBottomChromePx(h))
-                  }
                   syncPanelViewportRef.current({ immediate: true, force: true })
                 }}
                 onBlur={() => {
@@ -3856,29 +4047,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                       }
                       return
                     }
-                    if (stickerDockOpenRef.current || stickerOpen) {
-                      syncPanelViewportRef.current({ immediate: true, force: true })
-                      return
-                    }
                     keyboardPinnedRef.current = false
-                    if (bottomChromePxRef.current > 0) {
-                      flushSync(() => setBottomChromePx(0))
-                    }
-                    const panel = panelRef.current
-                    if (panel) {
-                      panel.style.left = ''
-                      panel.style.right = ''
-                      panel.style.top = ''
-                      panel.style.bottom = ''
-                      panel.style.width = ''
-                      panel.style.height = ''
-                      panel.style.maxHeight = ''
-                      panel.style.minHeight = ''
-                      panel.style.paddingBottom = ''
-                      panel.classList.remove('is-keyboard')
-                      panel.style.removeProperty('--hana-bottom-chrome-h')
-                      panel.style.removeProperty('--hana-sticker-dock-h')
-                    }
+                    // Let viewport sync restore full idle layout (完了 path).
                     syncPanelViewportRef.current({ immediate: true, force: true })
                   }, 60)
                 }}

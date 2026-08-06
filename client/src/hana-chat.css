@@ -3679,17 +3679,22 @@ body.hana-chat-scroll-lock #root {
     z-index: 10050;
   }
 
-  /* When open: root becomes a full-screen shell so nothing peeks underneath */
+  /* When open: root becomes a full-screen shell so nothing peeks underneath.
+   * Use lvh (large viewport) — NOT dvh — so the shell/header do not shrink
+   * or jump when the soft keyboard opens. */
   .hana-chat.is-open {
     inset: 0;
+    top: 0;
+    bottom: auto;
     width: 100%;
-    height: 100%;
-    height: 100dvh;
-    max-height: 100dvh;
+    height: 100lvh;
+    height: 100vh;
+    max-height: 100lvh;
+    max-height: 100vh;
+    min-height: 100lvh;
+    min-height: 100vh;
     right: 0;
     left: 0;
-    bottom: 0;
-    top: 0;
     /* Opaque shell — even if panel shrinks for keyboard, main screen stays covered */
     background:
       radial-gradient(ellipse at 12% 0%, rgba(232, 154, 170, 0.16), transparent 42%),
@@ -3747,24 +3752,39 @@ body.hana-chat-scroll-lock #root {
   }
 
   /*
-   * Mobile open: true viewport-fixed header so iOS keyboard / visualViewport
-   * shifts cannot drag the bar off-screen.
+   * Mobile open: header is a true viewport-fixed bar.
+   * top is driven by JS (visualViewport.offsetTop) so it stays glued to the
+   * visible screen edge even when iOS shifts the visual viewport.
    */
   .hana-chat.is-open .hana-chat-header {
-    position: fixed;
+    position: fixed !important;
     top: 0;
-    left: 0;
-    right: 0;
-    width: 100%;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
     height: var(--hana-chat-header-h, calc(48px + env(safe-area-inset-top, 0px)));
     min-height: var(--hana-chat-header-h, calc(48px + env(safe-area-inset-top, 0px)));
     max-height: none;
     padding: env(safe-area-inset-top, 0px) 10px 0;
     box-sizing: border-box;
-    z-index: 100;
+    z-index: 10100 !important;
+    transform: translateZ(0);
+    transition: none !important;
+    animation: none !important;
+    will-change: top;
     background:
       radial-gradient(ellipse at 12% 0%, rgba(232, 154, 170, 0.22), transparent 48%),
       linear-gradient(180deg, rgba(36, 22, 20, 0.99) 0%, rgba(22, 14, 16, 0.98) 100%);
+  }
+
+  .hana-chat.is-open .hana-chat-panel.is-keyboard {
+    padding-top: var(--hana-chat-header-h);
+  }
+
+  /* Avatar bob would make the header bar feel like it is jumping. */
+  .hana-chat.is-open .hana-chat-header .hana-chat-avatar {
+    animation: none !important;
   }
 
   .hana-chat.is-open .hana-chat-avatar {
@@ -4447,8 +4467,10 @@ html[data-site-theme='natsu'] .hana-chat-fab {
 }
 
 html[data-site-theme='natsu'] .hana-chat-panel {
-  border: 0;
-  box-shadow: 0 28px 64px rgba(0, 0, 0, 0.45);
+  border-color: rgba(245, 194, 107, 0.28);
+  box-shadow:
+    0 28px 64px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(245, 194, 107, 0.1);
 }
 
 html[data-site-theme='natsu'] .hana-chat-header {
@@ -4515,8 +4537,11 @@ html[data-site-theme='natsu'] .hana-chat-fab {
 }
 
 html[data-site-theme='natsu'] .hana-chat-panel {
-  border: 0;
-  box-shadow: 0 28px 64px rgba(0, 0, 0, 0.5);
+  border-color: rgba(255, 210, 74, 0.35);
+  box-shadow:
+    0 28px 64px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 107, 74, 0.12),
+    0 0 40px rgba(255, 90, 40, 0.12);
 }
 
 html[data-site-theme='natsu'] .hana-chat-panel::before {
@@ -4582,13 +4607,24 @@ html[data-site-theme='natsu'] .hana-chat-launcher-wrap::after {
 }
 
 html[data-site-theme='natsu'] .hana-chat-panel {
-  border: 0 !important;
+  border: 2px solid rgba(255, 210, 74, 0.45) !important;
   background:
     radial-gradient(ellipse 80% 40% at 50% -5%, rgba(255, 90, 40, 0.28), transparent 55%),
     radial-gradient(ellipse 50% 30% at 100% 100%, rgba(255, 210, 74, 0.12), transparent 50%),
     linear-gradient(165deg, rgba(18, 22, 42, 0.98), rgba(8, 12, 24, 0.99)) !important;
-  box-shadow: 0 28px 64px rgba(0, 0, 0, 0.55) !important;
+  box-shadow:
+    0 28px 64px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(255, 107, 74, 0.2),
+    0 0 48px rgba(255, 90, 40, 0.22) !important;
   overflow: hidden;
+}
+
+/* Mobile only: no yellow outer frame on the fullscreen chat panel. */
+@media (max-width: 640px) {
+  html[data-site-theme='natsu'] .hana-chat-panel {
+    border: 0 !important;
+    box-shadow: 0 28px 64px rgba(0, 0, 0, 0.55) !important;
+  }
 }
 
 html[data-site-theme='natsu'] .hana-chat-header {
@@ -4742,7 +4778,8 @@ html[data-site-theme='natsu'] .hana-chat:not(.is-open) .hana-chat-header {
 }
 
 html[data-site-theme='natsu'] .hana-chat.is-open .hana-chat-header {
-  z-index: 100;
+  position: fixed !important;
+  z-index: 10100 !important;
   background:
     linear-gradient(180deg, rgba(18, 22, 42, 0.99) 0%, rgba(18, 22, 42, 0.96) 55%, rgba(18, 22, 42, 0.92) 100%),
     linear-gradient(180deg, rgba(255, 90, 40, 0.28), rgba(255, 160, 60, 0.08) 70%, transparent) !important;
