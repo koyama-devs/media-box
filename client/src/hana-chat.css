@@ -225,6 +225,16 @@
   overflow: visible;
 }
 
+/* Open chat: keep header pinned at the top of the frame (desktop floating panel). */
+.hana-chat.is-open .hana-chat-header {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  background:
+    radial-gradient(ellipse at 12% 0%, rgba(232, 154, 170, 0.22), transparent 48%),
+    linear-gradient(180deg, rgba(36, 22, 20, 0.98) 0%, rgba(22, 14, 16, 0.96) 100%);
+}
+
 .hana-chat-avatar {
   position: relative;
   width: 34px;
@@ -3687,6 +3697,7 @@ body.hana-chat-scroll-lock #root {
   }
 
   .hana-chat.is-open .hana-chat-panel {
+    --hana-chat-header-h: calc(48px + env(safe-area-inset-top, 0px));
     position: absolute;
     top: 0;
     left: 0;
@@ -3704,7 +3715,8 @@ body.hana-chat-scroll-lock #root {
     border-radius: 0;
     border-left: 0;
     border-right: 0;
-    padding-top: env(safe-area-inset-top, 0px);
+    /* Reserve space for viewport-fixed header (safe-area + 48px bar). */
+    padding-top: var(--hana-chat-header-h);
     /* Safe-area lives on the composer (tiny), not a tall empty strip under the input. */
     padding-bottom: 0;
     z-index: 90;
@@ -3734,12 +3746,25 @@ body.hana-chat-scroll-lock #root {
     bottom: auto;
   }
 
-  /* Do NOT shrink header/avatar when keyboard opens — header is fixed at 48px. */
+  /*
+   * Mobile open: true viewport-fixed header so iOS keyboard / visualViewport
+   * shifts cannot drag the bar off-screen.
+   */
   .hana-chat.is-open .hana-chat-header {
-    height: 48px;
-    min-height: 48px;
-    max-height: 48px;
-    padding: 0 10px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: var(--hana-chat-header-h, calc(48px + env(safe-area-inset-top, 0px)));
+    min-height: var(--hana-chat-header-h, calc(48px + env(safe-area-inset-top, 0px)));
+    max-height: none;
+    padding: env(safe-area-inset-top, 0px) 10px 0;
+    box-sizing: border-box;
+    z-index: 100;
+    background:
+      radial-gradient(ellipse at 12% 0%, rgba(232, 154, 170, 0.22), transparent 48%),
+      linear-gradient(180deg, rgba(36, 22, 20, 0.99) 0%, rgba(22, 14, 16, 0.98) 100%);
   }
 
   .hana-chat.is-open .hana-chat-avatar {
@@ -4712,17 +4737,23 @@ html[data-site-theme='natsu'] .hana-chat-natsu-fish .natsu-kingyo-tail {
 
 
 
-html[data-site-theme='natsu'] .hana-chat-header,
 html[data-site-theme='natsu'] .hana-chat-composer,
 html[data-site-theme='natsu'] .hana-chat-body {
   position: relative;
   z-index: 2;
 }
 
-/* Keep guest dropdown above bubbles/effect chips in natsu theme as well. */
-html[data-site-theme='natsu'] .hana-chat-header {
+/* Keep guest dropdown above bubbles/effect chips; do not override open sticky/fixed. */
+html[data-site-theme='natsu'] .hana-chat:not(.is-open) .hana-chat-header {
   position: relative;
   z-index: 6;
+}
+
+html[data-site-theme='natsu'] .hana-chat.is-open .hana-chat-header {
+  z-index: 100;
+  background:
+    linear-gradient(180deg, rgba(18, 22, 42, 0.99) 0%, rgba(18, 22, 42, 0.96) 55%, rgba(18, 22, 42, 0.92) 100%),
+    linear-gradient(180deg, rgba(255, 90, 40, 0.28), rgba(255, 160, 60, 0.08) 70%, transparent) !important;
 }
 
 html[data-site-theme='natsu'] .hana-chat-messages,
