@@ -369,6 +369,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [ownerSuggestEnabled, setOwnerSuggestEnabled] = useState(() => readOwnerSuggestEnabled())
   const [guestMenuOpen, setGuestMenuOpen] = useState(false)
   const [stickerOpen, setStickerOpen] = useState(false)
+  const [composerFocused, setComposerFocused] = useState(false)
   const [stickerSetId, setStickerSetId] = useState(() => readStickerSet({ asOwner: appRole === 'owner' }))
   const activeStickerSet = HANA_STICKER_SETS.find((set) => set.id === stickerSetId) || HANA_STICKER_SETS[0]
   const stickerSuggestions = useMemo(() => suggestHanaStickers(draft, 12), [draft])
@@ -427,6 +428,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   /** Phone width: bottom half sticker dock (not the floating popover). */
   const stickerDockMode = narrowScreen
   const stickerDockOpenRef = useRef(false)
+  /** Freeze dock chrome after first open so keyboard overlay never resizes layout. */
+  const lockedDockChromeRef = useRef(0)
+  /** Icon blur must not close dock — only 完了 / outside tap should. */
+  const skipDockCloseOnNextBlurRef = useRef(false)
   stickerDockOpenRef.current = Boolean(stickerOpen && stickerDockMode)
   const retainComposerFocusRef = useRef(false)
   const migrationCheckedRef = useRef(new Set())
@@ -1574,9 +1579,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
     /**
      * Sticker dock mid-slot.
-     * Size the panel to the *visible* viewport while the IME is still
-     * dismissing — using full layout height then puts the composer below the
-     * fold ("tụt xuống sâu"). Expand to full half-screen once the keyboard is gone.
+     * Keep a fixed full-screen panel + locked bottom chrome.
+     * Soft keyboard is an overlay — never shrink this layout to visualViewport.
      */
     const applyStickerDock = () => {
       const layoutH = Math.max(
@@ -1586,20 +1590,20 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       )
       if (layoutH > (baselineLayoutRef.current || 0)) baselineLayoutRef.current = layoutH
 
-      const vv = window.visualViewport
-      const vvTop = vv ? Math.round(vv.offsetTop || 0) : 0
-      const vvH = vv ? Math.max(1, Math.round(vv.height)) : layoutH
-      const vvInset = Math.max(0, layoutH - vvH - vvTop)
-      // Keyboard mostly gone → full-screen mid dock. Otherwise stay inside the
-      // currently visible box so the composer never drops under the fold.
-      const imeBusy = vvInset > 80 || vvTop > 10
-      const boxH = imeBusy
-        ? Math.max(1, Math.min(layoutH, vvH))
-        : layoutH
-      const chrome = Math.max(160, Math.min(Math.round(boxH * 0.5), Math.round(layoutH * 0.5)))
-
+      const boxH = layoutH
+      // Prefer remembered real IME height; else ~52% screen (typical phone IME).
+      const rememberedKb = Math.max(0, Math.round(keyboardHeightRef.current || 0))
+      const preferred = Math.max(
+        200,
+        Math.round(layoutH * 0.46),
+        rememberedKb > 120 ? Math.min(rememberedKb, Math.round(layoutH * 0.48)) : 0,
+      )
+      const chrome = lockedDockChromeRef.current > 0
+        ? lockedDockChromeRef.current
+        : preferred
+      lockedDockChromeRef.current = chrome
       stableChromeHRef.current = chrome
-      keyboardHeightRef.current = chrome
+
       setDockChrome(chrome)
       lockShellHeight()
       pinHeaderFixed({ forceZero: true })
@@ -1615,7 +1619,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       panel.style.removeProperty('--hana-vv-top')
       panel.classList.remove('is-keyboard')
       keyboardPinnedRef.current = false
-      viewportApplyRef.current = { top: 0, height: boxH, width: 0, keyboard: false }
+      viewportApplyRef.current = { top: 0, height: boxH, width: chrome, keyboard: false }
       if (window.scrollY) window.scrollTo(0, 0)
       pinMessagesToLatest()
       window.requestAnimationFrame(pinMessagesToLatest)
@@ -1717,6 +1721,15 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         return
       }
 
+      // Mobile dock mode: while the composer is focused, always keep the
+      // fixed dock geometry. Never pin-shrink the panel to visualViewport
+      // (that buries the composer on the 2nd open after dismiss).
+      if (stickerDockMode && inputFocused) {
+        stickerDockOpenRef.current = true
+        applyStickerDock()
+        return
+      }
+
       if (inputFocused || keyboardOpen) {
         applyVisualKeyboardPin()
         return
@@ -1776,7 +1789,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       clearInline()
       lockPageScroll(false)
     }
-  }, [hidden, open])
+  }, [hidden, open, stickerDockMode])
 
   useEffect(() => {
     if (!open || (!editingId && !replyTo)) return undefined
@@ -1797,11 +1810,14 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     // Clear mobile/fullscreen inline viewport styles immediately so the
     // launcher returns to its anchored floating position on this same tick.
     resetPanelViewportInlineRef.current()
+    lockedDockChromeRef.current = 0
+    skipDockCloseOnNextBlurRef.current = false
     setOpen(false)
     setSuggestPickerGroup(null)
     setGuestMenuOpen(false)
     setBottomChromePx(0)
     setStickerOpen(false)
+    setComposerFocused(false)
   }
 
   const toggleChatOpen = () => {
@@ -2026,7 +2042,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     setSuggestPickerGroup(null)
     setGuestMenuOpen(false)
     stickerDockOpenRef.current = false
+    lockedDockChromeRef.current = 0
+    skipDockCloseOnNextBlurRef.current = false
     setStickerOpen(false)
+    setComposerFocused(false)
     setBottomChromePx(0)
     setSettingsOpen(false)
   }, [activeThreadId, open])
@@ -2042,9 +2061,16 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         const inTrigger = stickerTriggerRef.current?.contains(event.target)
         const inComposer = composerRef.current?.contains(event.target)
         if (!inPanel && !inTrigger && !inComposer) {
+          // Dismiss IME first so viewport sync restores idle (not keyboard-pin).
+          skipDockCloseOnNextBlurRef.current = false
+          lockedDockChromeRef.current = 0
           stickerDockOpenRef.current = false
-          setStickerOpen(false)
-          setBottomChromePx(0)
+          try { inputRef.current?.blur() } catch { /* ignore */ }
+          flushSync(() => {
+            setStickerOpen(false)
+            setBottomChromePx(0)
+            setComposerFocused(false)
+          })
           syncPanelViewportRef.current({ immediate: true, force: true })
         }
       }
@@ -2059,25 +2085,49 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const halfScreenDockPx = useCallback(() => {
     if (typeof window === 'undefined') return stableChromeHRef.current || 320
     const inner = window.innerHeight || document.documentElement.clientHeight || 0
-    // Prefer baseline (keyboard-closed) so dock height stays half-screen even
-    // when opening stickers while the IME is still dismissing / shrinking innerHeight.
     const fullH = Math.max(baselineLayoutRef.current || 0, inner)
     if (fullH > (baselineLayoutRef.current || 0)) baselineLayoutRef.current = fullH
-    const half = Math.round(fullH * 0.5)
-    stableChromeHRef.current = half
-    keyboardHeightRef.current = half
-    return half
+    const rememberedKb = Math.max(0, Math.round(keyboardHeightRef.current || 0))
+    // Slightly under half-screen so IME overlays dock without lifting composer too high.
+    const chrome = Math.max(
+      200,
+      Math.round(fullH * 0.46),
+      rememberedKb > 120 ? Math.min(rememberedKb, Math.round(fullH * 0.48)) : 0,
+    )
+    stableChromeHRef.current = chrome
+    return chrome
   }, [])
 
   const revealComposerKeyboard = useCallback(() => {
-    const h = halfScreenDockPx()
-    stickerDockOpenRef.current = false
+    const layoutH = Math.max(
+      baselineLayoutRef.current || 0,
+      typeof window !== 'undefined' ? (window.innerHeight || 0) : 0,
+    )
+    if (layoutH > (baselineLayoutRef.current || 0)) baselineLayoutRef.current = layoutH
+    const h = lockedDockChromeRef.current > 0
+      ? lockedDockChromeRef.current
+      : (bottomChromePxRef.current > 0 ? bottomChromePxRef.current : halfScreenDockPx())
+    lockedDockChromeRef.current = h
+    // Keep dock fixed; only slide soft keyboard up as an overlay.
+    stickerDockOpenRef.current = true
+    keyboardPinnedRef.current = false
     flushSync(() => {
-      setStickerOpen(false)
+      setStickerOpen(true)
       setBottomChromePx(h)
+      setComposerFocused(true)
     })
-    panelRef.current?.style.setProperty('--hana-sticker-dock-h', `${h}px`)
-    panelRef.current?.style.setProperty('--hana-bottom-chrome-h', `${h}px`)
+    const panel = panelRef.current
+    if (panel) {
+      // Restore full layout immediately (clears leftover is-keyboard shrink).
+      panel.classList.remove('is-keyboard')
+      panel.style.top = '0px'
+      panel.style.bottom = 'auto'
+      panel.style.height = `${layoutH}px`
+      panel.style.maxHeight = `${layoutH}px`
+      panel.style.minHeight = '0px'
+      panel.style.setProperty('--hana-sticker-dock-h', `${h}px`)
+      panel.style.setProperty('--hana-bottom-chrome-h', `${h}px`)
+    }
     const input = inputRef.current
     if (input) {
       try {
@@ -2090,11 +2140,13 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   }, [halfScreenDockPx])
 
   const closeStickerTray = useCallback((options = {}) => {
-    // Keyboard icon while dock is open → swap to IME, keep composer mid.
+    // Keyboard icon while dock is open → reveal IME overlay, keep dock.
     if (options.focusInput && stickerDockMode) {
       revealComposerKeyboard()
       return
     }
+    lockedDockChromeRef.current = 0
+    skipDockCloseOnNextBlurRef.current = false
     stickerDockOpenRef.current = false
     flushSync(() => {
       setStickerOpen(false)
@@ -2107,22 +2159,13 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     if (stickerDockMode) {
       stickerDockOpenRef.current = true
       keyboardPinnedRef.current = false
-      // Size chrome from the visible viewport first (not full layout) so we do
-      // not bury the composer while the soft keyboard is still dismissing.
-      const vv = typeof window !== 'undefined' ? window.visualViewport : null
       const layoutH = Math.max(
         baselineLayoutRef.current || 0,
         typeof window !== 'undefined' ? (window.innerHeight || 0) : 0,
       )
-      const vvH = vv ? Math.max(1, Math.round(vv.height)) : layoutH
-      const vvInset = vv
-        ? Math.max(0, layoutH - vv.height - (vv.offsetTop || 0))
-        : 0
-      const boxH = (vvInset > 80 || (vv?.offsetTop || 0) > 10)
-        ? Math.min(layoutH, vvH)
-        : Math.max(layoutH, halfScreenDockPx() * 2)
-      const h = Math.max(160, Math.round(boxH * 0.5))
-      stableChromeHRef.current = h
+      if (layoutH > (baselineLayoutRef.current || 0)) baselineLayoutRef.current = layoutH
+      const h = halfScreenDockPx()
+      lockedDockChromeRef.current = h
       flushSync(() => {
         setBottomChromePx(h)
         setStickerOpen(true)
@@ -2131,32 +2174,38 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       if (panel) {
         panel.classList.remove('is-keyboard')
         panel.style.top = '0px'
-        panel.style.height = `${boxH}px`
-        panel.style.maxHeight = `${boxH}px`
+        panel.style.height = `${layoutH}px`
+        panel.style.maxHeight = `${layoutH}px`
         panel.style.setProperty('--hana-sticker-dock-h', `${h}px`)
         panel.style.setProperty('--hana-bottom-chrome-h', `${h}px`)
       }
       try { inputRef.current?.blur() } catch { /* ignore */ }
       syncPanelViewportRef.current({ immediate: true, force: true })
-      window.requestAnimationFrame(() => {
-        syncPanelViewportRef.current({ immediate: true, force: true })
-      })
-      window.setTimeout(() => {
-        if (!stickerDockOpenRef.current) return
-        syncPanelViewportRef.current({ immediate: true, force: true })
-      }, 180)
       return
     }
     setStickerOpen(true)
   }, [halfScreenDockPx, stickerDockMode])
 
   const toggleStickerTray = useCallback(() => {
+    // Fixed dock: icon only toggles soft-keyboard overlay up/down.
+    if (stickerDockMode && stickerOpen) {
+      const inputFocused = document.activeElement === inputRef.current
+      if (inputFocused) {
+        skipDockCloseOnNextBlurRef.current = true
+        keyboardPinnedRef.current = false
+        try { inputRef.current?.blur() } catch { /* ignore */ }
+        syncPanelViewportRef.current({ immediate: true, force: true })
+        return
+      }
+      revealComposerKeyboard()
+      return
+    }
     if (stickerOpen) {
       closeStickerTray({ focusInput: stickerDockMode })
     } else {
       openStickerTray()
     }
-  }, [closeStickerTray, openStickerTray, stickerDockMode, stickerOpen])
+  }, [closeStickerTray, openStickerTray, revealComposerKeyboard, stickerDockMode, stickerOpen])
 
   const ownerReplyChips = ownerSuggestions.replies.length
     ? ownerSuggestions.replies
@@ -4033,18 +4082,33 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   }
                 }}
                 onPointerDown={() => {
-                  if (stickerOpen && stickerDockMode) {
-                    revealComposerKeyboard()
-                  }
+                  if (!stickerDockMode) return
+                  // First tap on input: raise fixed sticker dock under the IME.
+                  // Later taps: keep dock and ensure keyboard overlay is focused.
+                  revealComposerKeyboard()
                 }}
                 onFocus={() => {
-                  if (stickerOpen && stickerDockMode) return
+                  setComposerFocused(true)
+                  if (stickerDockMode) {
+                    // Focus without pointerdown (e.g. programmatic): still raise dock.
+                    if (!stickerDockOpenRef.current) {
+                      revealComposerKeyboard()
+                    }
+                    return
+                  }
                   syncPanelViewportRef.current({ immediate: true, force: true })
                 }}
                 onBlur={() => {
                   window.setTimeout(() => {
                     if (!open) return
                     if (document.activeElement === inputRef.current) return
+                    if (skipDockCloseOnNextBlurRef.current) {
+                      skipDockCloseOnNextBlurRef.current = false
+                      setComposerFocused(false)
+                      // Icon dismissed IME only — keep fixed dock layout.
+                      syncPanelViewportRef.current({ immediate: true, force: true })
+                      return
+                    }
                     if (retainComposerFocusRef.current) {
                       try {
                         inputRef.current?.focus({ preventScroll: true })
@@ -4053,8 +4117,13 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                       }
                       return
                     }
+                    setComposerFocused(false)
+                    // 完了 / true blur: close fixed dock and restore idle.
+                    if (stickerDockMode && stickerDockOpenRef.current) {
+                      closeStickerTray()
+                      return
+                    }
                     keyboardPinnedRef.current = false
-                    // Let viewport sync restore full idle layout (完了 path).
                     syncPanelViewportRef.current({ immediate: true, force: true })
                   }, 60)
                 }}
@@ -4076,12 +4145,16 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               />
               {canUseReactions && effectThreadId ? (
                 <div className="hana-chat-sticker">
+                  {(() => {
+                    // Dock visible + IME down → keyboard icon. IME up → sticker icon.
+                    const showKeyboardIcon = Boolean(stickerDockMode && stickerOpen && !composerFocused)
+                    return (
                   <button
                     ref={stickerTriggerRef}
                     type="button"
-                    className={`hana-chat-sticker-trigger${stickerOpen ? ' is-open' : ''}${stickerOpen && stickerDockMode ? ' is-keyboard' : ''}`}
-                    title={stickerOpen && stickerDockMode ? 'キーボード' : 'スタンプ・エフェクト'}
-                    aria-label={stickerOpen && stickerDockMode ? 'キーボードを表示' : 'スタンプ・エフェクト'}
+                    className={`hana-chat-sticker-trigger${stickerOpen ? ' is-open' : ''}${showKeyboardIcon ? ' is-keyboard' : ''}`}
+                    title={showKeyboardIcon ? 'キーボード' : 'スタンプ・エフェクト'}
+                    aria-label={showKeyboardIcon ? 'キーボードを表示' : 'スタンプ・エフェクト'}
                     aria-expanded={stickerOpen}
                     disabled={busy}
                     onMouseDown={(event) => {
@@ -4094,7 +4167,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     }}
                     onClick={toggleStickerTray}
                   >
-                    {stickerOpen && stickerDockMode ? (
+                    {showKeyboardIcon ? (
                       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
                         <path
                           fill="currentColor"
@@ -4105,6 +4178,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                       '✨'
                     )}
                   </button>
+                    )
+                  })()}
                   {stickerOpen && !stickerDockMode ? (
                     <div className="hana-chat-sticker-panel" ref={stickerRef} role="menu" aria-label="スタンプとエフェクト">
                       <div className="hana-chat-sticker-panel-head">

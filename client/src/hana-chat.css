@@ -1963,10 +1963,9 @@ body.hana-chat-scroll-lock #root {
 }
 
 .hana-chat-bottom-chrome.has-dock {
-  /* Hard cap: sticker dock never exceeds half the screen. */
+  /* JS sets exact dock height to match soft keyboard; do not hard-cap at 50%. */
   min-height: 0;
-  max-height: 50dvh;
-  max-height: 50%;
+  max-height: none;
 }
 
 .hana-chat-bottom-chrome:not(.has-dock) {
