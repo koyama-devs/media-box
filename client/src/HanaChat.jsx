@@ -2151,9 +2151,37 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     flushSync(() => {
       setStickerOpen(false)
       setBottomChromePx(0)
+      setComposerFocused(false)
     })
     syncPanelViewportRef.current({ immediate: true, force: true })
   }, [stickerDockMode, revealComposerKeyboard])
+
+  /**
+   * Same idea as tapping Send while 未確定: commit composition, then run「完了」
+   * dismiss (hide IME + sticker dock).
+   */
+  const kakuteiThenKanryouDismiss = useCallback(() => {
+    const input = inputRef.current
+    if (input) {
+      try {
+        input.dispatchEvent(new CompositionEvent('compositionend', {
+          bubbles: true,
+          cancelable: true,
+        }))
+      } catch { /* ignore */ }
+      // Controlled React state can lag behind the live composing value.
+      const live = String(input.value || '')
+      setDraft(live)
+      try { input.blur() } catch { /* ignore */ }
+    }
+    setComposerFocused(false)
+    keyboardPinnedRef.current = false
+    if (stickerDockMode && (stickerDockOpenRef.current || bottomChromePxRef.current > 0)) {
+      closeStickerTray()
+      return
+    }
+    syncPanelViewportRef.current({ immediate: true, force: true })
+  }, [closeStickerTray, stickerDockMode])
 
   const openStickerTray = useCallback(() => {
     if (stickerDockMode) {
@@ -4101,7 +4129,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 onBlur={() => {
                   window.setTimeout(() => {
                     if (!open) return
-                    if (document.activeElement === inputRef.current) return
                     if (skipDockCloseOnNextBlurRef.current) {
                       skipDockCloseOnNextBlurRef.current = false
                       setComposerFocused(false)
@@ -4117,15 +4144,20 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                       }
                       return
                     }
-                    setComposerFocused(false)
-                    // 完了 / true blur: close fixed dock and restore idle.
-                    if (stickerDockMode && stickerDockOpenRef.current) {
-                      closeStickerTray()
-                      return
-                    }
-                    keyboardPinnedRef.current = false
-                    syncPanelViewportRef.current({ immediate: true, force: true })
-                  }, 60)
+                    // Spurious IME blur while still typing: keep dock/keyboard.
+                    const vv = window.visualViewport
+                    const layoutH = Math.max(
+                      baselineLayoutRef.current || 0,
+                      window.innerHeight || 0,
+                    )
+                    const inset = vv
+                      ? Math.max(0, layoutH - vv.height - (vv.offsetTop || 0))
+                      : 0
+                    if (document.activeElement === inputRef.current && inset > 100) return
+
+                    // Like Send while 未確定: kakutei, then「完了」dismiss dock+IME.
+                    kakuteiThenKanryouDismiss()
+                  }, 80)
                 }}
                 placeholder={
                   editingId
