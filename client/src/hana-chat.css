@@ -1974,6 +1974,16 @@ body.hana-chat-scroll-lock #root {
   pointer-events: none;
 }
 
+/*
+ * Soft keyboard overlays the dock; Android/WebView still delivers taps to
+ * sticker buttons underneath (guest + owner). Block all dock hits while typing.
+ */
+.hana-chat-panel.is-composer-focused .hana-chat-bottom-chrome,
+.hana-chat-panel.is-composer-focused .hana-chat-sticker-dock,
+.hana-chat-panel.is-composer-focused .hana-chat-sticker-panel {
+  pointer-events: none !important;
+}
+
 /* Mobile: sticker tray sits where the soft keyboard was */
 .hana-chat-sticker-dock {
   flex: 1 1 auto;

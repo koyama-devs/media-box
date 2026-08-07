@@ -118,6 +118,12 @@ service cloud.firestore {
       }
     }
 
+    // Admin call history (tech fail reasons). Guests write; admin reads in /admin.
+    match /chat-call-history/{callId} {
+      allow read, create, update: if true;
+      allow delete: if isAdmin();
+    }
+
     // Xmediabox (public shell) — same shape, separate collections, starts empty.
     match /x-media-items/{itemId} {
       allow read, write: if true;

@@ -1705,6 +1705,7 @@ export function subscribeChatMessages(threadId, onData, onError) {
 }
 
 const CHAT_CALLS_SUBCOLLECTION = 'calls'
+const CHAT_CALL_HISTORY_COLLECTION = 'chat-call-history'
 
 function chatCallRef(threadId, callId) {
   return doc(db, CHAT_THREADS_COLLECTION, threadId, CHAT_CALLS_SUBCOLLECTION, callId)
@@ -1872,7 +1873,76 @@ export async function postChatCallLog({
     { merge: true },
   )
 
+  // Admin history (includes technical fail fields when present).
+  try {
+    const callData = callSnap.exists() ? (callSnap.data() || {}) : {}
+    await upsertChatCallHistory({
+      callId: cid,
+      threadId: tid,
+      status: st,
+      durationSec: dur,
+      callerRole: callerRole === 'hana' ? 'hana' : 'guest',
+      endedBy: endedBy === 'hana' || endedBy === 'guest' ? endedBy : '',
+      answeredAtIso: answeredAtIso ? String(answeredAtIso) : null,
+      createdAtIso: callData.createdAtIso || nowIso,
+      endedAtIso: callData.endedAtIso || nowIso,
+      failCode: callData.failCode || '',
+      failReason: callData.failReason || '',
+      failByRole: callData.failByRole || '',
+      guestKey: callData.guestKey || '',
+      type: callData.type || 'video',
+    })
+  } catch {
+    // History is best-effort; chat log already wrote.
+  }
+
   return messageId
+}
+
+/**
+ * Upsert a flat admin-facing call history row (tech details for failures).
+ */
+export async function upsertChatCallHistory(entry = {}) {
+  const callId = String(entry.callId || '').trim()
+  if (!callId) return null
+  const nowIso = new Date().toISOString()
+  const payload = {
+    callId,
+    threadId: String(entry.threadId || '').trim(),
+    status: String(entry.status || '').trim(),
+    durationSec: Math.max(0, Math.floor(Number(entry.durationSec) || 0)),
+    callerRole: entry.callerRole === 'hana' ? 'hana' : 'guest',
+    endedBy: entry.endedBy === 'hana' || entry.endedBy === 'guest' ? entry.endedBy : '',
+    answeredAtIso: entry.answeredAtIso ? String(entry.answeredAtIso) : null,
+    createdAtIso: String(entry.createdAtIso || nowIso),
+    endedAtIso: entry.endedAtIso ? String(entry.endedAtIso) : null,
+    failCode: String(entry.failCode || '').slice(0, 64),
+    failReason: String(entry.failReason || '').slice(0, 800),
+    failByRole: entry.failByRole === 'hana' || entry.failByRole === 'guest' ? entry.failByRole : '',
+    guestKey: String(entry.guestKey || '').slice(0, 80),
+    type: entry.type === 'voice' ? 'voice' : 'video',
+    updatedAt: serverTimestamp(),
+    updatedAtIso: nowIso,
+  }
+  if (!entry.createdAtIso) {
+    payload.createdAt = serverTimestamp()
+  }
+  await setDoc(doc(db, CHAT_CALL_HISTORY_COLLECTION, callId), payload, { merge: true })
+  return callId
+}
+
+export function subscribeChatCallHistory(onData, onError, { limitCount = 100 } = {}) {
+  return onSnapshot(
+    query(
+      collection(db, CHAT_CALL_HISTORY_COLLECTION),
+      orderBy('createdAtIso', 'desc'),
+      limit(Math.max(1, Math.min(200, Number(limitCount) || 100))),
+    ),
+    (snap) => {
+      onData?.(snap.docs.map((item) => ({ id: item.id, ...item.data() })))
+    },
+    (error) => onError?.(error),
+  )
 }
 
 export function subscribeChatCalls(threadId, onData, onError) {

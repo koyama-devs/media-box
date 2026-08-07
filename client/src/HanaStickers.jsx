@@ -198,7 +198,7 @@ const DAILY_SET = [
     phrase: 'わかった！',
     face: 'smile',
     accent: '#61b792',
-    aliases: ['わかった', '了解', 'りょうかい', 'wakatta', 'ryoukai', 'ok', 'hiểurồi'],
+    aliases: ['わかった', '了解', 'りょうかい', 'wakatta', 'ryoukai', 'okay', 'okk', 'okie', 'hiểurồi'],
     related: ['smile', 'wink', 'k-ok'],
   },
   {
@@ -437,7 +437,8 @@ export function suggestHanaStickers(value, limit = 8) {
     .map((item) => {
       const aliases = item.aliases.map(normalizeStickerQuery)
       const score = aliases.reduce((best, alias) => {
-        if (!alias) return best
+        // Ultra-short aliases ("ok") false-fire while composing on mobile IME.
+        if (!alias || alias.length < 3) return best
         if (query === alias) return Math.max(best, 4)
         if (query.startsWith(alias) || alias.startsWith(query)) {
           // Allow tiny suffix/prefix only while still near the keyword.

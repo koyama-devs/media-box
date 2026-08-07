@@ -2113,3 +2113,57 @@ html[data-site-theme='natsu'] .admin-tab.is-active {
   background: linear-gradient(135deg, rgba(255, 90, 40, 0.28), rgba(245, 194, 107, 0.18));
   border-color: rgba(255, 210, 74, 0.4);
 }
+
+.admin-call-table .admin-call-tech {
+  max-width: 28rem;
+  vertical-align: top;
+}
+
+.admin-call-table .admin-call-reason {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.06);
+  color: #334155;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 7.5rem;
+  overflow: auto;
+}
+
+.admin-call-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: rgba(148, 163, 184, 0.16);
+  color: #475569;
+}
+
+.admin-call-status.is-failed {
+  background: rgba(220, 80, 80, 0.16);
+  color: #b91c1c;
+}
+
+.admin-call-status.is-ended {
+  background: rgba(16, 185, 129, 0.16);
+  color: #047857;
+}
+
+.admin-call-status.is-missed,
+.admin-call-status.is-rejected {
+  background: rgba(245, 158, 11, 0.16);
+  color: #b45309;
+}
+
+.admin-table tbody tr.is-fail td {
+  background: rgba(254, 226, 226, 0.35);
+}
+
+.admin-muted {
+  color: rgba(100, 116, 139, 0.78);
+}

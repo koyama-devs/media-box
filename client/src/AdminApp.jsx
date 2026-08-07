@@ -20,6 +20,7 @@ import {
     saveSiteAppearance,
     subscribeAppReleases,
     subscribeChatAppSettings,
+    subscribeChatCallHistory,
     subscribeSiteAppearance,
     subscribeToAccessLogs,
     subscribeToAdminAuth,
@@ -260,6 +261,7 @@ function AdminLogin({ onLoggedIn }) {
 
 const ADMIN_TABS = [
   { id: 'logs', label: 'アクセスログ', kicker: 'Analytics', lead: '訪問の内訳を国・デバイス・期間で確認します。' },
+  { id: 'calls', label: '通話ログ', kicker: 'Calls', lead: '通話履歴と失敗時の技術原因を確認します。' },
   { id: 'users', label: 'ユーザー', kicker: 'Accounts', lead: 'ゲストとオーナーのアカウントを管理します。' },
   { id: 'chat', label: 'はなチャット', kicker: 'Inbox', lead: 'ゲストとのやりとりをここから返信します。' },
   { id: 'releases', label: 'リリース', kicker: 'Releases', lead: '各バージョンの変更点とロールバック情報です。' },
@@ -294,6 +296,138 @@ function formatReleaseTime(value) {
   } catch {
     return String(value)
   }
+}
+
+function formatCallStatus(status) {
+  if (status === 'ended') return '完了'
+  if (status === 'missed') return '不在'
+  if (status === 'rejected') return '拒否'
+  if (status === 'failed') return '失敗'
+  if (status === 'ringing') return '呼出中'
+  if (status === 'connected') return '接続中'
+  return status || '—'
+}
+
+function formatFailCode(code) {
+  if (code === 'ice_failed') return 'ICE/TURN接続失敗'
+  if (code === 'permission') return 'マイク許可拒否'
+  if (code === 'device') return 'マイク未検出'
+  if (code === 'media') return 'メディア取得失敗'
+  if (code === 'signaling') return 'シグナリング/通信'
+  if (code === 'unsupported') return '端末非対応'
+  if (code === 'unknown') return '不明'
+  return code || '—'
+}
+
+function AdminCallHistoryPanel({ hidden = false }) {
+  const [rows, setRows] = useState([])
+  const [error, setError] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+
+  useEffect(() => {
+    if (hidden) return undefined
+    setError('')
+    return subscribeChatCallHistory(
+      (list) => setRows(Array.isArray(list) ? list : []),
+      (err) => setError(getFirebaseErrorMessage(err) || '通話ログの読み込みに失敗しました。'),
+      { limitCount: 120 },
+    )
+  }, [hidden])
+
+  const filtered = useMemo(() => {
+    if (statusFilter === 'all') return rows
+    if (statusFilter === 'failed') return rows.filter((row) => row.status === 'failed')
+    return rows.filter((row) => row.status === statusFilter)
+  }, [rows, statusFilter])
+
+  const failCount = rows.filter((row) => row.status === 'failed').length
+
+  return (
+    <section className="admin-panel" hidden={hidden}>
+      <div className="admin-panel-head">
+        <div>
+          <h2>通話ログ</h2>
+          <p>
+            {filtered.length.toLocaleString('ja-JP')} / {rows.length.toLocaleString('ja-JP')} 件
+            {failCount ? ` · 失敗 ${failCount}` : ''}
+          </p>
+        </div>
+        <div className="admin-panel-actions">
+          <div className="admin-seg" role="group" aria-label="通話ステータス">
+            {[
+              { id: 'all', label: 'すべて' },
+              { id: 'failed', label: '失敗' },
+              { id: 'ended', label: '完了' },
+              { id: 'missed', label: '不在' },
+            ].map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={statusFilter === item.id ? 'is-active' : ''}
+                onClick={() => setStatusFilter(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      {error ? <p className="admin-inline-error">{error}</p> : null}
+      <div className="admin-table-wrap">
+        <table className="admin-table admin-call-table">
+          <thead>
+            <tr>
+              <th>日時</th>
+              <th>スレッド</th>
+              <th>状態</th>
+              <th>時間</th>
+              <th>発信</th>
+              <th>技術原因</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={6}>まだ通話ログがありません。</td>
+              </tr>
+            ) : filtered.map((row) => (
+              <tr key={row.id || row.callId} className={row.status === 'failed' ? 'is-fail' : ''}>
+                <td>{formatVisitTime(row.createdAtIso || row.endedAtIso)}</td>
+                <td>
+                  <code className="admin-mono">{String(row.threadId || '—')}</code>
+                </td>
+                <td>
+                  <span className={`admin-call-status is-${row.status || 'unknown'}`}>
+                    {formatCallStatus(row.status)}
+                  </span>
+                </td>
+                <td>
+                  {row.status === 'ended' && Number(row.durationSec) > 0
+                    ? `${Math.floor(Number(row.durationSec) / 60)}:${String(Number(row.durationSec) % 60).padStart(2, '0')}`
+                    : '—'}
+                </td>
+                <td>{row.callerRole === 'hana' ? 'はな' : 'ゲスト'}</td>
+                <td className="admin-call-tech">
+                  {row.status === 'failed' ? (
+                    <>
+                      <strong>{formatFailCode(row.failCode)}</strong>
+                      {row.failReason ? (
+                        <pre className="admin-call-reason">{row.failReason}</pre>
+                      ) : (
+                        <span className="admin-muted">詳細なし</span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="admin-muted">—</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
 }
 
 function AdminReleasesPanel({ hidden = false }) {
@@ -1104,6 +1238,7 @@ function AdminDashboard({ user }) {
             onOpenChat={openChatTab}
           />
 
+          <AdminCallHistoryPanel hidden={tab !== 'calls'} />
           <AdminChatSettingsPanel hidden={tab !== 'settings'} />
           <AdminReleasesPanel hidden={tab !== 'releases'} />
 

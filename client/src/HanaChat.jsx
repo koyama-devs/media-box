@@ -3316,7 +3316,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         <section
           ref={panelRef}
           id="hana-chat-panel"
-          className={`hana-chat-panel is-fullscreen${stickerOpen && stickerDockMode ? ' is-sticker-dock' : ''}${bottomChromePx > 0 ? ' is-bottom-chrome' : ''}`}
+          className={`hana-chat-panel is-fullscreen${stickerOpen && stickerDockMode ? ' is-sticker-dock' : ''}${bottomChromePx > 0 ? ' is-bottom-chrome' : ''}${composerFocused ? ' is-composer-focused' : ''}`}
           aria-label="はなちゃんチャット"
         >
           <div className="hana-chat-natsu-decor" aria-hidden="true">
@@ -4019,7 +4019,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             </div>
           ) : null}
 
-          {canUseReactions && stickerSuggestions.length > 0 && !editingId ? (
+          {/* Disabled: Android/touch ghost-taps were auto-sending ファイト/オッケー while typing (guest + owner). */}
+          {false && canUseReactions && stickerSuggestions.length > 0 && !editingId ? (
             <div className="hana-chat-sticker-suggestions" aria-label="入力に合うスタンプ">
               <div className="hana-chat-sticker-suggestions-head">
                 <span>おすすめスタンプ</span>

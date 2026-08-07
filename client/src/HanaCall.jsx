@@ -16,36 +16,135 @@ import {
     subscribeChatCalls,
     updateChatCall,
     postChatCallLog,
+    upsertChatCallHistory,
 } from './firebase'
 import './hana-call.css'
 
 const TERMINAL_STATUSES = new Set(['ended', 'rejected', 'missed', 'failed'])
 const RING_MAX_AGE_MS = 90_000
+const ICE_CACHE_TTL_MS = 45 * 60 * 1000
 
-function rtcConfiguration() {
-  const iceServers = [
+const USER_FAIL_GENERIC = '通話を接続できませんでした。もう一度お試しください。'
+const USER_FAIL_PERMISSION = 'マイクの許可が必要です。設定から許可してもう一度お試しください。'
+const USER_FAIL_DEVICE = 'マイクが見つかりません。別の端末でもう一度お試しください。'
+
+function classifyCallFailure(reason, extra = {}) {
+  const name = String(reason?.name || extra.name || '')
+  const rawMessage = String(
+    getFirebaseErrorMessage(reason)
+    || reason?.message
+    || reason
+    || extra.message
+    || '',
+  ).trim()
+  let failCode = 'unknown'
+  if (extra.iceFailed || /ice|turn|nat|接続できません|回線/i.test(rawMessage)) {
+    failCode = 'ice_failed'
+  } else if (/NotAllowedError|PermissionDeniedError/i.test(name) || /permission|許可/i.test(rawMessage)) {
+    failCode = 'permission'
+  } else if (/NotFoundError/i.test(name) || /マイクが見つかり/i.test(rawMessage)) {
+    failCode = 'device'
+  } else if (/NotSupported|HTTPS|対応していません/i.test(rawMessage) || /NotSupportedError/i.test(name)) {
+    failCode = 'unsupported'
+  } else if (/Firebase|Firestore|network|Failed to fetch|signaling/i.test(rawMessage)) {
+    failCode = 'signaling'
+  } else if (/getUserMedia|media|Overconstrained/i.test(rawMessage) || /OverconstrainedError/i.test(name)) {
+    failCode = 'media'
+  }
+
+  const ua = typeof navigator !== 'undefined' ? String(navigator.userAgent || '').slice(0, 140) : ''
+  const failReason = [
+    name && `name=${name}`,
+    rawMessage && `message=${rawMessage.slice(0, 280)}`,
+    extra.iceConnectionState && `ice=${extra.iceConnectionState}`,
+    extra.connectionState && `pc=${extra.connectionState}`,
+    extra.hasTurn != null && `hasTurn=${extra.hasTurn}`,
+    extra.phase && `phase=${extra.phase}`,
+    ua && `ua=${ua}`,
+  ].filter(Boolean).join(' | ')
+
+  const userMessage = failCode === 'permission'
+    ? USER_FAIL_PERMISSION
+    : failCode === 'device'
+      ? USER_FAIL_DEVICE
+      : USER_FAIL_GENERIC
+
+  return { failCode, failReason, userMessage }
+}
+
+const iceServersCache = { at: 0, servers: null }
+
+function stunOnlyServers() {
+  return [
     { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+    { urls: ['stun:stun.cloudflare.com:3478'] },
   ]
+}
+
+/**
+ * Resolve ICE servers for WebRTC.
+ * Cross-country / carrier-NAT (e.g. Vietnam ↔ Japan) almost always needs a
+ * working TURN relay. Static openrelayproject credentials no longer work —
+ * use Metered free API key (VITE_METERED_TURN_CREDENTIALS_URL) or a private TURN.
+ */
+async function resolveIceServers() {
+  const now = Date.now()
+  if (iceServersCache.servers && now - iceServersCache.at < ICE_CACHE_TTL_MS) {
+    return iceServersCache.servers
+  }
+
+  const credentialUrl = String(
+    import.meta.env.VITE_METERED_TURN_CREDENTIALS_URL
+    || import.meta.env.VITE_WEBRTC_ICE_URL
+    || '',
+  ).trim()
+
+  if (credentialUrl) {
+    try {
+      const response = await fetch(credentialUrl)
+      if (response.ok) {
+        const payload = await response.json()
+        const list = Array.isArray(payload)
+          ? payload
+          : (Array.isArray(payload?.iceServers) ? payload.iceServers : null)
+        if (list?.length) {
+          iceServersCache.at = now
+          iceServersCache.servers = list
+          return list
+        }
+      }
+    } catch {
+      // Fall through to static / STUN.
+    }
+  }
+
   const turnUrl = String(import.meta.env.VITE_WEBRTC_TURN_URL || '').trim()
   if (turnUrl) {
-    iceServers.push({
-      urls: turnUrl.split(',').map((item) => item.trim()).filter(Boolean),
-      username: String(import.meta.env.VITE_WEBRTC_TURN_USERNAME || ''),
-      credential: String(import.meta.env.VITE_WEBRTC_TURN_CREDENTIAL || ''),
-    })
-  } else {
-    iceServers.push({
-      urls: [
-        'turn:openrelay.metered.ca:80',
-        'turn:openrelay.metered.ca:443',
-        'turn:openrelay.metered.ca:443?transport=tcp',
-        'turns:openrelay.metered.ca:443',
-      ],
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    })
+    const servers = [
+      ...stunOnlyServers(),
+      {
+        urls: turnUrl.split(',').map((item) => item.trim()).filter(Boolean),
+        username: String(import.meta.env.VITE_WEBRTC_TURN_USERNAME || ''),
+        credential: String(import.meta.env.VITE_WEBRTC_TURN_CREDENTIAL || ''),
+      },
+    ]
+    iceServersCache.at = now
+    iceServersCache.servers = servers
+    return servers
   }
-  return { iceServers }
+
+  // STUN only — same Wi‑Fi may work; different countries usually will not.
+  const stun = stunOnlyServers()
+  iceServersCache.at = now
+  iceServersCache.servers = stun
+  return stun
+}
+
+function rtcConfiguration(iceServers) {
+  return {
+    iceServers: iceServers?.length ? iceServers : stunOnlyServers(),
+    iceCandidatePoolSize: 4,
+  }
 }
 
 function formatDuration(totalSeconds) {
@@ -139,6 +238,11 @@ export default function HanaCall({
   const connectedAtRef = useRef(0)
   const prevPhaseRef = useRef('idle')
   const announcedConnectRef = useRef(false)
+  const iceRestartedRef = useRef(false)
+  const finishCallRef = useRef(async () => {})
+  const failDetailRef = useRef(null)
+  const lastIceServersRef = useRef([])
+  const phaseRef = useRef('idle')
 
   const watchIds = useMemo(() => {
     const ids = new Set()
@@ -148,6 +252,10 @@ export default function HanaCall({
     })
     return [...ids]
   }, [threadId, listenThreadIds])
+
+  useEffect(() => {
+    phaseRef.current = phase
+  }, [phase])
 
   useEffect(() => {
     callRef.current = call
@@ -249,9 +357,10 @@ export default function HanaCall({
     attachRemoteStream(remoteStreamRef.current)
   }, [attachRemoteStream])
 
-  const buildPeer = useCallback((activeCall) => {
-    const peer = new RTCPeerConnection(rtcConfiguration())
+  const buildPeer = useCallback((activeCall, iceServers) => {
+    const peer = new RTCPeerConnection(rtcConfiguration(iceServers))
     peerRef.current = peer
+    iceRestartedRef.current = false
     const remote = new MediaStream()
     attachRemoteStream(remote)
 
@@ -269,6 +378,61 @@ export default function HanaCall({
         void addChatCallCandidate(activeCall.threadId, activeCall.id, role, event.candidate.toJSON())
       }
     }
+
+    const persistFailDetail = (classified) => {
+      failDetailRef.current = classified
+      const active = callRef.current || activeCall
+      if (!active?.id || !active?.threadId) return
+      const nowIso = new Date().toISOString()
+      void updateChatCall(active.threadId, active.id, {
+        status: 'failed',
+        failCode: classified.failCode,
+        failReason: classified.failReason,
+        failAtIso: nowIso,
+        failByRole: role,
+        endedAtIso: nowIso,
+        endedBy: role,
+      })
+      void upsertChatCallHistory({
+        callId: active.id,
+        threadId: active.threadId,
+        status: 'failed',
+        callerRole: active.callerRole || role,
+        endedBy: role,
+        createdAtIso: active.createdAtIso || nowIso,
+        endedAtIso: nowIso,
+        failCode: classified.failCode,
+        failReason: classified.failReason,
+        failByRole: role,
+        type: active.type || 'video',
+      })
+    }
+
+    const handleIceFailed = () => {
+      if (peerRef.current !== peer) return
+      // One ICE restart can recover brief NAT glitches; then mark call failed.
+      if (!iceRestartedRef.current && peer.remoteDescription && peer.localDescription) {
+        iceRestartedRef.current = true
+        setError('接続しています…')
+        void peer.restartIce?.()
+        return
+      }
+      const hasTurn = (lastIceServersRef.current || []).some((server) => {
+        const urls = Array.isArray(server?.urls) ? server.urls : [server?.urls]
+        return urls.some((url) => /^turns?:/i.test(String(url || '')))
+      })
+      const classified = classifyCallFailure('ICE connection failed', {
+        iceFailed: true,
+        iceConnectionState: peer.iceConnectionState,
+        connectionState: peer.connectionState,
+        hasTurn,
+        phase: phaseRef.current,
+      })
+      persistFailDetail(classified)
+      setError(classified.userMessage)
+      void finishCallRef.current('failed')
+    }
+
     peer.onconnectionstatechange = () => {
       const state = peer.connectionState
       if (state === 'connected') {
@@ -276,7 +440,7 @@ export default function HanaCall({
       } else if (state === 'connecting') {
         setPhase((prev) => (prev === 'ringing' || prev === 'idle' ? prev : 'connecting'))
       } else if (state === 'failed') {
-        setError('接続できませんでした。別のネットワークでもう一度お試しください。')
+        handleIceFailed()
       } else if (state === 'disconnected') {
         setError('接続が不安定です…')
       }
@@ -286,7 +450,7 @@ export default function HanaCall({
       if (state === 'connected' || state === 'completed') {
         markConnected()
       } else if (state === 'failed') {
-        setError('接続できませんでした。しばらくして再試行してください。')
+        handleIceFailed()
       }
     }
 
@@ -306,43 +470,64 @@ export default function HanaCall({
     if (!navigator.mediaDevices?.getUserMedia || !globalThis.RTCPeerConnection) {
       throw new Error('この端末は通話に対応していません。HTTPSで開いているか確認してください。')
     }
-    let stream
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: { facingMode: 'user' },
-      })
-    } catch (firstError) {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-      } catch {
-        throw firstError
-      }
-    }
-    stream.getVideoTracks().forEach((track) => {
-      track.enabled = cameraOnRef.current
+    // Audio only at call start — camera permission is requested later when the
+    // user turns the camera on (avoids re-prompting cam+mic every call).
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: false,
     })
     localStreamRef.current = stream
     if (localVideoRef.current) localVideoRef.current.srcObject = stream
     return stream
   }, [])
 
-  const fail = useCallback((reason) => {
+  const fail = useCallback((reason, extra = {}) => {
     stopCallSounds()
-    let message = getFirebaseErrorMessage(reason)
-      || reason?.message
-      || '通話を開始できませんでした。'
-    const name = String(reason?.name || '')
-    if (/NotAllowedError|PermissionDeniedError/i.test(name) || /permission|Permission|許可/i.test(message)) {
-      message = 'マイク（とカメラ）の許可が必要です。端末の設定でHana Mediaboxを許可してください。'
-    } else if (/NotFoundError/i.test(name)) {
-      message = 'マイクが見つかりません。イヤホンや別の端末でお試しください。'
+    const classified = classifyCallFailure(reason, {
+      ...extra,
+      phase: phaseRef.current,
+    })
+    failDetailRef.current = classified
+    const active = callRef.current
+    if (active?.id && active?.threadId) {
+      const nowIso = new Date().toISOString()
+      void updateChatCall(active.threadId, active.id, {
+        status: 'failed',
+        failCode: classified.failCode,
+        failReason: classified.failReason,
+        failAtIso: nowIso,
+        failByRole: role,
+        endedAtIso: nowIso,
+        endedBy: role,
+      })
+      void upsertChatCallHistory({
+        callId: active.id,
+        threadId: active.threadId,
+        status: 'failed',
+        callerRole: active.callerRole || role,
+        endedBy: role,
+        createdAtIso: active.createdAtIso || nowIso,
+        endedAtIso: nowIso,
+        failCode: classified.failCode,
+        failReason: classified.failReason,
+        failByRole: role,
+        type: active.type || 'video',
+      })
+      void postChatCallLog({
+        threadId: active.threadId,
+        callId: active.id,
+        status: 'failed',
+        callerRole: active.callerRole || role,
+        endedBy: role,
+        durationSec: 0,
+        answeredAtIso: active.answeredAtIso || null,
+      }).catch(() => {})
     }
-    setError(message)
+    setError(classified.userMessage)
     stopMedia()
     setPhase('idle')
     setCall(null)
-  }, [stopMedia])
+  }, [role, stopMedia])
 
   useEffect(() => {
     if (!error || phase !== 'idle') return undefined
@@ -355,21 +540,36 @@ export default function HanaCall({
     unlockCallSounds()
     onBeforeStart?.()
     setError('')
+    failDetailRef.current = null
     setPhase('preparing')
     setCameraOn(false)
     cameraOnRef.current = false
+    let createdId = ''
     try {
+      const iceServers = await resolveIceServers()
+      lastIceServersRef.current = iceServers
       await requestMedia()
       const callId = await createChatCall({ threadId, callerRole: role, type: 'video' })
+      createdId = callId
       const activeCall = {
         id: callId,
         threadId,
         callerRole: role,
         type: 'video',
         status: 'preparing',
+        createdAtIso: new Date().toISOString(),
       }
       setCall(activeCall)
-      const peer = buildPeer(activeCall)
+      callRef.current = activeCall
+      void upsertChatCallHistory({
+        callId,
+        threadId,
+        status: 'ringing',
+        callerRole: role,
+        createdAtIso: activeCall.createdAtIso,
+        type: 'video',
+      })
+      const peer = buildPeer(activeCall, iceServers)
       const offer = await peer.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
       await peer.setLocalDescription(offer)
       await updateChatCall(threadId, callId, {
@@ -378,7 +578,16 @@ export default function HanaCall({
       })
       setPhase('calling')
     } catch (reason) {
-      fail(reason)
+      if (createdId) {
+        callRef.current = {
+          id: createdId,
+          threadId,
+          callerRole: role,
+          type: 'video',
+          createdAtIso: new Date().toISOString(),
+        }
+      }
+      fail(reason, { phase: 'preparing' })
     }
   }, [buildPeer, fail, onBeforeStart, phase, requestMedia, role, threadId])
 
@@ -387,12 +596,15 @@ export default function HanaCall({
     unlockCallSounds()
     stopCallSounds()
     setError('')
+    failDetailRef.current = null
     setPhase('preparing')
     setCameraOn(false)
     cameraOnRef.current = false
     try {
+      const iceServers = await resolveIceServers()
+      lastIceServersRef.current = iceServers
       await requestMedia()
-      const peer = buildPeer(call)
+      const peer = buildPeer(call, iceServers)
       await peer.setRemoteDescription(new RTCSessionDescription(call.offer))
       await flushCandidates()
       const answer = await peer.createAnswer()
@@ -404,8 +616,7 @@ export default function HanaCall({
       })
       setPhase('connecting')
     } catch (reason) {
-      void updateChatCall(call.threadId, call.id, { status: 'failed' })
-      fail(reason)
+      fail(reason, { phase: 'accepting' })
     }
   }, [buildPeer, call, fail, flushCandidates, requestMedia])
 
@@ -420,6 +631,7 @@ export default function HanaCall({
       const durationSec = (status === 'ended' && startMs)
         ? Math.max(0, Math.floor((Date.now() - startMs) / 1000))
         : 0
+      const detail = status === 'failed' ? failDetailRef.current : null
       try {
         await updateChatCall(active.threadId, active.id, {
           status,
@@ -427,6 +639,14 @@ export default function HanaCall({
           endedBy: role,
           durationSec,
           ...(answeredAt ? { answeredAtIso: answeredAt } : {}),
+          ...(detail
+            ? {
+                failCode: detail.failCode,
+                failReason: detail.failReason,
+                failByRole: role,
+                failAtIso: new Date().toISOString(),
+              }
+            : {}),
         })
         await postChatCallLog({
           threadId: active.threadId,
@@ -437,13 +657,30 @@ export default function HanaCall({
           durationSec,
           answeredAtIso: answeredAt,
         })
+        await upsertChatCallHistory({
+          callId: active.id,
+          threadId: active.threadId,
+          status,
+          durationSec,
+          callerRole: active.callerRole || role,
+          endedBy: role,
+          answeredAtIso: answeredAt,
+          createdAtIso: active.createdAtIso || new Date().toISOString(),
+          endedAtIso: new Date().toISOString(),
+          failCode: detail?.failCode || '',
+          failReason: detail?.failReason || '',
+          failByRole: detail ? role : '',
+          type: active.type || 'video',
+        })
       } catch {
         // Still tear down local media.
       }
     }
+    failDetailRef.current = null
     if (wasLive) playCallEnded()
     reset()
   }, [reset, role])
+  finishCallRef.current = finishCall
 
   useEffect(() => {
     if (watchIds.length === 0) return undefined
@@ -466,6 +703,21 @@ export default function HanaCall({
               durationSec: next.durationSec || 0,
               answeredAtIso: next.answeredAtIso || null,
             }).catch(() => {})
+            void upsertChatCallHistory({
+              callId: next.id,
+              threadId: id,
+              status: next.status,
+              durationSec: next.durationSec || 0,
+              callerRole: next.callerRole || role,
+              endedBy: next.endedBy || '',
+              answeredAtIso: next.answeredAtIso || null,
+              createdAtIso: next.createdAtIso || new Date().toISOString(),
+              endedAtIso: next.endedAtIso || new Date().toISOString(),
+              failCode: next.failCode || '',
+              failReason: next.failReason || '',
+              failByRole: next.failByRole || '',
+              type: next.type || 'video',
+            }).catch(() => {})
             playCallEnded()
             reset()
             return
@@ -478,7 +730,7 @@ export default function HanaCall({
                 stopCallSounds()
                 setPhase('connecting')
               })
-              .catch(fail)
+              .catch((err) => fail(err, { phase: 'answer' }))
           }
           return
         }
@@ -498,7 +750,9 @@ export default function HanaCall({
         }
       },
       (err) => {
-        setError(getFirebaseErrorMessage(err) || '通話の監視に失敗しました。')
+        // Keep user-facing copy soft; detail goes nowhere until a call id exists.
+        setError(USER_FAIL_GENERIC)
+        console.warn('[call] subscribe failed', err)
       },
     ))
     return () => unsubs.forEach((unsub) => unsub())
@@ -596,7 +850,10 @@ export default function HanaCall({
       setCameraOn(true)
       cameraOnRef.current = true
     } catch (reason) {
-      setError(getFirebaseErrorMessage(reason) || 'カメラを起動できませんでした。')
+      const classified = classifyCallFailure(reason, { phase: 'camera' })
+      setError(classified.failCode === 'permission'
+        ? 'カメラの許可が必要です。設定から許可してください。'
+        : 'カメラを起動できませんでした。')
     }
   }
 
