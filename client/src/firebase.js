@@ -1726,7 +1726,7 @@ export async function createChatCall({ threadId, callerRole, type }) {
       callerRole,
       calleeRole: callerRole === 'hana' ? 'guest' : 'hana',
       type: type === 'video' ? 'video' : 'voice',
-      status: 'preparing',
+      status: 'ringing',
       offer: null,
       answer: null,
       createdAt: serverTimestamp(),

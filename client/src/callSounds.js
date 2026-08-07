@@ -187,9 +187,9 @@ export function startIncomingRingtone() {
   loopTimer = window.setInterval(burst, 2800)
 }
 
-export function startOutgoingRingback() {
+export function startOutgoingRingback(force = false) {
   unlockCallSounds()
-  if (activeKind === 'outgoing') return
+  if (!force && activeKind === 'outgoing') return
   stopLoop()
   activeKind = 'outgoing'
   const burst = () => {
