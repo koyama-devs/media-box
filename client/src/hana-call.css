@@ -63,6 +63,50 @@
   text-align: center;
 }
 
+.hana-call-toast-error p {
+  margin: 0;
+}
+
+.hana-call-toast-error.is-permission {
+  text-align: left;
+  padding: 14px 16px 12px;
+}
+
+.hana-call-perm-help {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.hana-call-perm-help ol {
+  margin: 0;
+  padding-left: 1.2em;
+  color: #fecaca;
+  opacity: 0.95;
+}
+
+.hana-call-perm-help li {
+  margin: 0.2em 0;
+}
+
+.hana-call-perm-help button {
+  appearance: none;
+  border: 1px solid rgba(254, 202, 202, 0.35);
+  border-radius: 10px;
+  background: rgba(254, 202, 202, 0.12);
+  color: #fff1f2;
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.hana-call-perm-help button.is-ghost {
+  background: transparent;
+  border-color: transparent;
+  opacity: 0.8;
+}
+
 .hana-call-overlay {
   position: fixed;
   inset: 0;

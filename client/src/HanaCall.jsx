@@ -25,8 +25,9 @@ const RING_MAX_AGE_MS = 90_000
 const ICE_CACHE_TTL_MS = 2 * 60 * 1000
 
 const USER_FAIL_GENERIC = '通話を接続できませんでした。もう一度お試しください。'
-const USER_FAIL_PERMISSION = 'マイクの許可が必要です。設定から許可してもう一度お試しください。'
+const USER_FAIL_PERMISSION = 'マイクがブロックされています。下の手順で許可してから、もう一度通話してください。'
 const USER_FAIL_DEVICE = 'マイクが見つかりません。別の端末でもう一度お試しください。'
+const USER_FAIL_INSECURE = '安全な接続（HTTPS）で開いてください。'
 
 function classifyCallFailure(reason, extra = {}) {
   const name = String(reason?.name || extra.name || '')
@@ -43,11 +44,11 @@ function classifyCallFailure(reason, extra = {}) {
   let failCode = 'unknown'
   if (extra.iceFailed || /ice|turn|nat|接続できません|回線|Connecting timeout/i.test(rawMessage)) {
     failCode = 'ice_failed'
-  } else if (/NotAllowedError|PermissionDeniedError/i.test(name) || /permission|許可/i.test(rawMessage)) {
+  } else if (/NotAllowedError|PermissionDeniedError/i.test(name) || /permission|許可|ブロック/i.test(rawMessage)) {
     failCode = 'permission'
   } else if (/NotFoundError/i.test(name) || /マイクが見つかり/i.test(rawMessage)) {
     failCode = 'device'
-  } else if (/NotSupported|HTTPS|対応していません/i.test(rawMessage) || /NotSupportedError/i.test(name)) {
+  } else if (/NotSupported|HTTPS|対応していません|安全な接続/i.test(rawMessage) || /NotSupportedError/i.test(name)) {
     failCode = 'unsupported'
   } else if (/Firebase|firestore|network|Failed to fetch|signaling|candidate/i.test(rawMessage)) {
     failCode = 'signaling'
@@ -70,6 +71,8 @@ function classifyCallFailure(reason, extra = {}) {
     ? USER_FAIL_PERMISSION
     : failCode === 'device'
       ? USER_FAIL_DEVICE
+      : failCode === 'unsupported'
+        ? ( /HTTPS|安全な接続/i.test(rawMessage) ? USER_FAIL_INSECURE : rawMessage || USER_FAIL_GENERIC )
       : failCode === 'ice_failed'
         ? '通話回線を接続できませんでした。Wi‑Fiを切り替えるか、もう一度お試しください。'
         : USER_FAIL_GENERIC
@@ -266,6 +269,7 @@ export default function HanaCall({
   const [call, setCall] = useState(null)
   const [phase, setPhase] = useState('idle')
   const [error, setError] = useState('')
+  const [permBlocked, setPermBlocked] = useState(false)
   const [micOn, setMicOn] = useState(true)
   const [cameraOn, setCameraOn] = useState(false)
   const [elapsedSec, setElapsedSec] = useState(0)
@@ -530,24 +534,19 @@ export default function HanaCall({
   }, [addRemoteCandidate, attachRemoteStream, handleIceFailed, markConnected, role])
 
   const requestMedia = useCallback(async () => {
+    if (!window.isSecureContext) {
+      throw new Error(USER_FAIL_INSECURE)
+    }
     if (!navigator.mediaDevices?.getUserMedia || !globalThis.RTCPeerConnection) {
       throw new Error('この端末は通話に対応していません。HTTPSで開いているか確認してください。')
     }
-    // One mic+camera permission grant; camera tracks stay disabled until toggle.
-    let stream
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: { facingMode: 'user' },
-      })
-    } catch {
-      // Fallback audio-only if video permission/device fails.
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: false,
-      })
-    }
-    stream.getVideoTracks().forEach((track) => { track.enabled = false })
+    // Voice-only at call start. Camera is requested later on toggle — a blocked
+    // camera must never prevent the mic prompt on Android Chrome.
+    // Must be started synchronously from the call/accept tap (no prior await).
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: false,
+    })
     localStreamRef.current = stream
     if (localVideoRef.current) localVideoRef.current.srcObject = stream
     return stream
@@ -557,7 +556,7 @@ export default function HanaCall({
     stopCallSounds()
     const classified = classifyCallFailure(reason, {
       ...extra,
-      phase: phaseRef.current,
+      phase: extra.phase || phaseRef.current,
     })
     failDetailRef.current = classified
     const active = callRef.current
@@ -596,31 +595,55 @@ export default function HanaCall({
       }).catch(() => {})
     }
     setError(classified.userMessage)
+    if (classified.failCode === 'permission') setPermBlocked(true)
     stopMedia()
     setPhase('idle')
     setCall(null)
   }, [role, stopMedia])
 
   useEffect(() => {
-    if (!error || phase !== 'idle') return undefined
+    if (!error || phase !== 'idle' || permBlocked) return undefined
     const timer = window.setTimeout(() => setError(''), 8000)
     return () => window.clearTimeout(timer)
-  }, [error, phase])
+  }, [error, phase, permBlocked])
+
+  const retryMicPermission = useCallback(async () => {
+    setError('')
+    try {
+      if (!window.isSecureContext) throw new Error(USER_FAIL_INSECURE)
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      stream.getTracks().forEach((track) => track.stop())
+      setPermBlocked(false)
+      setError('マイクを許可しました。もう一度「通話」を押してください。')
+    } catch (reason) {
+      const classified = classifyCallFailure(reason, { phase: 'permission-retry' })
+      setPermBlocked(true)
+      setError(classified.userMessage)
+    }
+  }, [])
 
   const startCall = useCallback(async () => {
     if (!threadId || phase !== 'idle') return
-    unlockCallSounds()
-    startOutgoingRingback(true)
+    // Start getUserMedia in the same tap turn — before any await / audio unlock.
+    const mediaPromise = requestMedia()
     onBeforeStart?.()
     setError('')
+    setPermBlocked(false)
     failDetailRef.current = null
     setCameraOn(false)
     cameraOnRef.current = false
     let createdId = ''
     try {
+      // Wait for mic first. Do not ring / write Firestore until mic is granted,
+      // otherwise Android may deny while ringback AudioContext is starting.
+      await mediaPromise
+      unlockCallSounds()
+      startOutgoingRingback(true)
       const createdAtIso = new Date().toISOString()
-      // 1) Ring the other side FIRST — do not wait for mic / TURN / SDP.
-      const callId = await createChatCall({ threadId, callerRole: role, type: 'video' })
+      const [callId, iceServers] = await Promise.all([
+        createChatCall({ threadId, callerRole: role, type: 'video' }),
+        resolveIceServers(),
+      ])
       createdId = callId
       const activeCall = {
         id: callId,
@@ -642,19 +665,12 @@ export default function HanaCall({
         createdAtIso,
         type: 'video',
       })
-
-      // 2) Prepare media + offer in the background while they already hear ring.
-      const [iceServers] = await Promise.all([
-        resolveIceServers(),
-        requestMedia(),
-      ])
-      if (phaseRef.current === 'idle' || callRef.current?.id !== callId) return
+      if (callRef.current?.id !== callId) return
       lastIceServersRef.current = iceServers
-      startOutgoingRingback(true)
       const peer = buildPeer(activeCall, iceServers)
       const offer = await peer.createOffer()
       await peer.setLocalDescription(offer)
-      if (phaseRef.current === 'idle' || callRef.current?.id !== callId) return
+      if (callRef.current?.id !== callId) return
       await updateChatCall(threadId, callId, {
         offer: { type: offer.type, sdp: offer.sdp },
         status: 'ringing',
@@ -670,28 +686,34 @@ export default function HanaCall({
           createdAtIso: new Date().toISOString(),
         }
       }
-      fail(reason, { phase: 'preparing' })
+      fail(reason, { phase: 'calling' })
     }
   }, [buildPeer, fail, onBeforeStart, phase, requestMedia, role, threadId])
 
   const acceptCall = useCallback(async () => {
     if (!call?.threadId || !call?.id) return
-    unlockCallSounds()
-    stopCallSounds()
+    const mediaPromise = requestMedia()
     setError('')
+    setPermBlocked(false)
     failDetailRef.current = null
     const answeredAtIso = new Date().toISOString()
-    // Tell caller "picked up" without marking fully connected yet — writing
-    // status=connected before the answer SDP made the caller's ICE fail.
     setPhase('connecting')
     setCall((prev) => (prev ? { ...prev, answeredAtIso } : prev))
+    setCameraOn(false)
+    cameraOnRef.current = false
+    try {
+      await mediaPromise
+      unlockCallSounds()
+      stopCallSounds()
+    } catch (reason) {
+      fail(reason, { phase: 'accepting' })
+      return
+    }
     try {
       await updateChatCall(call.threadId, call.id, { answeredAtIso })
     } catch {
       // Continue media handshake.
     }
-    setCameraOn(false)
-    cameraOnRef.current = false
     try {
       let offer = callRef.current?.offer || call.offer
       if (!offer) {
@@ -705,10 +727,7 @@ export default function HanaCall({
       if (!offer) {
         throw new Error('相手の通話準備が完了しませんでした。もう一度お試しください。')
       }
-      const [iceServers] = await Promise.all([
-        resolveIceServers(),
-        requestMedia(),
-      ])
+      const iceServers = await resolveIceServers()
       if (!hasTurnServer(iceServers)) {
         console.warn('[call] no TURN servers — cross-country calls likely to fail')
       }
@@ -718,7 +737,6 @@ export default function HanaCall({
       await flushCandidates()
       const answer = await peer.createAnswer()
       await peer.setLocalDescription(answer)
-      // Answer + connected together so caller can apply SDP immediately.
       await updateChatCall(call.threadId, call.id, {
         answer: { type: answer.type, sdp: answer.sdp },
         status: 'connected',
@@ -984,16 +1002,57 @@ export default function HanaCall({
 
   const toggleCamera = () => {
     const next = !cameraOn
-    const tracks = localStreamRef.current?.getVideoTracks() || []
-    if (tracks.length === 0) {
-      if (next) {
-        setError('カメラを起動できませんでした。')
-      }
+    const existing = localStreamRef.current?.getVideoTracks() || []
+    if (!next) {
+      existing.forEach((track) => { track.enabled = false })
+      setCameraOn(false)
+      cameraOnRef.current = false
       return
     }
-    tracks.forEach((track) => { track.enabled = next })
-    setCameraOn(next)
-    cameraOnRef.current = next
+    if (existing.length > 0) {
+      existing.forEach((track) => { track.enabled = true })
+      setCameraOn(true)
+      cameraOnRef.current = true
+      return
+    }
+    // Acquire camera on demand (own user gesture from the toggle tap).
+    void (async () => {
+      try {
+        const cam = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: 'user' },
+        })
+        const track = cam.getVideoTracks()[0]
+        if (!track || !localStreamRef.current) {
+          cam.getTracks().forEach((t) => t.stop())
+          setError('カメラを起動できませんでした。')
+          return
+        }
+        track.enabled = true
+        localStreamRef.current.addTrack(track)
+        const peer = peerRef.current
+        if (peer) {
+          peer.addTrack(track, localStreamRef.current)
+          try {
+            const offer = await peer.createOffer()
+            await peer.setLocalDescription(offer)
+            const active = callRef.current
+            if (active?.threadId && active?.id) {
+              await updateChatCall(active.threadId, active.id, {
+                offer: { type: offer.type, sdp: offer.sdp },
+              })
+            }
+          } catch {
+            // Voice call still works without renegotiation.
+          }
+        }
+        if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current
+        setCameraOn(true)
+        cameraOnRef.current = true
+      } catch {
+        setError('カメラの許可が必要です。サイト設定から許可してください。')
+      }
+    })()
   }
 
   const showOverlay = phase !== 'idle'
@@ -1023,8 +1082,29 @@ export default function HanaCall({
     <>
       {buttonsHost && startButtons ? createPortal(startButtons, buttonsHost) : startButtons}
 
-      {error && !showOverlay ? createPortal(
-        <p className="hana-call-toast-error" role="alert">{error}</p>,
+      {(error || permBlocked) && !showOverlay ? createPortal(
+        <div className={`hana-call-toast-error${permBlocked ? ' is-permission' : ''}`} role="alert">
+          <p>{error || USER_FAIL_PERMISSION}</p>
+          {permBlocked ? (
+            <div className="hana-call-perm-help">
+              <ol>
+                <li>Chrome右上「︙」→「設定」→「サイトの設定」</li>
+                <li>「マイク」を「許可」にする</li>
+                <li>このページを再読み込みする</li>
+              </ol>
+              <button type="button" onClick={() => void retryMicPermission()}>
+                マイク許可を再試行
+              </button>
+              <button
+                type="button"
+                className="is-ghost"
+                onClick={() => { setPermBlocked(false); setError('') }}
+              >
+                閉じる
+              </button>
+            </div>
+          ) : null}
+        </div>,
         document.body,
       ) : null}
 
