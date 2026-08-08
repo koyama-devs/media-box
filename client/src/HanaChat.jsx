@@ -72,7 +72,10 @@ import {
     toggleChatReaction,
     translateChatMessage,
     updateChatMessage,
-    uploadChatImage
+    uploadChatAttachment,
+    getChatMessageAttachment,
+    formatChatFileSize,
+    classifyChatAttachment,
 } from './firebase'
 import FlowerRainLayer, {
     CHAT_PARTY_REACTION,
@@ -107,7 +110,7 @@ function isOwnerAssistableGuestMessage(message) {
   if (!message || message.deleted || message.pending) return false
   const sender = message.sender || message.role
   if (sender !== 'guest') return false
-  if (message.sticker || message.imageUrl || message.effect) return false
+  if (message.sticker || message.imageUrl || message.fileUrl || message.effect) return false
   return Boolean(String(message.rawText || message.text || '').trim())
 }
 const TYPING_IDLE_MS = 3_000
@@ -205,6 +208,8 @@ function mergeServerMessagesWithPending(server, previous) {
       if (String(row.sticker || '') !== String(item.sticker || '')) return false
       if (String(row.effect || '') !== String(item.effect || '')) return false
       if (Boolean(row.imageUrl) !== Boolean(item.imageUrl)) return false
+      if (Boolean(row.fileUrl) !== Boolean(item.fileUrl)) return false
+      if (String(row.fileKind || '') !== String(item.fileKind || '')) return false
       if (pendingTs) {
         const rowTs = Date.parse(row.createdAtIso || row.createdAt || '') || 0
         if (rowTs && Math.abs(rowTs - pendingTs) > 90_000) return false
@@ -1858,6 +1863,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         effect: m.effect || '',
         effectEmoji: m.effectEmoji || '',
         imageUrl: m.imageUrl || '',
+        fileUrl: m.fileUrl || '',
+        fileName: m.fileName || '',
+        fileMime: m.fileMime || '',
+        fileKind: m.fileKind || '',
+        fileSize: m.fileSize || 0,
         createdAt: m.createdAt,
         editedAt: m.editedAt,
         deleted: m.deleted,
@@ -2471,6 +2481,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     const raw = String(message.rawText || message.text || '').trim()
     const replyText = raw
       || (message.imageUrl ? '写真' : '')
+      || (message.fileKind === 'video' || String(message.fileMime || '').startsWith('video/')
+        ? '動画'
+        : '')
       || (message.sticker ? 'スタンプ' : '')
       || (message.fileUrl ? (message.fileName || 'ファイル') : '')
       || 'メッセージ'
@@ -2628,13 +2641,17 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     }
   }
 
-  /** Pick/take photo(s) → compress → Storage → chat message(s) with imageUrl. */
-  const handleSendImage = async (fileOrFiles) => {
+  /** Pick photo/video → Storage → chat message(s). */
+  const handleSendMedia = async (fileOrFiles) => {
     const files = (
       Array.isArray(fileOrFiles) || (typeof FileList !== 'undefined' && fileOrFiles instanceof FileList)
         ? [...fileOrFiles]
         : [fileOrFiles]
-    ).filter((file) => file && String(file.type || '').startsWith('image/'))
+    ).filter((file) => {
+      if (!file) return false
+      const kind = classifyChatAttachment(file)
+      return kind === 'image' || kind === 'video'
+    })
     if (!files.length || busy) return
     if (actingAsOwner && !activeThreadId) {
       setError('返信する相手を選んでください。')
@@ -2668,6 +2685,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       for (const file of batch) {
         const pendingId = nextStickerPendingId()
         const localUrl = URL.createObjectURL(file)
+        const kind = classifyChatAttachment(file)
+        const label = kind === 'video' ? '動画' : '写真'
         try {
           setHanaMessages((prev) => [
             ...prev,
@@ -2678,9 +2697,14 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               uploading: true,
               role,
               sender: role,
-              text: '写真',
-              rawText: '写真',
-              imageUrl: localUrl,
+              text: label,
+              rawText: label,
+              imageUrl: kind === 'image' ? localUrl : '',
+              fileUrl: kind === 'video' ? localUrl : '',
+              fileKind: kind,
+              fileName: file.name || label,
+              fileMime: String(file.type || ''),
+              fileSize: Math.max(0, Number(file.size) || 0),
               createdAt: new Date().toISOString(),
               createdAtIso: new Date().toISOString(),
               replyTo: null,
@@ -2688,16 +2712,34 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           ])
           scrollToLatestRef.current()
 
-          const imageUrl = await uploadChatImage(threadId, file)
+          const uploaded = await uploadChatAttachment(threadId, file)
+          const imageUrl = uploaded.kind === 'image' ? uploaded.url : ''
+          const fileUrl = uploaded.kind === 'image' ? '' : uploaded.url
           setHanaMessages((prev) => prev.map((m) => (
-            m.id === pendingId ? { ...m, imageUrl, uploading: false } : m
+            m.id === pendingId
+              ? {
+                  ...m,
+                  imageUrl,
+                  fileUrl,
+                  fileKind: uploaded.kind,
+                  fileName: uploaded.fileName,
+                  fileMime: uploaded.fileMime,
+                  fileSize: uploaded.fileSize,
+                  uploading: false,
+                }
+              : m
           )))
           URL.revokeObjectURL(localUrl)
           const serverId = await sendChatMessage({
             threadId,
-            text: '写真',
+            text: label,
             sender: role,
-            imageUrl,
+            ...(imageUrl ? { imageUrl } : {}),
+            ...(fileUrl ? { fileUrl } : {}),
+            fileKind: uploaded.kind,
+            fileName: uploaded.fileName,
+            fileMime: uploaded.fileMime,
+            fileSize: uploaded.fileSize,
             clientId: pendingId,
             ...guestMeta,
           })
@@ -2711,13 +2753,13 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           URL.revokeObjectURL(localUrl)
           setHanaMessages((prev) => prev.filter((m) => m.id !== pendingId))
           if (batch.length === 1) {
-            setError(getFirebaseErrorMessage(err) || err?.message || '写真を送れませんでした。')
+            setError(getFirebaseErrorMessage(err) || err?.message || 'メディアを送れませんでした。')
           }
         }
       }
       if (!actingAsOwner) setChannel('human')
       if (failed > 0 && batch.length > 1) {
-        setError(`${failed}枚の写真を送れませんでした。`)
+        setError(`${failed}件のメディアを送れませんでした。`)
       }
     } finally {
       setBusy(false)
@@ -3694,7 +3736,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               const isOwn = (message.sender || message.role) === ownSender
                 || (!actingAsOwner && !guestOnHuman && message.role === 'guest')
               const showsSticker = !message.deleted && isHanaSticker(message.sticker)
-              const showsImage = !message.deleted && Boolean(message.imageUrl)
+              const attachment = !message.deleted ? getChatMessageAttachment(message) : null
+              const showsImage = Boolean(attachment && attachment.kind === 'image')
+              const showsVideo = Boolean(attachment && attachment.kind === 'video')
+              const showsFile = Boolean(attachment && attachment.kind === 'file')
+              const showsMedia = showsImage || showsVideo || showsFile
               const effectEmoji = !message.deleted && message.effect
                 ? (String(message.effectEmoji || '').trim()
                   || EMOTION_MOMENTS.find((item) => item.id === message.effect)?.emoji
@@ -3747,14 +3793,14 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                       <ChatSwipeBubble
                         className={`${sideClass} is-${message.role}`}
                         canReply={!message.deleted}
-                        canEdit={mutable && !showsSticker && !showsEffect && !showsImage}
+                        canEdit={mutable && !showsSticker && !showsEffect && !showsMedia}
                         canDelete={mutable}
                         canReact={!message.deleted}
                         showFlowerReact={!message.deleted && !isOwn}
                         defaultReaction={defaultReaction}
                         reactions={message.reactions || {}}
                         reactorId={reactorId}
-                        copyText={message.deleted || showsImage ? '' : (message.rawText || message.text || '')}
+                        copyText={message.deleted || showsMedia ? '' : (message.rawText || message.text || '')}
                         onCopy={notifyCopied}
                         onReply={() => startReply(message)}
                         onEdit={() => startEdit(message)}
@@ -3764,7 +3810,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                         onEffect={handleLocalEffect}
                       >
                         <div
-                          className={`hana-chat-bubble ${sideClass} is-${message.role}${message.kind === 'human-switch' || message.kind === 'intro' ? ' is-notice' : ''}${message.deleted ? ' is-deleted' : ''}${showsSticker ? ' is-sticker' : ''}${showsEffect ? ' is-effect' : ''}${showsImage ? ' is-image' : ''}${message.uploading ? ' is-uploading' : ''}`}
+                          className={`hana-chat-bubble ${sideClass} is-${message.role}${message.kind === 'human-switch' || message.kind === 'intro' ? ' is-notice' : ''}${message.deleted ? ' is-deleted' : ''}${showsSticker ? ' is-sticker' : ''}${showsEffect ? ' is-effect' : ''}${showsImage ? ' is-image' : ''}${showsVideo ? ' is-video' : ''}${showsFile ? ' is-file' : ''}${message.uploading ? ' is-uploading' : ''}`}
                         >
                           {message.replyTo ? (
                             <div className="hana-chat-quote">
@@ -3785,21 +3831,51 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                                 event.stopPropagation()
                                 if (message.uploading) return
                                 setPreviewImage({
-                                  src: message.imageUrl,
-                                  alt: message.text || '写真',
+                                  src: attachment.url,
+                                  alt: attachment.fileName || message.text || '写真',
                                 })
                               }}
                             >
                               <img
                                 className="hana-chat-image"
-                                src={message.imageUrl}
-                                alt={message.text || '写真'}
+                                src={attachment.url}
+                                alt={attachment.fileName || message.text || '写真'}
                                 loading="lazy"
                               />
                               {message.uploading ? (
                                 <span className="hana-chat-image-status">送信中…</span>
                               ) : null}
                             </button>
+                          ) : showsVideo ? (
+                            <div className="hana-chat-video-wrap" data-no-bubble-press="true">
+                              <video
+                                className="hana-chat-video"
+                                src={attachment.url}
+                                controls
+                                playsInline
+                                preload="metadata"
+                              />
+                              {message.uploading ? (
+                                <span className="hana-chat-image-status">送信中…</span>
+                              ) : null}
+                            </div>
+                          ) : showsFile ? (
+                            <a
+                              className="hana-chat-file-card"
+                              href={attachment.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              download={attachment.fileName || true}
+                              data-no-bubble-press="true"
+                            >
+                              <span className="hana-chat-file-icon" aria-hidden="true">📄</span>
+                              <span className="hana-chat-file-meta">
+                                <strong className="hana-chat-file-name">{attachment.fileName}</strong>
+                                <span className="hana-chat-file-sub">
+                                  {attachment.fileSize ? formatChatFileSize(attachment.fileSize) : 'ファイル'}
+                                </span>
+                              </span>
+                            </a>
                           ) : showsEffect ? (
                             <div className="hana-chat-effect-msg">
                               <span className="hana-chat-effect-msg-emoji" aria-hidden="true">{effectEmoji}</span>
@@ -4072,14 +4148,14 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 <input
                   ref={imageInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/*,video/*"
                   multiple
                   className="sr-only"
                   tabIndex={-1}
                   aria-hidden="true"
                   onChange={(event) => {
                     const picked = event.target.files
-                    if (picked?.length) void handleSendImage(picked)
+                    if (picked?.length) void handleSendMedia(picked)
                   }}
                 />
               ) : null}
@@ -4307,8 +4383,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               <button
                 type="button"
                 className="hana-chat-composer-action is-camera"
-                title="写真を送る（複数可）"
-                aria-label="写真を送る（複数可）"
+                title="写真・動画を送る（複数可）"
+                aria-label="写真・動画を送る（複数可）"
                 disabled={busy || (actingAsOwner && !activeThreadId)}
                 onMouseDown={(event) => event.preventDefault()}
                 onPointerDown={(event) => event.preventDefault()}

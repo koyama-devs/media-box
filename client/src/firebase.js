@@ -986,6 +986,12 @@ export function classifyChatAttachment(fileOrMime) {
   ).trim().toLowerCase()
   if (mime.startsWith('image/')) return 'image'
   if (mime.startsWith('video/')) return 'video'
+  // Some Android pickers omit mime — fall back to extension.
+  if (typeof fileOrMime !== 'string') {
+    const name = String(fileOrMime?.name || '').toLowerCase()
+    if (/\.(jpe?g|png|gif|webp|heic|heif|bmp)$/i.test(name)) return 'image'
+    if (/\.(mp4|mov|webm|m4v|3gp|mkv)$/i.test(name)) return 'video'
+  }
   return 'file'
 }
 
@@ -1036,9 +1042,12 @@ export async function uploadChatAttachment(threadId, file) {
 
   const stamp = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
   const objectRef = storageRef(storage, `chat-files/${tid}/${stamp}_${fileName}`)
-  await uploadBytes(objectRef, file, { contentType: fileMime })
+  const contentType = fileMime && fileMime !== 'application/octet-stream'
+    ? fileMime
+    : (kind === 'video' ? 'video/mp4' : fileMime)
+  await uploadBytes(objectRef, file, { contentType })
   const url = await getDownloadURL(objectRef)
-  return { url, kind, fileName, fileMime, fileSize }
+  return { url, kind, fileName, fileMime: contentType, fileSize }
 }
 
 /** Resolve a friendly guest display name from thread id / guestKey / stored label. */
