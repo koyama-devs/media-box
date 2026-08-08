@@ -4284,7 +4284,47 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                         />
                       </svg>
                     ) : (
-                      '✨'
+                      <svg
+                        className="hana-chat-sticker-face"
+                        viewBox="0 0 24 24"
+                        width="28"
+                        height="28"
+                        aria-hidden="true"
+                        focusable="false"
+                      >
+                        {/* Soft Hana smile — same palette as stickers */}
+                        <circle cx="12" cy="13" r="8.2" fill="#ffe8dc" />
+                        <path
+                          d="M4.2 13c.45-7.1 4.3-10.6 7.8-10.6s7.35 3.5 7.8 10.6c-1.05-2.45-3.1-3.9-7.8-3.9S5.25 10.55 4.2 13z"
+                          fill="#3a2420"
+                        />
+                        <path
+                          d="M9 6.15c1.05 2.1 1.85 3.15 2.25 4.55.4-1.9.85-3.35 1.9-4.85-1.5-.4-2.95-.35-4.15.3z"
+                          fill="#2a1814"
+                        />
+                        <ellipse
+                          cx="18.15"
+                          cy="7.15"
+                          rx="2.25"
+                          ry="1.55"
+                          transform="rotate(28 18.15 7.15)"
+                          fill="#e89aaa"
+                        />
+                        <circle cx="18.75" cy="6.35" r="1" fill="#f2b8c4" />
+                        <circle cx="7.85" cy="14.7" r="1.65" fill="#f4a89a" opacity="0.55" />
+                        <circle cx="16.15" cy="14.7" r="1.65" fill="#f4a89a" opacity="0.55" />
+                        <ellipse cx="9.25" cy="12.55" rx="1.2" ry="1.45" fill="#2a1814" />
+                        <ellipse cx="14.75" cy="12.55" rx="1.2" ry="1.45" fill="#2a1814" />
+                        <circle cx="9.6" cy="12.1" r="0.38" fill="#fff" />
+                        <circle cx="15.1" cy="12.1" r="0.38" fill="#fff" />
+                        <path
+                          d="M10.35 15.65c.55 1.15 2.75 1.15 3.3 0"
+                          stroke="#c47a6e"
+                          strokeWidth="1.2"
+                          strokeLinecap="round"
+                          fill="none"
+                        />
+                      </svg>
                     )}
                   </button>
                     )

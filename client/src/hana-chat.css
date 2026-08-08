@@ -3505,8 +3505,8 @@ body.hana-chat-scroll-lock #root {
 }
 
 .hana-chat-composer-field .hana-chat-sticker-trigger {
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   border: 0;
   border-radius: 999px;
   background: transparent;
@@ -3514,6 +3514,21 @@ body.hana-chat-scroll-lock #root {
   font-size: 1.15rem;
   line-height: 1;
   box-shadow: none;
+}
+
+.hana-chat-composer-field .hana-chat-sticker-trigger .hana-chat-sticker-face {
+  display: block;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 1px 1px rgba(42, 24, 20, 0.18));
+  transition: transform 0.16s ease;
+}
+
+.hana-chat-composer-field .hana-chat-sticker-trigger:hover .hana-chat-sticker-face,
+.hana-chat-composer-field .hana-chat-sticker-trigger:focus-visible .hana-chat-sticker-face,
+.hana-chat-composer-field .hana-chat-sticker-trigger.is-open .hana-chat-sticker-face {
+  transform: scale(1.06);
 }
 
 .hana-chat-composer-field .hana-chat-sticker-trigger:hover,
@@ -3825,8 +3840,8 @@ body.hana-chat-scroll-lock #root {
   }
 
   .hana-chat-composer-field .hana-chat-sticker-trigger {
-    width: 34px;
-    height: 34px;
+    width: 38px;
+    height: 38px;
     border-radius: 999px;
   }
 
