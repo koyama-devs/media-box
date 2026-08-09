@@ -101,10 +101,41 @@ const CHANNEL_PREFIX = 'hana-chat-channel-'
 const OWNER_SUGGEST_PREF_KEY = 'hana-chat-owner-suggest-enabled'
 /** Default guest selected in owner (real Hana) inbox. Password alias: gabu → gabusan. */
 const DEFAULT_OWNER_GUEST_KEY = 'gabusan'
+/** Shared Japan trip — countdown visible only to Hana ↔ gabusan. Calendar date in Asia/Tokyo. */
+const JP_TRIP_DEPARTURE_YMD = '2026-12-17'
+const JP_TRIP_COUNTDOWN_GUEST = 'gabusan'
 /** Composer grows with the draft up to this many lines, then scrolls instead. */
 const COMPOSER_MAX_LINES = 5
 const TYPING_PULSE_MS = 2_000
 const OWNER_ASSIST_CACHE_LIMIT = 40
+
+/** YYYY-MM-DD for Asia/Tokyo (calendar day, not local browser TZ). */
+function tokyoCalendarYmd(date = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date)
+}
+
+/** Whole calendar days from Tokyo-today to target YMD. Negative after departure day. */
+function daysUntilTokyoYmd(targetYmd, now = new Date()) {
+  const today = tokyoCalendarYmd(now)
+  const [ty, tm, td] = String(targetYmd).split('-').map(Number)
+  const [y, m, d] = today.split('-').map(Number)
+  if (![ty, tm, td, y, m, d].every(Number.isFinite)) return null
+  const targetUtc = Date.UTC(ty, tm - 1, td)
+  const todayUtc = Date.UTC(y, m - 1, d)
+  return Math.round((targetUtc - todayUtc) / 86_400_000)
+}
+
+function canSeeJpTripCountdown({ actingAsOwner, guestKey, ownerThreadGuestKey }) {
+  if (actingAsOwner) {
+    return String(ownerThreadGuestKey || '').trim().toLowerCase() === JP_TRIP_COUNTDOWN_GUEST
+  }
+  return String(guestKey || '').trim().toLowerCase() === JP_TRIP_COUNTDOWN_GUEST
+}
 
 function isOwnerAssistableGuestMessage(message) {
   if (!message || message.deleted || message.pending) return false
@@ -627,6 +658,37 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     const known = String(activeThreadId).match(/^guest-([a-z0-9_-]+)$/i)
     return known ? known[1].toLowerCase() : ''
   }, [actingAsOwner, activeThreadId, threads])
+
+  const [tripNowMs, setTripNowMs] = useState(() => Date.now())
+  useEffect(() => {
+    const tick = () => setTripNowMs(Date.now())
+    const id = window.setInterval(tick, 60_000)
+    const onFocus = () => tick()
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') tick()
+    }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.clearInterval(id)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [])
+
+  const jpTripDaysLeft = useMemo(
+    () => daysUntilTokyoYmd(JP_TRIP_DEPARTURE_YMD, new Date(tripNowMs)),
+    [tripNowMs],
+  )
+  const showJpTripCountdown = (
+    canSeeJpTripCountdown({
+      actingAsOwner,
+      guestKey,
+      ownerThreadGuestKey: ownerActiveGuestKey,
+    })
+    && jpTripDaysLeft != null
+    && jpTripDaysLeft >= 0
+  )
 
   const callListenThreadIds = useMemo(() => {
     if (actingAsOwner) {
@@ -3691,6 +3753,29 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               </button>
             </div>
           </header>
+
+          {showJpTripCountdown ? (
+            <div
+              className={`hana-chat-trip-countdown${jpTripDaysLeft === 0 ? ' is-today' : ''}`}
+              role="status"
+              aria-live="polite"
+            >
+              <span className="hana-chat-trip-countdown-petal" aria-hidden="true" />
+              <div className="hana-chat-trip-countdown-copy">
+                <span className="hana-chat-trip-countdown-kicker">はなの日本旅</span>
+                {jpTripDaysLeft === 0 ? (
+                  <strong className="hana-chat-trip-countdown-title">今日出発！</strong>
+                ) : (
+                  <strong className="hana-chat-trip-countdown-title">
+                    <span className="hana-chat-trip-countdown-label">出発まであと</span>
+                    <span className="hana-chat-trip-countdown-num">{jpTripDaysLeft}</span>
+                    <span className="hana-chat-trip-countdown-label">日</span>
+                  </strong>
+                )}
+              </div>
+              <span className="hana-chat-trip-countdown-date" aria-hidden="true">12/17</span>
+            </div>
+          ) : null}
 
           {dueReminders.length > 0 ? (
             <div className="hana-chat-reminder-banner" role="status">

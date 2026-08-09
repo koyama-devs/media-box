@@ -3396,6 +3396,120 @@ body.hana-chat-scroll-lock #root {
   flex-shrink: 0;
 }
 
+.hana-chat-trip-countdown {
+  position: relative;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  margin: 6px 10px 0;
+  padding: 7px 12px 7px 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(232, 154, 170, 0.28);
+  background:
+    radial-gradient(ellipse at 8% 20%, rgba(255, 190, 205, 0.28), transparent 55%),
+    radial-gradient(ellipse at 92% 80%, rgba(240, 201, 188, 0.16), transparent 50%),
+    rgba(42, 24, 28, 0.72);
+  overflow: hidden;
+  animation: hana-trip-countdown-in 0.28s ease-out;
+}
+
+.hana-chat-trip-countdown.is-today {
+  border-color: rgba(232, 154, 170, 0.48);
+  background:
+    radial-gradient(ellipse at 12% 0%, rgba(255, 190, 205, 0.38), transparent 58%),
+    rgba(52, 28, 34, 0.78);
+}
+
+.hana-chat-trip-countdown-petal {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 70% 0 70% 0;
+  background: linear-gradient(145deg, #f2b8c4, #e89aaa 55%, #f0c9bc);
+  transform: rotate(-18deg);
+  box-shadow: 0 0 0 1px rgba(255, 248, 240, 0.12);
+  animation: hana-trip-petal-soft 3.6s ease-in-out infinite;
+}
+
+.hana-chat-trip-countdown-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.hana-chat-trip-countdown-kicker {
+  font-size: 0.58rem;
+  letter-spacing: 0.14em;
+  color: rgba(240, 201, 188, 0.72);
+}
+
+.hana-chat-trip-countdown-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.86rem;
+  font-weight: 650;
+  color: rgba(255, 248, 240, 0.96);
+  line-height: 1.25;
+}
+
+.hana-chat-trip-countdown-num {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #f2b8c4;
+  line-height: 1;
+}
+
+.hana-chat-trip-countdown-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgba(255, 248, 240, 0.9);
+}
+
+.hana-chat-trip-countdown-date {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  color: rgba(240, 201, 188, 0.62);
+}
+
+@keyframes hana-trip-countdown-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes hana-trip-petal-soft {
+  0%,
+  100% {
+    transform: rotate(-18deg) scale(1);
+    opacity: 0.92;
+  }
+  50% {
+    transform: rotate(-8deg) scale(1.06);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hana-chat-trip-countdown,
+  .hana-chat-trip-countdown-petal {
+    animation: none;
+  }
+}
+
 .hana-chat-reminder-item {
   display: flex;
   align-items: center;
