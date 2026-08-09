@@ -385,11 +385,11 @@ const MAINICHI_VARIANTS = Object.fromEntries(MAINICHI_BASE.map((item) => [
   MAINICHI_CHARACTERS.map((character) => `${character.prefix}-${item.baseId}`),
 ]))
 
-/** Picker groups. `label` is the tab caption. */
+/** Picker groups. Face sets first, then daily/mainichi character packs. */
 export const HANA_STICKER_SETS = [
-  ...MAINICHI_SETS.map((set) => ({ id: set.tabId, label: set.tabLabel, items: set.items })),
   { id: 'hana', label: 'はな', items: HANA_SET.map((item) => ({ ...item, set: 'hana' })) },
   { id: 'kaito', label: 'かいと', items: KAITO_SET.map((item) => ({ ...item, set: 'kaito' })) },
+  ...MAINICHI_SETS.map((set) => ({ id: set.tabId, label: set.tabLabel, items: set.items })),
 ]
 
 /** Every sticker across both sets. `label` doubles as the message text fallback. */
