@@ -2103,17 +2103,17 @@ body.hana-chat-scroll-lock #root {
 }
 
 .hana-chat-sticker-tab.is-icon {
-  width: 36px;
-  height: 36px;
-  padding: 4px;
-  border-radius: 12px;
+  width: 44px;
+  height: 44px;
+  padding: 3px;
+  border-radius: 14px;
   gap: 0;
 }
 
 .hana-chat-sticker-tab.is-icon .hana-sticker {
   display: block;
-  width: 26px;
-  height: 26px;
+  width: 34px;
+  height: 34px;
 }
 
 .hana-chat-sticker-grid {

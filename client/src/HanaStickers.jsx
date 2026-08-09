@@ -1667,9 +1667,15 @@ function DailyStickerArt({ sticker }) {
 
 /**
  * One sticker as inline SVG. Works for both sets — the id decides the character.
- * @param {{ id: string, size?: number, title?: string, className?: string }} props
+ * @param {{ id: string, size?: number, title?: string, className?: string, characterOnly?: boolean }} props
  */
-export default function HanaSticker({ id, size = 64, title, className = '' }) {
+export default function HanaSticker({
+  id,
+  size = 64,
+  title,
+  className = '',
+  characterOnly = false,
+}) {
   const key = String(id || '')
   const sticker = STICKER_BY_ID[key]
   const isDaily = String(sticker?.set || '').startsWith('daily-')
@@ -1678,6 +1684,34 @@ export default function HanaSticker({ id, size = 64, title, className = '' }) {
   if (!isDaily && !Face) return null
   const Head = isKaito ? KaitoHead : HanaHead
   const label = title || hanaStickerLabel(id)
+
+  // Pack tabs for mainichi: full chibi body (no phrase) so they differ from
+  // the close-up face tabs for はな / かいと expression packs.
+  if (characterOnly && (isDaily || sticker?.character)) {
+    const character = sticker.character || (isKaito ? 'kaito' : 'hana')
+    const portrait = {
+      ...sticker,
+      character,
+      pose: 'wave',
+      mood: 'smile',
+      face: 'smile',
+    }
+    return (
+      <svg
+        viewBox="22 16 76 112"
+        width={size}
+        height={size}
+        className={`hana-sticker is-portrait ${className}`.trim()}
+        role={label ? 'img' : 'presentation'}
+        aria-label={label || undefined}
+        aria-hidden={label ? undefined : 'true'}
+        focusable="false"
+      >
+        <DailyCharacter sticker={portrait} />
+      </svg>
+    )
+  }
+
   return (
     <svg
       viewBox={isDaily ? '0 0 150 125' : VIEW_BOX}

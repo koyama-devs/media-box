@@ -4389,7 +4389,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                               writeStickerSet(set.id, { asOwner: actingAsOwner })
                             }}
                           >
-                            <HanaSticker id={set.items[0].id} size={26} title="" />
+                            <HanaSticker id={set.items[0].id} size={34} title="" characterOnly />
                           </button>
                         ))}
                       </div>
@@ -4536,7 +4536,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                       writeStickerSet(set.id, { asOwner: actingAsOwner })
                     }}
                   >
-                    <HanaSticker id={set.items[0].id} size={26} title="" />
+                    <HanaSticker id={set.items[0].id} size={34} title="" characterOnly />
                   </button>
                 ))}
               </div>
