@@ -85,8 +85,8 @@ import FlowerRainLayer, {
 import './hana-chat.css'
 import HanaCall from './HanaCall'
 import HanaSticker, {
-    HANA_STICKER_SETS,
     isHanaSticker,
+    stickerSetsForViewer,
     suggestHanaStickers,
 } from './HanaStickers'
 import NatsuKingyo from './NatsuKingyo'
@@ -376,8 +376,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [stickerOpen, setStickerOpen] = useState(false)
   const [composerFocused, setComposerFocused] = useState(false)
   const [stickerSetId, setStickerSetId] = useState(() => readStickerSet({ asOwner: appRole === 'owner' }))
-  const activeStickerSet = HANA_STICKER_SETS.find((set) => set.id === stickerSetId) || HANA_STICKER_SETS[0]
-  const stickerSuggestions = useMemo(() => suggestHanaStickers(draft, 12), [draft])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [defaultReaction, setDefaultReaction] = useState(() => readDefaultReaction())
   const [enterToSend, setEnterToSend] = useState(() => readEnterToSend())
@@ -499,6 +497,19 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   const isAdmin = isAdminUser(authUser)
   const actingAsOwner = appRole === 'owner' || isAdmin
+  // Owner/Hana → feminine packs; guests (mostly male) → masculine packs.
+  const stickerFeminine = actingAsOwner
+  const visibleStickerSets = useMemo(
+    () => stickerSetsForViewer({ feminine: stickerFeminine }),
+    [stickerFeminine],
+  )
+  const activeStickerSet = visibleStickerSets.find((set) => set.id === stickerSetId)
+    || visibleStickerSets[0]
+    || { id: stickerFeminine ? 'hana' : 'kaito', items: [] }
+  const stickerSuggestions = useMemo(
+    () => suggestHanaStickers(draft, 12, { feminine: stickerFeminine }),
+    [draft, stickerFeminine],
+  )
   const sessionProfile = useMemo(
     () => resolveSessionProfile(actingAsOwner ? 'owner' : 'guest', guestKey),
     [actingAsOwner, guestKey, chatAccounts],
@@ -4095,8 +4106,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             </div>
           ) : null}
 
-          {/* Disabled: Android/touch ghost-taps were auto-sending ファイト/オッケー while typing (guest + owner). */}
-          {false && canUseReactions && stickerSuggestions.length > 0 && !editingId ? (
+          {/* Sticker keyword search above the composer. Dock stays pointer-events:none
+              while typing (see .is-composer-focused) so ghost-taps can't fire stamps. */}
+          {canUseReactions && stickerSuggestions.length > 0 && !editingId ? (
             <div className="hana-chat-sticker-suggestions" aria-label="入力に合うスタンプ">
               <div className="hana-chat-sticker-suggestions-head">
                 <span>おすすめスタンプ</span>
@@ -4283,44 +4295,84 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                           d="M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2zm1.25 2.5v1.75h1.75V8.5H5.25zm3.25 0v1.75h1.75V8.5H8.5zm3.25 0v1.75h1.75V8.5h-1.75zm3.25 0v1.75H18V8.5h-1.75zm3.25 0V10H20V8.5h-1.5zM5.25 12v1.75h1.75V12H5.25zm3.25 0v1.75h8.5V12h-8.5zm10 0V13.75H20V12h-1.5zM7 15.75v1.25h10v-1.25H7z"
                         />
                       </svg>
-                    ) : (
+                    ) : stickerFeminine ? (
                       <svg
-                        className="hana-chat-sticker-face"
-                        viewBox="0 0 24 24"
-                        width="28"
-                        height="28"
+                        className="hana-chat-sticker-face is-hana"
+                        viewBox="22 12 76 80"
+                        width="30"
+                        height="30"
                         aria-hidden="true"
                         focusable="false"
                       >
-                        {/* Soft Hana smile — same palette as stickers */}
-                        <circle cx="12" cy="13" r="8.2" fill="#ffe8dc" />
+                        <circle cx="60" cy="58" r="32" fill="#ffe8dc" />
                         <path
-                          d="M4.2 13c.45-7.1 4.3-10.6 7.8-10.6s7.35 3.5 7.8 10.6c-1.05-2.45-3.1-3.9-7.8-3.9S5.25 10.55 4.2 13z"
+                          d="M28 58c2-28 18-42 32-42s30 14 32 42c-4-10-12-16-32-16S32 48 28 58z"
                           fill="#3a2420"
                         />
                         <path
-                          d="M9 6.15c1.05 2.1 1.85 3.15 2.25 4.55.4-1.9.85-3.35 1.9-4.85-1.5-.4-2.95-.35-4.15.3z"
+                          d="M32 48c8-18 20-24 28-24 8 0 20 6 28 24-10-8-18-10-28-10s-18 2-28 10z"
+                          fill="#3a2420"
+                        />
+                        <path
+                          d="M44 34c4 8 8 12 10 18 2-8 4-14 8-20-6-2-12-2-18 2z"
                           fill="#2a1814"
                         />
-                        <ellipse
-                          cx="18.15"
-                          cy="7.15"
-                          rx="2.25"
-                          ry="1.55"
-                          transform="rotate(28 18.15 7.15)"
-                          fill="#e89aaa"
-                        />
-                        <circle cx="18.75" cy="6.35" r="1" fill="#f2b8c4" />
-                        <circle cx="7.85" cy="14.7" r="1.65" fill="#f4a89a" opacity="0.55" />
-                        <circle cx="16.15" cy="14.7" r="1.65" fill="#f4a89a" opacity="0.55" />
-                        <ellipse cx="9.25" cy="12.55" rx="1.2" ry="1.45" fill="#2a1814" />
-                        <ellipse cx="14.75" cy="12.55" rx="1.2" ry="1.45" fill="#2a1814" />
-                        <circle cx="9.6" cy="12.1" r="0.38" fill="#fff" />
-                        <circle cx="15.1" cy="12.1" r="0.38" fill="#fff" />
+                        <path d="M86 36c6-2 12 2 10 8-6 2-12-2-10-8z" fill="#e89aaa" />
+                        <circle cx="88" cy="34" r="3.5" fill="#f2b8c4" />
+                        <circle cx="40" cy="66" r="6" fill="#f4a89a" opacity="0.55" />
+                        <circle cx="80" cy="66" r="6" fill="#f4a89a" opacity="0.55" />
+                        <ellipse cx="48" cy="58" rx="4.2" ry="5" fill="#2a1814" />
+                        <ellipse cx="72" cy="58" rx="4.2" ry="5" fill="#2a1814" />
+                        <circle cx="49.4" cy="56" r="1.35" fill="#fff" />
+                        <circle cx="73.4" cy="56" r="1.35" fill="#fff" />
                         <path
-                          d="M10.35 15.65c.55 1.15 2.75 1.15 3.3 0"
+                          d="M54 70c2 4.5 10 4.5 12 0"
                           stroke="#c47a6e"
-                          strokeWidth="1.2"
+                          strokeWidth="2.4"
+                          strokeLinecap="round"
+                          fill="none"
+                        />
+                      </svg>
+                    ) : (
+                      <svg
+                        className="hana-chat-sticker-face is-kaito"
+                        viewBox="22 16 76 78"
+                        width="30"
+                        height="30"
+                        aria-hidden="true"
+                        focusable="false"
+                      >
+                        <path
+                          d="M31 54c0-17 13-28 29-28s29 11 29 28c0 8-1 15-4 21-4 9-14 15-25 15s-21-6-25-15c-3-6-4-13-4-21z"
+                          fill="#ffdcc6"
+                        />
+                        <path
+                          d="M27 54c0-20 14-34 33-34s33 14 33 34c-2-9-6-14-11-18l-4 5-5-6-5 6-5-6-5 6-5-6-4 5c-7 0-13 4-22 14z"
+                          fill="#2c3548"
+                        />
+                        <path d="M49 23l3-8 5 7z" fill="#2c3548" />
+                        <path d="M63 22l5-7 3 8z" fill="#2c3548" />
+                        <path
+                          d="M28 60a32 32 0 0 1 64 0"
+                          fill="none"
+                          stroke="#5b8def"
+                          strokeWidth="5.2"
+                          strokeLinecap="round"
+                        />
+                        <rect x="20" y="52" width="14" height="22" rx="7" fill="#3d4a63" />
+                        <rect x="86" y="52" width="14" height="22" rx="7" fill="#3d4a63" />
+                        <rect x="23.5" y="56" width="7" height="14" rx="3.5" fill="#5b8def" />
+                        <rect x="89.5" y="56" width="7" height="14" rx="3.5" fill="#5b8def" />
+                        <circle cx="42" cy="68" r="5.5" fill="#ef9280" opacity="0.5" />
+                        <circle cx="78" cy="68" r="5.5" fill="#ef9280" opacity="0.5" />
+                        <ellipse cx="48" cy="58.5" rx="4.2" ry="5.2" fill="#2a1814" />
+                        <ellipse cx="72" cy="58.5" rx="4.2" ry="5.2" fill="#2a1814" />
+                        <circle cx="49.5" cy="56.4" r="1.4" fill="#fff" />
+                        <circle cx="73.5" cy="56.4" r="1.4" fill="#fff" />
+                        <path
+                          d="M52 70c3.4 5.4 12.6 5.4 16 0"
+                          stroke="#a9645a"
+                          strokeWidth="2.6"
                           strokeLinecap="round"
                           fill="none"
                         />
@@ -4373,7 +4425,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                         ))}
                       </div>
                       <div className="hana-chat-sticker-tabs" role="tablist" aria-label="スタンプの種類">
-                        {HANA_STICKER_SETS.map((set) => (
+                        {visibleStickerSets.map((set) => (
                           <button
                             key={set.id}
                             type="button"
@@ -4520,7 +4572,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 ))}
               </div>
               <div className="hana-chat-sticker-tabs" role="tablist" aria-label="スタンプの種類">
-                {HANA_STICKER_SETS.map((set) => (
+                {visibleStickerSets.map((set) => (
                   <button
                     key={set.id}
                     type="button"

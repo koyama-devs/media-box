@@ -1766,12 +1766,16 @@ body.hana-chat-scroll-lock #root {
 }
 
 .hana-chat-sticker-suggestions {
+  position: relative;
+  z-index: 5;
   flex: 0 0 auto;
   padding: 7px 0 8px;
   border-top: 1px solid rgba(255, 248, 240, 0.08);
   background:
     linear-gradient(90deg, rgba(232, 154, 170, 0.08), rgba(255, 248, 240, 0.025));
   animation: hana-sticker-suggestions-in 0.18s ease-out;
+  /* Keep searchable while dock under the IME is pointer-events:none. */
+  pointer-events: auto;
 }
 
 .hana-chat-sticker-suggestions-head {
@@ -3532,8 +3536,8 @@ body.hana-chat-scroll-lock #root {
 
 .hana-chat-composer-field .hana-chat-sticker-trigger .hana-chat-sticker-face {
   display: block;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
   filter: drop-shadow(0 1px 1px rgba(42, 24, 20, 0.18));
   transition: transform 0.16s ease;

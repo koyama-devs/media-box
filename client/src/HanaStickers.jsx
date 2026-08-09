@@ -392,6 +392,28 @@ export const HANA_STICKER_SETS = [
   ...MAINICHI_SETS.map((set) => ({ id: set.tabId, label: set.tabLabel, items: set.items })),
 ]
 
+/**
+ * Hana (owner / feminine) does not need Kaito packs; male guests do not need Hana packs.
+ * Animal daily packs stay for everyone.
+ * @param {{ feminine?: boolean }} [opts]
+ */
+export function stickerSetsForViewer({ feminine = false } = {}) {
+  return HANA_STICKER_SETS.filter((set) => {
+    if (feminine) return set.id !== 'kaito' && set.id !== 'daily-kaito'
+    return set.id !== 'hana' && set.id !== 'daily'
+  })
+}
+
+function stickerAllowedForViewer(sticker, { feminine = false } = {}) {
+  if (!sticker) return false
+  const setId = String(sticker.set || '')
+  const character = String(sticker.character || '')
+  if (feminine) {
+    return !(setId === 'kaito' || setId === 'daily-kaito' || character === 'kaito')
+  }
+  return !(setId === 'hana' || setId === 'daily' || setId === 'daily-hana' || character === 'hana')
+}
+
 /** Every sticker across both sets. `label` doubles as the message text fallback. */
 export const HANA_STICKERS = HANA_STICKER_SETS.flatMap((set) => set.items)
 
@@ -421,7 +443,7 @@ function normalizeStickerQuery(value) {
  * Only fires for short single-token drafts (stamp search). Once the user keeps
  * typing a longer message or hits newline, suggestions hide.
  */
-export function suggestHanaStickers(value, limit = 8) {
+export function suggestHanaStickers(value, limit = 8, { feminine = false } = {}) {
   const raw = String(value || '')
   // Newline / multi-line = composing a message, not searching stamps.
   if (/[\r\n]/.test(raw)) return []
@@ -459,11 +481,22 @@ export function suggestHanaStickers(value, limit = 8) {
     ids.push(...(MAINICHI_VARIANTS[item.baseId] || []))
   })
   matched.forEach(({ item }) => {
-    ids.push(...(item.related || []))
+    const related = item.related || []
+    if (feminine) {
+      ids.push(...related)
+      return
+    }
+    // Male guests: map はな mood ids (smile) to かいと face ids (k-smile).
+    related.forEach((id) => {
+      const key = String(id || '')
+      if (!key) return
+      if (STICKER_BY_ID[`k-${key}`]) ids.push(`k-${key}`)
+      else if (STICKER_BY_ID[key]?.set === 'kaito') ids.push(key)
+    })
   })
   return [...new Set(ids)]
     .map((id) => STICKER_BY_ID[id])
-    .filter(Boolean)
+    .filter((sticker) => stickerAllowedForViewer(sticker, { feminine }))
     .slice(0, Math.max(1, limit))
 }
 
