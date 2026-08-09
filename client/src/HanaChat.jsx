@@ -4331,10 +4331,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   })()}
                   {stickerOpen && !stickerDockMode ? (
                     <div className="hana-chat-sticker-panel" ref={stickerRef} role="menu" aria-label="スタンプとエフェクト">
-                      <div className="hana-chat-sticker-panel-head">
-                        <strong>スタンプ・エフェクト</strong>
-                        <button type="button" onClick={() => setStickerOpen(false)} aria-label="閉じる">×</button>
-                      </div>
                       <div className="hana-chat-effect-picker">
                         <button
                           type="button"
@@ -4382,8 +4378,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                             key={set.id}
                             type="button"
                             role="tab"
+                            title={set.label}
+                            aria-label={set.label}
                             aria-selected={set.id === activeStickerSet.id}
-                            className={`hana-chat-sticker-tab${set.id === activeStickerSet.id ? ' is-active' : ''}`}
+                            className={`hana-chat-sticker-tab is-icon${set.id === activeStickerSet.id ? ' is-active' : ''}`}
                             onMouseDown={(event) => event.preventDefault()}
                             onPointerDown={(event) => event.preventDefault()}
                             onClick={() => {
@@ -4391,8 +4389,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                               writeStickerSet(set.id, { asOwner: actingAsOwner })
                             }}
                           >
-                            <HanaSticker id={set.items[0].id} size={20} title="" />
-                            <span>{set.label}</span>
+                            <HanaSticker id={set.items[0].id} size={26} title="" />
                           </button>
                         ))}
                       </div>
@@ -4481,9 +4478,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               role="menu"
               aria-label="スタンプとエフェクト"
             >
-              <div className="hana-chat-sticker-panel-head">
-                <strong>スタンプ・エフェクト</strong>
-              </div>
               <div className="hana-chat-effect-picker">
                 <button
                   type="button"
@@ -4531,8 +4525,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     key={set.id}
                     type="button"
                     role="tab"
+                    title={set.label}
+                    aria-label={set.label}
                     aria-selected={set.id === activeStickerSet.id}
-                    className={`hana-chat-sticker-tab${set.id === activeStickerSet.id ? ' is-active' : ''}`}
+                    className={`hana-chat-sticker-tab is-icon${set.id === activeStickerSet.id ? ' is-active' : ''}`}
                     onMouseDown={(event) => event.preventDefault()}
                     onPointerDown={(event) => event.preventDefault()}
                     onClick={() => {
@@ -4540,8 +4536,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                       writeStickerSet(set.id, { asOwner: actingAsOwner })
                     }}
                   >
-                    <HanaSticker id={set.items[0].id} size={20} title="" />
-                    <span>{set.label}</span>
+                    <HanaSticker id={set.items[0].id} size={26} title="" />
                   </button>
                 ))}
               </div>

@@ -2102,6 +2102,20 @@ body.hana-chat-scroll-lock #root {
   color: rgba(255, 248, 240, 0.95);
 }
 
+.hana-chat-sticker-tab.is-icon {
+  width: 36px;
+  height: 36px;
+  padding: 4px;
+  border-radius: 12px;
+  gap: 0;
+}
+
+.hana-chat-sticker-tab.is-icon .hana-sticker {
+  display: block;
+  width: 26px;
+  height: 26px;
+}
+
 .hana-chat-sticker-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
