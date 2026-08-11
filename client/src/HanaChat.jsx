@@ -1631,13 +1631,17 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     && (actingAsOwner || guestOnHuman),
   )
 
-  // Typing heartbeat: bind to thread/eligibility; draft is read from a ref so
-  // keystrokes do not tear down/rebuild this effect.
+  // Typing heartbeat: draft is read from a ref so keystrokes do not rebuild this effect.
+  // Hana: keep "typing" alive while the composer still has text (even if she paused).
+  // Guest: classic idle timeout — stop advertising shortly after keystrokes pause.
   useEffect(() => {
     window.clearTimeout(typingPulseTimerRef.current)
     window.clearTimeout(typingStopTimerRef.current)
     typingPulseTimerRef.current = null
     typingStopTimerRef.current = null
+
+    const draftHasText = () => Boolean(String(draftRef.current || '').trim())
+    const keepAliveWhileDraft = typingRole === 'hana'
 
     const stopCurrent = () => {
       const current = typingStateRef.current
@@ -1670,16 +1674,16 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         : 0,
     }
 
-    const pulseIfDraft = () => {
-      const state = typingStateRef.current
-      if (state.threadId !== typingThreadId || state.role !== typingRole) return
-      if (!String(draftRef.current || '').trim()) {
-        stopCurrent()
-        typingStateRef.current = { threadId: typingThreadId, role: typingRole, lastPulseAt: 0 }
+    const clearIdleStop = () => {
+      window.clearTimeout(typingStopTimerRef.current)
+      typingStopTimerRef.current = null
+    }
+
+    const armGuestIdleStop = () => {
+      if (keepAliveWhileDraft) {
+        clearIdleStop()
         return
       }
-      state.lastPulseAt = Date.now()
-      setChatTyping(typingThreadId, typingRole, true).catch(() => {})
       window.clearTimeout(typingStopTimerRef.current)
       typingStopTimerRef.current = window.setTimeout(() => {
         stopCurrent()
@@ -1687,9 +1691,24 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       }, TYPING_IDLE_MS)
     }
 
+    const pulseIfDraft = () => {
+      const state = typingStateRef.current
+      if (state.threadId !== typingThreadId || state.role !== typingRole) return
+      if (!draftHasText()) {
+        stopCurrent()
+        typingStateRef.current = { threadId: typingThreadId, role: typingRole, lastPulseAt: 0 }
+        return
+      }
+      state.lastPulseAt = Date.now()
+      setChatTyping(typingThreadId, typingRole, true).catch(() => {})
+      armGuestIdleStop()
+    }
+
     typingNudgeRef.current = () => {
-      if (!String(draftRef.current || '').trim()) {
-        window.clearTimeout(typingStopTimerRef.current)
+      if (!draftHasText()) {
+        clearIdleStop()
+        window.clearTimeout(typingPulseTimerRef.current)
+        typingPulseTimerRef.current = null
         if (typingStateRef.current.lastPulseAt) {
           stopCurrent()
           typingStateRef.current = { threadId: typingThreadId, role: typingRole, lastPulseAt: 0 }
@@ -1700,22 +1719,27 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       if (!typingStateRef.current.lastPulseAt || elapsed >= TYPING_PULSE_MS) {
         pulseIfDraft()
       } else {
-        window.clearTimeout(typingStopTimerRef.current)
-        typingStopTimerRef.current = window.setTimeout(() => {
-          stopCurrent()
-          typingStateRef.current = { threadId: typingThreadId, role: typingRole, lastPulseAt: 0 }
-        }, TYPING_IDLE_MS)
+        armGuestIdleStop()
         window.clearTimeout(typingPulseTimerRef.current)
         typingPulseTimerRef.current = window.setTimeout(pulseIfDraft, TYPING_PULSE_MS - elapsed)
       }
     }
 
-    if (String(draftRef.current || '').trim()) pulseIfDraft()
+    if (draftHasText()) pulseIfDraft()
 
     const intervalId = window.setInterval(() => {
-      if (!String(draftRef.current || '').trim()) return
-      const elapsed = Date.now() - typingStateRef.current.lastPulseAt
-      if (elapsed >= TYPING_PULSE_MS) pulseIfDraft()
+      if (!draftHasText()) {
+        if (typingStateRef.current.lastPulseAt) {
+          stopCurrent()
+          typingStateRef.current = { threadId: typingThreadId, role: typingRole, lastPulseAt: 0 }
+        }
+        return
+      }
+      // Hana refreshes while draft remains; guest only refreshes if still within idle window.
+      if (keepAliveWhileDraft || typingStateRef.current.lastPulseAt) {
+        const elapsed = Date.now() - typingStateRef.current.lastPulseAt
+        if (!typingStateRef.current.lastPulseAt || elapsed >= TYPING_PULSE_MS) pulseIfDraft()
+      }
     }, TYPING_PULSE_MS)
 
     return () => {
@@ -3624,6 +3648,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     const text = draft.trim()
     if (!text || busy) return
     setDraft('')
+    draftRef.current = ''
+    typingNudgeRef.current()
     setError('')
     setBusy(true)
     setSpeaking(true)
@@ -4707,6 +4733,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     onPointerDown={(event) => event.preventDefault()}
                     onClick={() => {
                       setDraft('')
+                      draftRef.current = ''
+                      typingNudgeRef.current()
                       void handleSendSticker(sticker)
                     }}
                   >
