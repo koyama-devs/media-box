@@ -1689,6 +1689,22 @@
   border-top: 1px solid var(--line);
 }
 
+.admin-idle-policy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  font-size: 0.72rem;
+  color: rgba(42, 24, 20, 0.72);
+}
+
+.admin-idle-policy-select {
+  min-width: 7.5rem;
+  width: auto;
+  padding: 4px 8px;
+  font-size: 0.72rem;
+}
+
 .admin-guest-card-actions .admin-btn--primary {
   margin-right: auto;
 }

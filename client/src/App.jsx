@@ -7,78 +7,80 @@ import { clearBookBookmark, getAllBookBookmarks, getBookBookmark } from './bookP
 import { requestChatCardShare } from './chatCardShare'
 import DailyKotoba from './DailyKotoba'
 import {
-  ACCOUNT_INACTIVE_LOGIN_MESSAGE,
-  addMediaComment,
-  CHAT_PRESENCE_MODES,
-  clearUserAvatar,
-  deleteMediaComment,
-  deleteMediaItem,
-  ensureDefaultChatAccounts,
-  evaluateAccountLogin,
-  findChatAccountByPassKey,
-  getFirebaseErrorMessage,
-  getMaxUploadBytes,
-  guestMayAccessAlbum,
-  guestMayAccessImage,
-  guestMayAccessPlaylist,
-  guestMayAccessTrack,
-  isAccountLoginAllowed,
-  isProtectedOwnerAccount,
-  loadMediaBlobUrl,
-  loadMediaBytes,
-  MAX_BOOK_FILE_SIZE,
-  MAX_FILE_SIZE,
-  normalizeChatPresenceMode,
-  recordAccessVisit,
-  resolveAvatarSrc,
-  resolvePushUserKey,
-  resolveSessionProfile,
-  savePushToken,
-  saveSharedPhotoAlbums,
-  saveSharedPlaylists,
-  saveSharedSpaces,
-  setChatProfileStatus,
-  setUserAvatarPreset,
-  sortMediaItems,
-  subscribeChatAccounts,
-  subscribeChatProfile,
-  subscribeMediaComments,
-  subscribeSiteAppearance,
-  subscribeToMediaItems,
-  subscribeToSharedPhotoAlbums,
-  subscribeToSharedPlaylists,
-  subscribeToSharedSpaces,
-  syncIdleAccountStatuses,
-  toggleMediaLike,
-  touchAccountAccess,
-  updateMediaCaption,
-  updateMediaCover,
-  updateMediaJacket,
-  updateMediaJacketStyle,
-  updateMediaLyrics,
-  updateMediaName,
-  updatePlaylistOrder,
-  uploadMediaFile,
-  uploadUserAvatar,
+    ACCOUNT_INACTIVE_LOGIN_MESSAGE,
+    addMediaComment,
+    CHAT_PRESENCE_MODES,
+    clearUserAvatar,
+    DEFAULT_ACCOUNT_IDLE_DAYS,
+    deleteMediaComment,
+    deleteMediaItem,
+    ensureDefaultChatAccounts,
+    evaluateAccountLogin,
+    findChatAccountByPassKey,
+    getFirebaseErrorMessage,
+    getMaxUploadBytes,
+    guestMayAccessAlbum,
+    guestMayAccessImage,
+    guestMayAccessPlaylist,
+    guestMayAccessTrack,
+    isAccountLoginAllowed,
+    isProtectedOwnerAccount,
+    loadMediaBlobUrl,
+    loadMediaBytes,
+    MAX_BOOK_FILE_SIZE,
+    MAX_FILE_SIZE,
+    normalizeChatPresenceMode,
+    recordAccessVisit,
+    resolveAvatarSrc,
+    resolvePushUserKey,
+    resolveSessionProfile,
+    savePushToken,
+    saveSharedPhotoAlbums,
+    saveSharedPlaylists,
+    saveSharedSpaces,
+    setChatProfileStatus,
+    setUserAvatarPreset,
+    sortMediaItems,
+    subscribeChatAccounts,
+    subscribeChatAppSettings,
+    subscribeChatProfile,
+    subscribeMediaComments,
+    subscribeSiteAppearance,
+    subscribeToMediaItems,
+    subscribeToSharedPhotoAlbums,
+    subscribeToSharedPlaylists,
+    subscribeToSharedSpaces,
+    syncIdleAccountStatuses,
+    toggleMediaLike,
+    touchAccountAccess,
+    updateMediaCaption,
+    updateMediaCover,
+    updateMediaJacket,
+    updateMediaJacketStyle,
+    updateMediaLyrics,
+    updateMediaName,
+    updatePlaylistOrder,
+    uploadMediaFile,
+    uploadUserAvatar,
 } from './firebase'
 import HanaChat from './HanaChat.jsx'
 import ListeningPostcard from './ListeningPostcard'
 import ListeningSpace, { ListeningSpaceSettings } from './ListeningSpace'
 import {
-  compressImageFileToJpegFile,
-  createCustomSpaceDraft,
-  hydrateCustomSpace,
-  isKnownSpaceId,
-  LISTENING_SPACES,
-  listeningSpaceStyleVars,
-  loadAmbientSettings,
-  loadSavedListeningSpaceId,
-  loadSpaceBackgrounds,
-  MAX_CUSTOM_SPACES,
-  resolveTodayJacketStyleId,
-  saveListeningSpaceId,
-  suggestListeningSpace,
-  toSharedSpaceRecord,
+    compressImageFileToJpegFile,
+    createCustomSpaceDraft,
+    hydrateCustomSpace,
+    isKnownSpaceId,
+    LISTENING_SPACES,
+    listeningSpaceStyleVars,
+    loadAmbientSettings,
+    loadSavedListeningSpaceId,
+    loadSpaceBackgrounds,
+    MAX_CUSTOM_SPACES,
+    resolveTodayJacketStyleId,
+    saveListeningSpaceId,
+    suggestListeningSpace,
+    toSharedSpaceRecord,
 } from './listeningSpaces'
 import { pickPostcardLyric } from './lyrics'
 import LyricsPanel from './LyricsPanel'
@@ -86,31 +88,31 @@ import { blobToThumbnailUrl, mapPool } from './mediaPerf'
 import NatsuAtmosphere from './NatsuAtmosphere'
 import { SITE_THEME_DEFAULT } from './siteTheme'
 import {
-  appendTodayRecordHistory,
-  formatTodayDateLabel,
-  getTodayShuffleRemaining,
-  isTodayRecordShown,
-  loadTodayRecordHistory,
-  markTodayRecordShown,
-  pickTodayAudioItem,
-  resolveJacketUrl,
-  resolveTodayReveal,
-  useTodayShuffle,
+    appendTodayRecordHistory,
+    formatTodayDateLabel,
+    getTodayShuffleRemaining,
+    isTodayRecordShown,
+    loadTodayRecordHistory,
+    markTodayRecordShown,
+    pickTodayAudioItem,
+    resolveJacketUrl,
+    resolveTodayReveal,
+    useTodayShuffle,
 } from './todayPick'
 import TodayRecord from './TodayRecord'
 import TodayShelf from './TodayShelf.jsx'
 import { useFloatingPanel } from './useFloatingPanel'
 import {
-  createPlaylistId,
-  loadCustomPlaylists,
-  loadFavoriteIds,
-  loadListFilter,
-  saveCustomPlaylists,
-  saveFavoriteIds,
-  saveListFilter,
+    createPlaylistId,
+    loadCustomPlaylists,
+    loadFavoriteIds,
+    loadListFilter,
+    saveCustomPlaylists,
+    saveFavoriteIds,
+    saveListFilter,
 } from './userPlaylists'
 import VinylPlayer from './VinylPlayer'
-import {ensureWebPush, registerAppServiceWorker, bindForegroundPush} from './webPush'
+import { bindForegroundPush, ensureWebPush, registerAppServiceWorker } from './webPush'
 
 const BookReader = lazy(() => import('./BookReader'))
 
@@ -404,6 +406,9 @@ function App() {
   const [statusMenuOpen, setStatusMenuOpen] = useState(false)
   const [avatarUploading, setAvatarUploading] = useState(false)
   const [chatAccounts, setChatAccounts] = useState(() => [])
+  const [chatAppSettings, setChatAppSettings] = useState(() => ({
+    accountIdleDays: DEFAULT_ACCOUNT_IDLE_DAYS,
+  }))
   const avatarInputRef = useRef(null)
   const statusChipRef = useRef(null)
 
@@ -422,11 +427,25 @@ function App() {
     }
   }, [])
 
-  // Auto-inactivate accounts idle for 5+ days; stamp missing lastAccessAt.
+  useEffect(() => {
+    const unsub = subscribeChatAppSettings(
+      (settings) => {
+        setChatAppSettings({
+          accountIdleDays: settings?.accountIdleDays ?? DEFAULT_ACCOUNT_IDLE_DAYS,
+          messageEditWindowMinutes: settings?.messageEditWindowMinutes,
+          ownerAssistEnabled: settings?.ownerAssistEnabled,
+        })
+      },
+      () => {},
+    )
+    return () => unsub?.()
+  }, [])
+
+  // Auto-inactivate accounts idle past their activity threshold; stamp missing lastAccessAt.
   useEffect(() => {
     if (!chatAccounts.length) return
-    void syncIdleAccountStatuses(chatAccounts)
-  }, [chatAccounts])
+    void syncIdleAccountStatuses(chatAccounts, chatAppSettings)
+  }, [chatAccounts, chatAppSettings])
 
   // Service worker first: the Badging API needs one, and it receives push.
   useEffect(() => {
@@ -442,15 +461,30 @@ function App() {
     void ensureWebPush(pushKey)
   }, [isLoggedIn, guestKey, authRole])
 
-  // Refresh lastAccessAt while the session is alive (also covers restored sessions).
+  // Refresh lastAccessAt while the session is alive (activity, not only password login).
   useEffect(() => {
-    if (!isLoggedIn || !guestKey) return
+    if (!isLoggedIn || !guestKey) return undefined
     const account = findChatAccountByPassKey(guestKey, chatAccounts)
       || chatAccounts.find((item) => item.key === guestKey)
-    if (!account?.key) return
-    if (!isAccountLoginAllowed(account) && !isProtectedOwnerAccount(account.key)) return
-    void touchAccountAccess(account.key)
-  }, [isLoggedIn, guestKey])
+    if (!account?.key) return undefined
+    if (!isAccountLoginAllowed(account) && !isProtectedOwnerAccount(account.key)) return undefined
+
+    const stamp = () => {
+      void touchAccountAccess(account.key)
+    }
+    stamp()
+    const id = window.setInterval(stamp, 60 * 60 * 1000)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') stamp()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', stamp)
+    return () => {
+      window.clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', stamp)
+    }
+  }, [isLoggedIn, guestKey, chatAccounts])
 
   // Capacitor only: persist FCM token for the logged-in chat account.
   useEffect(() => {
@@ -2483,7 +2517,7 @@ const playPrevious = useCallback(() => {
     }
 
     try {
-      const verdict = await evaluateAccountLogin(account)
+      const verdict = await evaluateAccountLogin(account, chatAppSettings)
       if (!verdict.ok) {
         setIsLoggedIn(false)
         setError(ACCOUNT_INACTIVE_LOGIN_MESSAGE)

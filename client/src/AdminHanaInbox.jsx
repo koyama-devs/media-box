@@ -12,54 +12,58 @@ import OwnerMessageAssist, {
     OWNER_ASSIST_BURST_DEBOUNCE_MS,
     ownerAssistShouldCollapse,
 } from './OwnerMessageAssist'
-import { renderChatTextWithLinks } from './chatLinkify'
-import { getAvatarPresetSrc } from './avatarPresets'
 import hanachanArt from './assets/hanachan.svg'
+import { getAvatarPresetSrc } from './avatarPresets'
 import {
     addChatReminder,
     remindAtFromChoice,
     toggleChatPin,
 } from './chatExtras'
+import { renderChatTextWithLinks } from './chatLinkify'
 import { readDefaultReaction } from './chatSettings'
 import {
+    ACCOUNT_IDLE_DAYS_NEVER,
     analyzeGuestMessageForOwner,
     clearAllChatHistories,
     clearChatThreadHistory,
+    DEFAULT_ACCOUNT_IDLE_DAYS,
+    DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
     deleteChatAccount,
     deleteChatMessage,
     deliveryStatusLabel,
     ensureChatThread,
     ensureDefaultChatAccounts,
-    formatChatTimestamp,
     formatChatFileSize,
+    formatChatTimestamp,
     getChatMessageAttachment,
     getFirebaseErrorMessage,
     getMessageDeliveryStatus,
+    isProtectedOwnerAccount,
     listGuestProfiles,
     listOwnerProfiles,
     markThreadRead,
+    messageEditWindowMsFromMinutes,
+    normalizeAccountIdleDays,
     OWNER_PROFILE,
     pulseChatPresence,
     resolveAvatarSrc,
     resolveChatPresence,
     sendChatMessage,
+    setAccountActiveState,
+    setAccountIdleDays,
+    setGuestAlbumAccess,
+    setGuestPlaylistAccess,
     subscribeChatAccounts,
     subscribeChatAppSettings,
-    messageEditWindowMsFromMinutes,
-    DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
     subscribeChatMessages,
     subscribeChatProfiles,
     subscribeChatThreads,
+    subscribeToSharedPhotoAlbums,
+    subscribeToSharedPlaylists,
     toggleChatReaction,
     translateChatMessage,
     updateChatMessage,
     upsertChatAccount,
-    setGuestPlaylistAccess,
-    setGuestAlbumAccess,
-    setAccountActiveState,
-    isProtectedOwnerAccount,
-    subscribeToSharedPlaylists,
-    subscribeToSharedPhotoAlbums,
 } from './firebase'
 import './hana-chat.css'
 
@@ -96,6 +100,7 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
   const [editWindowMs, setEditWindowMs] = useState(
     () => messageEditWindowMsFromMinutes(DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES),
   )
+  const [accountIdleDaysGlobal, setAccountIdleDaysGlobal] = useState(DEFAULT_ACCOUNT_IDLE_DAYS)
   const [activeId, setActiveId] = useState(null)
   const [messages, setMessages] = useState([])
   const [draft, setDraft] = useState('')
@@ -499,8 +504,85 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
 
   const accountLastAccessLabel = (profile) => {
     const live = resolveLiveAccount(profile)
-    if (!live.lastAccessAt) return '最終アクセス: —'
-    return `最終アクセス: ${formatChatTimestamp(live.lastAccessAt)}`
+    if (!live.lastAccessAt) return '最終利用: —'
+    return `最終利用: ${formatChatTimestamp(live.lastAccessAt)}`
+  }
+
+  const accountIdlePolicyLabel = (profile) => {
+    const live = resolveLiveAccount(profile)
+    if (isProtectedOwnerAccount(live.key)) return '自動停止: なし（保護）'
+    const own = normalizeAccountIdleDays(live.idleDays, { allowNull: true })
+    if (own === ACCOUNT_IDLE_DAYS_NEVER) return '自動停止: 無期限'
+    if (own == null) {
+      if (accountIdleDaysGlobal === ACCOUNT_IDLE_DAYS_NEVER) return '自動停止: 全体（無期限）'
+      return `自動停止: 全体（${accountIdleDaysGlobal}日）`
+    }
+    return `自動停止: ${own}日`
+  }
+
+  const handleAccountIdlePolicyChange = async (profile, mode, customDays = '') => {
+    if (!profile?.key || isProtectedOwnerAccount(profile.key) || accountBusy) return
+    let next = null
+    if (mode === 'never') next = ACCOUNT_IDLE_DAYS_NEVER
+    else if (mode === 'custom') {
+      const n = Math.floor(Number(customDays))
+      if (!Number.isFinite(n) || n <= 0) {
+        setError('日数は1以上で指定してください。')
+        return
+      }
+      next = normalizeAccountIdleDays(n, { allowNull: false })
+    } else {
+      next = null
+    }
+    setAccountBusy(true)
+    setError('')
+    setStatusNote('')
+    try {
+      await setAccountIdleDays(profile.key, next)
+      const label = profile.displayName || profile.key
+      setStatusNote(
+        next == null
+          ? `${label}: 自動停止を全体設定に合わせました。`
+          : next === ACCOUNT_IDLE_DAYS_NEVER
+            ? `${label}: 自動停止なし（無期限）にしました。`
+            : `${label}: ${next}日で自動停止に設定しました。`,
+      )
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || err?.message || '自動停止設定の更新に失敗しました。')
+    } finally {
+      setAccountBusy(false)
+    }
+  }
+
+  const renderIdlePolicyControls = (profile) => {
+    if (isProtectedOwnerAccount(profile.key)) return null
+    const live = resolveLiveAccount(profile)
+    const own = normalizeAccountIdleDays(live.idleDays, { allowNull: true })
+    const mode = own === ACCOUNT_IDLE_DAYS_NEVER ? 'never' : own == null ? 'inherit' : 'custom'
+    return (
+      <label className="admin-idle-policy">
+        <span>自動停止</span>
+        <select
+          className="admin-input admin-idle-policy-select"
+          disabled={accountBusy}
+          value={mode}
+          onChange={(event) => {
+            const nextMode = event.target.value
+            if (nextMode === 'custom') {
+              const days = window.prompt('何日利用がなければ自動停止しますか？', String(own > 0 ? own : accountIdleDaysGlobal || DEFAULT_ACCOUNT_IDLE_DAYS))
+              if (days == null) return
+              void handleAccountIdlePolicyChange(profile, 'custom', days)
+              return
+            }
+            void handleAccountIdlePolicyChange(profile, nextMode)
+          }}
+        >
+          <option value="inherit">全体と同じ</option>
+          <option value="custom">{mode === 'custom' ? `${own}日（変更）` : '日数を指定…'}</option>
+          <option value="never">無期限</option>
+        </select>
+      </label>
+    )
   }
 
   const handleDeleteAccount = async (profile) => {
@@ -784,13 +866,14 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
       (settings) => {
         setEditWindowMs(messageEditWindowMsFromMinutes(settings?.messageEditWindowMinutes))
         setOwnerAssistEnabled(settings?.ownerAssistEnabled !== false)
+        setAccountIdleDaysGlobal(settings?.accountIdleDays ?? DEFAULT_ACCOUNT_IDLE_DAYS)
       },
       () => {},
     )
     return unsubscribe
   }, [])
 
-    const canMutateMessage = (message) => canMutateOwnMessage(message, {
+  const canMutateMessage = (message) => canMutateOwnMessage(message, {
     unreadByPartner: getMessageDeliveryStatus(message, activeThread, 'hana') === 'sent',
     windowMs: editWindowMs,
   })
@@ -1000,7 +1083,7 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
               ユーザー管理
               <span className="admin-badge">{ownerRoster.length + guestRoster.length}</span>
             </h2>
-            <p>ゲスト / オーナーの発行・編集・削除と会話スレッド。5日間アクセスがないアカウントは自動停止されます（hana除く）。</p>
+            <p>ゲスト / オーナーの発行・編集・削除と会話スレッド。長期間利用がないアカウントは設定日数で自動停止されます（hana除く・無期限設定可）。</p>
           </div>
           <div className="admin-user-header-actions">
             <button
@@ -1190,9 +1273,10 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
                     <span className="admin-cred"><b>呼び</b><span>{profile.addressAs}</span></span>
                   ) : null}
                 </span>
-                <span className="admin-guest-meta">{accountLastAccessLabel(profile)}</span>
+                <span className="admin-guest-meta">{accountLastAccessLabel(profile)} · {accountIdlePolicyLabel(profile)}</span>
               </div>
               <div className="admin-guest-card-actions">
+                {renderIdlePolicyControls(profile)}
                 <button
                   type="button"
                   className="admin-btn admin-btn--secondary admin-btn--sm"
@@ -1264,12 +1348,15 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
                       : 'まだ会話なし'}
                     {' · '}
                     {accountLastAccessLabel(profile)}
+                    {' · '}
+                    {accountIdlePolicyLabel(profile)}
                   </span>
                   {thread?.lastText ? (
                     <span className="admin-guest-preview">{thread.lastText}</span>
                   ) : null}
                 </div>
                 <div className="admin-guest-card-actions">
+                  {renderIdlePolicyControls(profile)}
                   <button
                     type="button"
                     className="admin-btn admin-btn--primary admin-btn--sm"

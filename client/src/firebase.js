@@ -143,6 +143,7 @@ function accountFromDefault(def) {
     allowedAlbumIds: null,
     accountActive: true,
     lastAccessAt: null,
+    idleDays: null,
     inactiveReason: null,
     updatedAt: null,
   }
@@ -244,18 +245,57 @@ export function guestMayAccessImage(account, imageId, albums = []) {
   return true
 }
 
-/** Idle auto-inactivate threshold (5 days). */
-export const ACCOUNT_IDLE_MS = 5 * 24 * 60 * 60 * 1000
+/** Default idle auto-inactivate threshold (days). Overridable in admin settings. */
+export const DEFAULT_ACCOUNT_IDLE_DAYS = 5
+/** Legacy constant — prefer resolveAccountIdleMs(..., settings). */
+export const ACCOUNT_IDLE_MS = DEFAULT_ACCOUNT_IDLE_DAYS * 24 * 60 * 60 * 1000
+/** Per-account / resolved policy: never auto-inactivate. */
+export const ACCOUNT_IDLE_DAYS_NEVER = -1
 
 /** Default owner account that cannot be inactivated. */
 export const PROTECTED_OWNER_KEY = OWNER_PROFILE.key
 
 /** Shown on the login gate whenever an account is inactive. */
 export const ACCOUNT_INACTIVE_LOGIN_MESSAGE =
-  '長期間アクセスがなかったため、システムがアカウントを停止しました。管理者に連絡して処理してもらってください。'
+  '長期間利用がなかったため、システムがアカウントを停止しました。管理者に連絡して処理してもらってください。'
 
 export function isProtectedOwnerAccount(key) {
   return normalizeAccountKey(key) === PROTECTED_OWNER_KEY
+}
+
+/**
+ * Normalize idle-days policy.
+ * - null → inherit global default (only for per-account field)
+ * - -1 → never auto-inactivate
+ * - > 0 → days
+ */
+export function normalizeAccountIdleDays(value, { allowNull = false } = {}) {
+  if (value == null || value === '') {
+    return allowNull ? null : DEFAULT_ACCOUNT_IDLE_DAYS
+  }
+  if (value === 'never' || value === '無限' || value === '無期限') return ACCOUNT_IDLE_DAYS_NEVER
+  const n = Math.floor(Number(value))
+  if (!Number.isFinite(n)) return allowNull ? null : DEFAULT_ACCOUNT_IDLE_DAYS
+  if (n === ACCOUNT_IDLE_DAYS_NEVER) return ACCOUNT_IDLE_DAYS_NEVER
+  if (n <= 0) return allowNull ? null : DEFAULT_ACCOUNT_IDLE_DAYS
+  return Math.min(n, 3650)
+}
+
+export function normalizeGlobalAccountIdleDays(value) {
+  const n = normalizeAccountIdleDays(value, { allowNull: false })
+  if (n === ACCOUNT_IDLE_DAYS_NEVER) return ACCOUNT_IDLE_DAYS_NEVER
+  return n > 0 ? n : DEFAULT_ACCOUNT_IDLE_DAYS
+}
+
+/** Effective idle threshold in ms, or null when never auto-inactivate. */
+export function resolveAccountIdleMs(account, settings = {}) {
+  if (!account || isProtectedOwnerAccount(account.key)) return null
+  const globalDays = normalizeGlobalAccountIdleDays(settings?.accountIdleDays)
+  const own = normalizeAccountIdleDays(account.idleDays, { allowNull: true })
+  const days = own == null ? globalDays : own
+  if (days === ACCOUNT_IDLE_DAYS_NEVER) return null
+  if (!(days > 0)) return null
+  return days * 24 * 60 * 60 * 1000
 }
 
 export function parseAccountAccessMs(account) {
@@ -271,12 +311,14 @@ export function isAccountLoginAllowed(account) {
   return account.accountActive !== false
 }
 
-export function isAccountIdlePastThreshold(account, nowMs = Date.now()) {
+export function isAccountIdlePastThreshold(account, nowMs = Date.now(), settings = {}) {
   if (!account || isProtectedOwnerAccount(account.key)) return false
   if (account.accountActive === false) return false
+  const idleMs = resolveAccountIdleMs(account, settings)
+  if (idleMs == null) return false
   const accessMs = parseAccountAccessMs(account)
   if (accessMs == null) return false
-  return nowMs - accessMs >= ACCOUNT_IDLE_MS
+  return nowMs - accessMs >= idleMs
 }
 
 function serializeChatAccount(id, data = {}) {
@@ -314,6 +356,8 @@ function serializeChatAccount(id, data = {}) {
     lastAccessAt: data?.lastAccessAt?.toDate?.()?.toISOString?.()
       || data?.lastAccessAtIso
       || null,
+    /** null = inherit global; -1 = never; >0 = days override. */
+    idleDays: normalizeAccountIdleDays(data?.idleDays, { allowNull: true }),
     inactiveReason: data?.inactiveReason === 'idle' || data?.inactiveReason === 'admin'
       ? data.inactiveReason
       : null,
@@ -335,6 +379,7 @@ export function listGuestProfiles(accounts = chatAccountsCache) {
       allowedAlbumIds: normalizeAllowedAlbumIds(account.allowedAlbumIds),
       accountActive: account.accountActive !== false,
       lastAccessAt: account.lastAccessAt || null,
+      idleDays: normalizeAccountIdleDays(account.idleDays, { allowNull: true }),
       inactiveReason: account.inactiveReason || null,
     }))
 }
@@ -349,6 +394,10 @@ export function listOwnerProfiles(accounts = chatAccountsCache) {
       passKey: account.passKey,
       role: 'owner',
       roleLabel: account.roleLabel || 'オーナー',
+      accountActive: account.accountActive !== false,
+      lastAccessAt: account.lastAccessAt || null,
+      idleDays: normalizeAccountIdleDays(account.idleDays, { allowNull: true }),
+      inactiveReason: account.inactiveReason || null,
     }))
 }
 
@@ -701,8 +750,10 @@ export async function setAccountActiveState(accountKey, active, options = {}) {
 /**
  * Stamp missing lastAccessAt, or auto-inactivate idle accounts.
  * Safe to call often (idempotent).
+ * @param {object[]} [accounts]
+ * @param {{ accountIdleDays?: number }} [settings]
  */
-export async function syncIdleAccountStatuses(accounts = chatAccountsCache) {
+export async function syncIdleAccountStatuses(accounts = chatAccountsCache, settings = {}) {
   const now = Date.now()
   const jobs = []
   for (const account of accounts || []) {
@@ -713,7 +764,7 @@ export async function syncIdleAccountStatuses(accounts = chatAccountsCache) {
       jobs.push(touchAccountAccess(account.key))
       continue
     }
-    if (now - accessMs >= ACCOUNT_IDLE_MS) {
+    if (isAccountIdlePastThreshold(account, now, settings)) {
       jobs.push(setAccountActiveState(account.key, false, { by: 'idle' }))
     }
   }
@@ -724,15 +775,33 @@ export async function syncIdleAccountStatuses(accounts = chatAccountsCache) {
  * Login gate helper: may auto-inactivate then report whether login is allowed.
  * @returns {Promise<{ ok: true, account } | { ok: false, reason: 'inactive'|'missing' }>}
  */
-export async function evaluateAccountLogin(account) {
+export async function evaluateAccountLogin(account, settings = {}) {
   if (!account) return { ok: false, reason: 'missing' }
   if (isProtectedOwnerAccount(account.key)) return { ok: true, account }
   if (account.accountActive === false) return { ok: false, reason: 'inactive' }
-  if (isAccountIdlePastThreshold(account)) {
+  if (isAccountIdlePastThreshold(account, Date.now(), settings)) {
     await setAccountActiveState(account.key, false, { by: 'idle' })
     return { ok: false, reason: 'inactive' }
   }
   return { ok: true, account }
+}
+
+/** Admin: set per-account idle policy (null=inherit, -1=never, >0=days). */
+export async function setAccountIdleDays(accountKey, idleDays) {
+  const key = normalizeAccountKey(accountKey)
+  if (!isValidAccountKey(key)) throw new Error('ユーザーが見つかりません。')
+  const next = normalizeAccountIdleDays(idleDays, { allowNull: true })
+  const nowIso = new Date().toISOString()
+  await setDoc(doc(db, CHAT_PROFILES_COLLECTION, key), {
+    idleDays: next,
+    updatedAt: serverTimestamp(),
+    updatedAtIso: nowIso,
+  }, { merge: true })
+  return serializeChatAccount(key, {
+    ...(chatAccountsCache.find((item) => item.key === key) || {}),
+    idleDays: next,
+    updatedAt: nowIso,
+  })
 }
 
 export async function setGuestPlaylistAccess(guestKey, playlistIds) {
@@ -3179,6 +3248,11 @@ function normalizeChatAppSettings(data = {}) {
     messageEditWindowMinutes: normalizeMessageEditWindowMinutes(data?.messageEditWindowMinutes),
     /** Default on: missing field keeps はな専用 available. */
     ownerAssistEnabled: data?.ownerAssistEnabled !== false,
+    accountIdleDays: normalizeGlobalAccountIdleDays(
+      Object.prototype.hasOwnProperty.call(data || {}, 'accountIdleDays')
+        ? data.accountIdleDays
+        : DEFAULT_ACCOUNT_IDLE_DAYS,
+    ),
   }
 }
 
@@ -3202,6 +3276,9 @@ export async function saveChatAppSettings(patch = {}) {
   if (Object.prototype.hasOwnProperty.call(patch, 'ownerAssistEnabled')) {
     next.ownerAssistEnabled = patch.ownerAssistEnabled !== false
   }
+  if (Object.prototype.hasOwnProperty.call(patch, 'accountIdleDays')) {
+    next.accountIdleDays = normalizeGlobalAccountIdleDays(patch.accountIdleDays)
+  }
   await setDoc(
     doc(db, SHARED_STATE_COLLECTION, SHARED_CHAT_DOC),
     next,
@@ -3213,6 +3290,9 @@ export async function saveChatAppSettings(patch = {}) {
       : {}),
     ...(Object.prototype.hasOwnProperty.call(next, 'ownerAssistEnabled')
       ? { ownerAssistEnabled: next.ownerAssistEnabled }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(next, 'accountIdleDays')
+      ? { accountIdleDays: next.accountIdleDays }
       : {}),
   }
 }

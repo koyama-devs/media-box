@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import './Admin.css'
 import AdminHanaInbox from './AdminHanaInbox'
-import NatsuAtmosphere from './NatsuAtmosphere'
-import { SITE_THEMES, SITE_THEME_DEFAULT, applySiteTheme } from './siteTheme'
 import {
-    completeAdminRedirectLogin,
+    ACCOUNT_IDLE_DAYS_NEVER,
+    DEFAULT_ACCOUNT_IDLE_DAYS,
     DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
+    completeAdminRedirectLogin,
     fetchHostingReleases,
     fetchLiveVersionInfo,
     fetchReleasesHistoryFile,
@@ -13,6 +13,7 @@ import {
     loginAdmin,
     loginAdminWithGoogle,
     logoutAdmin,
+    normalizeGlobalAccountIdleDays,
     normalizeMessageEditWindowMinutes,
     recordAppRelease,
     rollbackHostingRelease,
@@ -26,6 +27,8 @@ import {
     subscribeToAdminAuth,
     subscribeToMediaItems,
 } from './firebase'
+import NatsuAtmosphere from './NatsuAtmosphere'
+import { SITE_THEMES, SITE_THEME_DEFAULT, applySiteTheme } from './siteTheme'
 
 const TRACK_QUERY_KEY = 'track'
 
@@ -754,6 +757,8 @@ function AdminChatSettingsPanel({ hidden = false }) {
   const [minutes, setMinutes] = useState(DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES)
   const [draft, setDraft] = useState(String(DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES))
   const [ownerAssistEnabled, setOwnerAssistEnabled] = useState(true)
+  const [accountIdleDays, setAccountIdleDays] = useState(DEFAULT_ACCOUNT_IDLE_DAYS)
+  const [idleDraft, setIdleDraft] = useState(String(DEFAULT_ACCOUNT_IDLE_DAYS))
   const [themeId, setThemeId] = useState(SITE_THEME_DEFAULT)
   const [saving, setSaving] = useState(false)
   const [savedFlash, setSavedFlash] = useState(false)
@@ -766,6 +771,9 @@ function AdminChatSettingsPanel({ hidden = false }) {
         setMinutes(next)
         setDraft(String(next))
         setOwnerAssistEnabled(settings?.ownerAssistEnabled !== false)
+        const idle = normalizeGlobalAccountIdleDays(settings?.accountIdleDays)
+        setAccountIdleDays(idle)
+        setIdleDraft(idle === ACCOUNT_IDLE_DAYS_NEVER ? 'never' : String(idle))
         setError('')
       },
       (subscribeError) => {
@@ -800,6 +808,35 @@ function AdminChatSettingsPanel({ hidden = false }) {
     } finally {
       setSaving(false)
     }
+  }
+
+  const applyAccountIdleDays = async (nextDays) => {
+    const normalized = nextDays === 'never' || nextDays === ACCOUNT_IDLE_DAYS_NEVER
+      ? ACCOUNT_IDLE_DAYS_NEVER
+      : normalizeGlobalAccountIdleDays(nextDays)
+    setSaving(true)
+    setError('')
+    try {
+      const saved = await saveChatAppSettings({ accountIdleDays: normalized })
+      const idle = saved.accountIdleDays ?? normalized
+      setAccountIdleDays(idle)
+      setIdleDraft(idle === ACCOUNT_IDLE_DAYS_NEVER ? 'never' : String(idle))
+      setSavedFlash(true)
+    } catch (saveError) {
+      console.error(saveError)
+      setError(getFirebaseErrorMessage(saveError) || '自動停止日数の保存に失敗しました。')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleSaveIdleDays = (event) => {
+    event.preventDefault()
+    if (idleDraft === 'never') {
+      void applyAccountIdleDays(ACCOUNT_IDLE_DAYS_NEVER)
+      return
+    }
+    void applyAccountIdleDays(idleDraft)
   }
 
 
@@ -900,6 +937,64 @@ function AdminChatSettingsPanel({ hidden = false }) {
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="admin-settings-block">
+          <div className="admin-settings-copy">
+            <p className="admin-settings-label">自動停止までの日数（全体）</p>
+            <p className="admin-settings-hint">
+              最後の利用からこの日数が過ぎたアカウントを自動停止します（ログイン回数ではなく、アプリ利用の有無）。個別ユーザーで上書き／無期限にもできます。hana は対象外です。
+            </p>
+            <p className="admin-settings-current">
+              現在:{' '}
+              <strong>
+                {accountIdleDays === ACCOUNT_IDLE_DAYS_NEVER
+                  ? '無期限（自動停止なし）'
+                  : `${accountIdleDays}日`}
+              </strong>
+              {savedFlash ? <span className="admin-settings-saved">保存しました</span> : null}
+            </p>
+          </div>
+
+          <div className="admin-seg admin-seg--wrap" role="group" aria-label="自動停止日数プリセット">
+            {[3, 5, 7, 14, 30].map((days) => (
+              <button
+                key={days}
+                type="button"
+                className={accountIdleDays === days ? 'is-active' : ''}
+                disabled={saving}
+                onClick={() => void applyAccountIdleDays(days)}
+              >
+                {days}日
+              </button>
+            ))}
+            <button
+              type="button"
+              className={accountIdleDays === ACCOUNT_IDLE_DAYS_NEVER ? 'is-active' : ''}
+              disabled={saving}
+              onClick={() => void applyAccountIdleDays(ACCOUNT_IDLE_DAYS_NEVER)}
+            >
+              無期限
+            </button>
+          </div>
+
+          <form className="admin-settings-custom" onSubmit={handleSaveIdleDays}>
+            <label className="admin-field">
+              <span>日数を指定（never = 無期限）</span>
+              <input
+                className="admin-input"
+                type="text"
+                inputMode="numeric"
+                value={idleDraft}
+                disabled={saving}
+                onChange={(event) => setIdleDraft(event.target.value)}
+                placeholder="5"
+              />
+            </label>
+            <button type="submit" className="admin-btn admin-btn--primary" disabled={saving}>
+              {saving ? '保存中…' : '保存'}
+            </button>
+          </form>
         </div>
 
         <div className="admin-settings-block">
