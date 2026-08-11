@@ -3010,28 +3010,31 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         const kind = classifyChatAttachment(file)
         const label = kind === 'video' ? '動画' : '写真'
         try {
-          setHanaMessages((prev) => [
-            ...prev,
-            {
-              id: pendingId,
-              clientId: pendingId,
-              pending: true,
-              uploading: true,
-              role,
-              sender: role,
-              text: label,
-              rawText: label,
-              imageUrl: kind === 'image' ? localUrl : '',
-              fileUrl: kind === 'video' ? localUrl : '',
-              fileKind: kind,
-              fileName: file.name || label,
-              fileMime: String(file.type || ''),
-              fileSize: Math.max(0, Number(file.size) || 0),
-              createdAt: new Date().toISOString(),
-              createdAtIso: new Date().toISOString(),
-              replyTo: null,
-            },
-          ])
+          // Paint the optimistic bubble before compression / Storage upload.
+          flushSync(() => {
+            setHanaMessages((prev) => [
+              ...prev,
+              {
+                id: pendingId,
+                clientId: pendingId,
+                pending: true,
+                uploading: true,
+                role,
+                sender: role,
+                text: label,
+                rawText: label,
+                imageUrl: kind === 'image' ? localUrl : '',
+                fileUrl: kind === 'video' ? localUrl : '',
+                fileKind: kind,
+                fileName: file.name || label,
+                fileMime: String(file.type || ''),
+                fileSize: Math.max(0, Number(file.size) || 0),
+                createdAt: new Date().toISOString(),
+                createdAtIso: new Date().toISOString(),
+                replyTo: null,
+              },
+            ])
+          })
           scrollToLatestRef.current()
 
           const uploaded = await uploadChatAttachment(threadId, file)
@@ -3041,17 +3044,15 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             m.id === pendingId
               ? {
                   ...m,
-                  imageUrl,
-                  fileUrl,
+                  // Keep blob preview visible while Storage URL is still cold.
+                  uploading: false,
                   fileKind: uploaded.kind,
                   fileName: uploaded.fileName,
                   fileMime: uploaded.fileMime,
                   fileSize: uploaded.fileSize,
-                  uploading: false,
                 }
               : m
           )))
-          URL.revokeObjectURL(localUrl)
           const serverId = await sendChatMessage({
             threadId,
             text: label,
@@ -3065,11 +3066,26 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             clientId: pendingId,
             ...guestMeta,
           })
-          if (serverId) {
-            setHanaMessages((prev) => prev.map((m) => (
-              m.id === pendingId ? { ...m, serverId } : m
-            )))
+          if (imageUrl) {
+            await new Promise((resolve) => {
+              const img = new Image()
+              img.onload = () => resolve()
+              img.onerror = () => resolve()
+              img.src = imageUrl
+            })
           }
+          setHanaMessages((prev) => prev.map((m) => (
+            m.id === pendingId
+              ? {
+                  ...m,
+                  imageUrl: imageUrl || m.imageUrl,
+                  fileUrl: fileUrl || (imageUrl ? '' : m.fileUrl),
+                  serverId: serverId || m.serverId,
+                  uploading: false,
+                }
+              : m
+          )))
+          URL.revokeObjectURL(localUrl)
         } catch (err) {
           failed += 1
           URL.revokeObjectURL(localUrl)

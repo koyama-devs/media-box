@@ -1024,7 +1024,8 @@ export async function clearUserAvatar(profileId) {
 }
 
 export const CHAT_MAX_IMAGE_BYTES = 8 * 1024 * 1024
-export const CHAT_MAX_VIDEO_BYTES = 50 * 1024 * 1024
+/** Phone camera clips often exceed 50MB; Storage rules do not cap this path. */
+export const CHAT_MAX_VIDEO_BYTES = 200 * 1024 * 1024
 export const CHAT_MAX_FILE_BYTES = 25 * 1024 * 1024
 
 /**
@@ -1103,7 +1104,7 @@ export async function uploadChatAttachment(threadId, file) {
   }
 
   if (kind === 'video' && fileSize > CHAT_MAX_VIDEO_BYTES) {
-    throw new Error('動画は50MB以下にしてください。')
+    throw new Error(`動画は${formatChatFileSize(CHAT_MAX_VIDEO_BYTES)}以下にしてください。`)
   }
   if (kind === 'file' && fileSize > CHAT_MAX_FILE_BYTES) {
     throw new Error('ファイルは25MB以下にしてください。')
@@ -1424,8 +1425,18 @@ export function normalizeChatEffect(value) {
 export function normalizeChatImageUrl(value) {
   const url = String(value || '').trim()
   if (!url || url.length > 2048) return ''
+  // Firestore / Storage only — never persist blob: or data: URLs.
   if (!/^https:\/\//i.test(url)) return ''
   return url
+}
+
+/** URLs safe to show in the chat UI (includes optimistic local blob previews). */
+export function normalizeChatDisplayMediaUrl(value) {
+  const url = String(value || '').trim()
+  if (!url || url.length > 2048) return ''
+  if (/^https:\/\//i.test(url)) return url
+  if (/^blob:/i.test(url)) return url
+  return ''
 }
 
 export function normalizeChatFileName(value) {
@@ -1445,8 +1456,9 @@ export function normalizeChatFileKind(value, mime = '') {
 /** Resolve display attachment from a serialized chat message (legacy imageUrl supported). */
 export function getChatMessageAttachment(message) {
   if (!message || message.deleted) return null
-  const fileUrl = normalizeChatImageUrl(message.fileUrl)
-  const imageUrl = normalizeChatImageUrl(message.imageUrl)
+  // Prefer blob: local previews while uploading so the bubble is not blank.
+  const fileUrl = normalizeChatDisplayMediaUrl(message.fileUrl)
+  const imageUrl = normalizeChatDisplayMediaUrl(message.imageUrl)
   const url = fileUrl || imageUrl
   if (!url) return null
   const fileMime = normalizeChatFileMime(message.fileMime) || (imageUrl && !fileUrl ? 'image/*' : '')
