@@ -2567,9 +2567,9 @@ body.hana-chat-scroll-lock #root {
   align-items: center;
   gap: 4px;
   margin-top: 0;
-  /* Explicit width — abspos shrink-to-fit was capped by short bubble width and wrapped early */
-  width: min(72vw, 300px);
-  max-width: min(72vw, 300px);
+  /* Hug the bubble — a fixed wide width was shoving the first chip far away. */
+  width: max-content;
+  max-width: min(72vw, 240px);
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
@@ -2585,13 +2585,23 @@ body.hana-chat-scroll-lock #root {
 .chat-swipe.is-own .hana-chat-reactions {
   left: auto;
   right: 0;
-  justify-content: flex-start;
+  top: calc(100% + 6px);
+  justify-content: flex-end;
 }
 
 .chat-swipe.is-other .hana-chat-reactions,
 .chat-swipe.is-hanachan .hana-chat-reactions,
 .chat-swipe.is-hana:not(.is-own) .hana-chat-reactions {
+  left: 0;
+  right: auto;
+  top: calc(100% + 6px);
   justify-content: flex-start;
+}
+
+/* Flower FAB reserves padding under the bubble — pull chips back up so the
+   visual gap matches own-message reactions (~6px under the bubble). */
+.chat-swipe .chat-swipe-bubble-wrap.has-flower ~ .hana-chat-reactions {
+  top: calc(100% - 8px);
 }
 
 .hana-chat-reaction {
@@ -3396,30 +3406,123 @@ body.hana-chat-scroll-lock #root {
   flex-shrink: 0;
 }
 
-.hana-chat-trip-countdown {
-  position: relative;
-  z-index: 30;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.hana-chat-trip-dock {
+  position: absolute;
+  z-index: 55;
+  top: calc(48px + 6px);
+  left: 10px;
+  right: 10px;
   flex-shrink: 0;
-  margin: 6px 10px 0;
-  padding: 7px 12px 7px 10px;
-  border-radius: 14px;
-  border: 1px solid rgba(232, 154, 170, 0.28);
+  pointer-events: none;
+}
+
+.hana-chat-trip-dock.is-collapsed {
+  left: auto;
+  width: auto;
+}
+
+.hana-chat-trip-dock .hana-chat-trip-bubble,
+.hana-chat-trip-dock .hana-chat-trip-panel {
+  pointer-events: auto;
+}
+
+.hana-chat-trip-bubble {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  min-width: 52px;
+  width: auto;
+  height: 52px;
+  padding: 0 8px;
+  border: 1px solid rgba(232, 154, 170, 0.42);
+  border-radius: 999px;
   background:
-    radial-gradient(ellipse at 8% 20%, rgba(255, 190, 205, 0.28), transparent 55%),
-    radial-gradient(ellipse at 92% 80%, rgba(240, 201, 188, 0.16), transparent 50%),
-    rgba(42, 24, 28, 0.72);
+    radial-gradient(ellipse at 30% 20%, rgba(255, 190, 205, 0.42), transparent 58%),
+    rgba(42, 24, 28, 0.92);
+  box-shadow:
+    0 8px 20px rgba(14, 8, 10, 0.35),
+    0 0 0 1px rgba(255, 248, 240, 0.06) inset;
+  color: rgba(255, 248, 240, 0.96);
+  cursor: pointer;
+  animation: hana-trip-countdown-in 0.28s ease-out;
+}
+
+.hana-chat-trip-dock.is-today .hana-chat-trip-bubble {
+  border-color: rgba(232, 154, 170, 0.6);
+}
+
+.hana-chat-trip-bubble-num {
+  position: relative;
+  z-index: 1;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #f2b8c4;
+}
+
+.hana-chat-trip-bubble-unit {
+  margin-top: 1px;
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  color: rgba(240, 201, 188, 0.78);
+}
+
+.hana-chat-trip-bubble-today {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #f2b8c4;
+}
+
+.hana-chat-trip-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(58vh, 420px);
+  padding: 10px 12px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(232, 154, 170, 0.3);
+  background:
+    radial-gradient(ellipse at 8% 0%, rgba(255, 190, 205, 0.24), transparent 52%),
+    radial-gradient(ellipse at 100% 100%, rgba(240, 201, 188, 0.12), transparent 46%),
+    rgba(28, 16, 20, 0.96);
+  box-shadow: 0 14px 32px rgba(8, 4, 6, 0.38);
   overflow: hidden;
   animation: hana-trip-countdown-in 0.28s ease-out;
 }
 
-.hana-chat-trip-countdown.is-today {
+.hana-chat-trip-dock.is-today .hana-chat-trip-panel {
   border-color: rgba(232, 154, 170, 0.48);
-  background:
-    radial-gradient(ellipse at 12% 0%, rgba(255, 190, 205, 0.38), transparent 58%),
-    rgba(52, 28, 34, 0.78);
+}
+
+.hana-chat-trip-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.hana-chat-trip-panel-collapse {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  margin-left: auto;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 248, 240, 0.08);
+  color: rgba(255, 248, 240, 0.78);
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.hana-chat-trip-panel-collapse:hover,
+.hana-chat-trip-panel-collapse:focus-visible {
+  background: rgba(255, 248, 240, 0.14);
+  color: rgba(255, 248, 240, 0.98);
 }
 
 .hana-chat-trip-countdown-petal {
@@ -3473,11 +3576,174 @@ body.hana-chat-scroll-lock #root {
   color: rgba(255, 248, 240, 0.9);
 }
 
-.hana-chat-trip-countdown-date {
+.hana-chat-trip-itinerary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+  overscroll-behavior: contain;
+}
+
+.hana-chat-trip-card {
+  padding: 10px 11px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 248, 240, 0.08);
+  background: rgba(255, 248, 240, 0.04);
+}
+
+.hana-chat-trip-card.is-flight {
+  background:
+    linear-gradient(120deg, rgba(91, 141, 239, 0.1), transparent 42%),
+    rgba(255, 248, 240, 0.04);
+}
+
+.hana-chat-trip-card.is-hotel {
+  background:
+    linear-gradient(120deg, rgba(232, 154, 170, 0.12), transparent 48%),
+    rgba(255, 248, 240, 0.04);
+}
+
+.hana-chat-trip-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.hana-chat-trip-card-icon {
+  font-size: 0.78rem;
+  line-height: 1;
+}
+
+.hana-chat-trip-card-date {
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  color: rgba(255, 248, 240, 0.88);
+}
+
+.hana-chat-trip-flight-legs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hana-chat-trip-flight-leg {
+  display: grid;
+  grid-template-columns: 3.2rem minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: baseline;
+  position: relative;
+}
+
+.hana-chat-trip-flight-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #9dc0ff;
+}
+
+.hana-chat-trip-flight-place {
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: rgba(255, 248, 240, 0.9);
+}
+
+.hana-chat-trip-flight-arrow {
+  grid-column: 1 / -1;
+  padding: 1px 0 1px 0.55rem;
+  font-size: 0.7rem;
+  color: rgba(157, 192, 255, 0.55);
+}
+
+.hana-chat-trip-hotel-name {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: rgba(255, 248, 240, 0.96);
+}
+
+.hana-chat-trip-hotel-address-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.hana-chat-trip-hotel-address {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: rgba(255, 248, 240, 0.82);
+}
+
+.hana-chat-trip-copy {
   flex-shrink: 0;
-  font-size: 0.68rem;
-  letter-spacing: 0.06em;
-  color: rgba(240, 201, 188, 0.62);
+  margin-top: 1px;
+  padding: 5px 9px;
+  border: 1px solid rgba(232, 154, 170, 0.35);
+  border-radius: 999px;
+  background: rgba(232, 154, 170, 0.12);
+  color: #f2b8c4;
+  font-size: 0.66rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.hana-chat-trip-copy:hover,
+.hana-chat-trip-copy:focus-visible {
+  background: rgba(232, 154, 170, 0.22);
+}
+
+.hana-chat-trip-copy.is-copied {
+  border-color: rgba(157, 192, 255, 0.45);
+  background: rgba(91, 141, 239, 0.18);
+  color: #9dc0ff;
+}
+
+.hana-chat-trip-hotel-hours {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: 0.72rem;
+  color: rgba(240, 201, 188, 0.78);
+}
+
+.hana-chat-trip-arrived-btn {
+  width: 100%;
+  margin-top: 2px;
+  padding: 11px 14px;
+  border: 1px solid rgba(232, 154, 170, 0.45);
+  border-radius: 12px;
+  background:
+    linear-gradient(165deg, rgba(255, 190, 205, 0.28), rgba(232, 154, 170, 0.16));
+  color: rgba(255, 248, 240, 0.98);
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.hana-chat-trip-arrived-btn:hover:not(:disabled),
+.hana-chat-trip-arrived-btn:focus-visible:not(:disabled) {
+  background:
+    linear-gradient(165deg, rgba(255, 190, 205, 0.38), rgba(232, 154, 170, 0.24));
+}
+
+.hana-chat-trip-arrived-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
 }
 
 @keyframes hana-trip-countdown-in {
@@ -3504,9 +3770,23 @@ body.hana-chat-scroll-lock #root {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hana-chat-trip-countdown,
+  .hana-chat-trip-panel,
+  .hana-chat-trip-bubble,
   .hana-chat-trip-countdown-petal {
     animation: none;
+  }
+}
+
+/* Mobile open chat: header uses safe-area height variable. */
+@media (max-width: 640px) {
+  .hana-chat.is-open .hana-chat-trip-dock {
+    top: calc(var(--hana-chat-header-h, 48px) + 6px);
+    left: 12px;
+    right: 12px;
+  }
+
+  .hana-chat.is-open .hana-chat-trip-dock.is-collapsed {
+    left: auto;
   }
 }
 

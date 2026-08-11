@@ -3,96 +3,97 @@ import { createPortal, flushSync } from 'react-dom'
 import { setAppUnreadBadge } from './appBadge'
 import hanachanArt from './assets/hanachan.svg'
 import {
-    addChatReminder,
-    dueChatReminders,
-    loadChatPins,
-    markChatReminderDone,
-    remindAtFromChoice,
-    toggleChatPin,
-    unpinChatMessage,
+  addChatReminder,
+  dueChatReminders,
+  loadChatPins,
+  markChatReminderDone,
+  remindAtFromChoice,
+  toggleChatPin,
+  unpinChatMessage,
 } from './chatExtras'
 import ChatImageLightbox from './ChatImageLightbox'
 import ChatNatsuFireworks from './ChatNatsuFireworks'
 import { playChatNotifySound, unlockChatNotifySound } from './chatNotifySound'
 import {
-    readDefaultReaction,
-    readEnterToSend,
-    readMessageSound,
-    readStickerSet,
-    writeDefaultReaction,
-    writeEnterToSend,
-    writeMessageSound,
-    writeStickerSet,
+  readDefaultReaction,
+  readEnterToSend,
+  readMessageSound,
+  readStickerSet,
+  writeDefaultReaction,
+  writeEnterToSend,
+  writeMessageSound,
+  writeStickerSet,
 } from './chatSettings'
 import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
 import EmotionMomentLayer, { EMOTION_MOMENTS, triggerEmotionMoment } from './EmotionMoment'
 import {
-    analyzeGuestMessageForOwner,
-    applyReactionLocally,
-    broadcastChatEffect,
-    CHAT_PRESENCE_MODES,
-    CHAT_REACTION_EMOJIS,
-    chatWithHanachan,
-    DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
-    deleteChatMessage,
-    deliveryStatusLabel,
-    ensureChatThread,
-    ensureDefaultChatAccounts,
-    ensureGuestChatId,
-    formatChatTimestamp,
-    getFirebaseErrorMessage,
-    getGuestProfile,
-    getMessageDeliveryStatus,
-    isAdminUser,
-    listGuestProfiles,
-    markThreadRead,
-    messageEditWindowMsFromMinutes,
-    migrateLegacyGuestThread,
-    normalizeChatPresenceMode,
-    OWNER_PROFILE,
-    pulseChatPresence,
-    resolveAvatarSrc,
-    resolveChatPresence,
-    resolveGuestDisplayName,
-    resolveGuestThreadWithHistory,
-    resolveSessionProfile,
-    sendChatMessage,
-    setChatPresenceStatus,
-    setChatProfileStatus,
-    setChatTyping,
-    sortChatMessages,
-    subscribeChatAccounts,
-    subscribeChatMessages,
-    subscribeChatProfiles,
-    subscribeChatThreads,
-    subscribeOwnChatThread,
-    subscribeToAuthUser,
-    suggestHanaChat,
-    threadUnreadCount,
-    toggleChatReaction,
-    translateChatMessage,
-    updateChatMessage,
-    uploadChatAttachment,
-    getChatMessageAttachment,
-    formatChatFileSize,
-    classifyChatAttachment,
+  analyzeGuestMessageForOwner,
+  applyReactionLocally,
+  broadcastChatEffect,
+  CHAT_PRESENCE_MODES,
+  CHAT_REACTION_EMOJIS,
+  chatWithHanachan,
+  classifyChatAttachment,
+  confirmJpTripArrived,
+  DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
+  deleteChatMessage,
+  deliveryStatusLabel,
+  ensureChatThread,
+  ensureDefaultChatAccounts,
+  ensureGuestChatId,
+  formatChatFileSize,
+  formatChatTimestamp,
+  getChatMessageAttachment,
+  getFirebaseErrorMessage,
+  getGuestProfile,
+  getMessageDeliveryStatus,
+  isAdminUser,
+  listGuestProfiles,
+  markThreadRead,
+  messageEditWindowMsFromMinutes,
+  migrateLegacyGuestThread,
+  normalizeChatPresenceMode,
+  OWNER_PROFILE,
+  pulseChatPresence,
+  resolveAvatarSrc,
+  resolveChatPresence,
+  resolveGuestDisplayName,
+  resolveGuestThreadWithHistory,
+  resolveSessionProfile,
+  sendChatMessage,
+  setChatPresenceStatus,
+  setChatProfileStatus,
+  setChatTyping,
+  sortChatMessages,
+  subscribeChatAccounts,
+  subscribeChatMessages,
+  subscribeChatProfiles,
+  subscribeChatThreads,
+  subscribeOwnChatThread,
+  subscribeToAuthUser,
+  suggestHanaChat,
+  threadUnreadCount,
+  toggleChatReaction,
+  translateChatMessage,
+  updateChatMessage,
+  uploadChatAttachment,
 } from './firebase'
 import FlowerRainLayer, {
-    CHAT_PARTY_REACTION,
-    triggerFlowerRain,
-    triggerPartyBurst,
+  CHAT_PARTY_REACTION,
+  triggerFlowerRain,
+  triggerPartyBurst,
 } from './FlowerRain'
 import './hana-chat.css'
 import HanaCall from './HanaCall'
 import HanaSticker, {
-    isHanaSticker,
-    stickerSetsForViewer,
-    suggestHanaStickers,
+  isHanaSticker,
+  stickerSetsForViewer,
+  suggestHanaStickers,
 } from './HanaStickers'
 import NatsuKingyo from './NatsuKingyo'
 import OwnerMessageAssist, {
-    collectUnansweredOwnerAssistMessages,
-    ownerAssistShouldCollapse,
+  collectUnansweredOwnerAssistMessages,
+  ownerAssistShouldCollapse,
 } from './OwnerMessageAssist'
 import { bindForegroundPush, ensureWebPush } from './webPush'
 
@@ -104,6 +105,35 @@ const DEFAULT_OWNER_GUEST_KEY = 'gabusan'
 /** Shared Japan trip — countdown visible only to Hana ↔ gabusan. Calendar date in Asia/Tokyo. */
 const JP_TRIP_DEPARTURE_YMD = '2026-12-17'
 const JP_TRIP_COUNTDOWN_GUEST = 'gabusan'
+const JP_TRIP_EXPAND_KEY = 'hana-chat-jp-trip-expanded'
+const JP_TRIP_HOTEL_ADDRESS = '〒557-0004 大阪府大阪市西成区萩之茶屋2丁目8番12号'
+const JP_TRIP_ITINERARY = {
+  flights: [
+    {
+      id: 'outbound',
+      dateLabel: '12月17日(木)',
+      legs: [
+        { time: '01:00', place: 'ダナン国際空港' },
+        { time: '07:25', place: '関西国際空港（第1ターミナル）' },
+      ],
+    },
+    {
+      id: 'return',
+      dateLabel: '12月24日(木)',
+      legs: [
+        { time: '09:30', place: '関西国際空港（第1ターミナル）' },
+        { time: '13:05', place: 'ダナン国際空港' },
+      ],
+    },
+  ],
+  hotel: {
+    stayLabel: '12月17日〜24日',
+    name: 'BAKURO - DOYANEN HOTELS',
+    address: JP_TRIP_HOTEL_ADDRESS,
+    checkIn: '15:00',
+    checkOut: '10:00',
+  },
+}
 /** Composer grows with the draft up to this many lines, then scrolls instead. */
 const COMPOSER_MAX_LINES = 5
 const TYPING_PULSE_MS = 2_000
@@ -135,6 +165,56 @@ function canSeeJpTripCountdown({ actingAsOwner, guestKey, ownerThreadGuestKey })
     return String(ownerThreadGuestKey || '').trim().toLowerCase() === JP_TRIP_COUNTDOWN_GUEST
   }
   return String(guestKey || '').trim().toLowerCase() === JP_TRIP_COUNTDOWN_GUEST
+}
+
+function defaultJpTripExpanded() {
+  return false
+}
+
+function readJpTripExpanded() {
+  try {
+    const saved = sessionStorage.getItem(JP_TRIP_EXPAND_KEY)
+    if (saved === '1') return true
+    if (saved === '0') return false
+  } catch {
+    /* ignore */
+  }
+  return defaultJpTripExpanded()
+}
+
+function writeJpTripExpanded(expanded) {
+  try {
+    sessionStorage.setItem(JP_TRIP_EXPAND_KEY, expanded ? '1' : '0')
+  } catch {
+    /* ignore */
+  }
+}
+
+async function copyTextToClipboard(text) {
+  const value = String(text || '')
+  if (!value) return false
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value)
+      return true
+    }
+  } catch {
+    /* fall through */
+  }
+  try {
+    const area = document.createElement('textarea')
+    area.value = value
+    area.setAttribute('readonly', '')
+    area.style.position = 'fixed'
+    area.style.left = '-9999px'
+    document.body.appendChild(area)
+    area.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(area)
+    return ok
+  } catch {
+    return false
+  }
 }
 
 function isOwnerAssistableGuestMessage(message) {
@@ -680,6 +760,24 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     () => daysUntilTokyoYmd(JP_TRIP_DEPARTURE_YMD, new Date(tripNowMs)),
     [tripNowMs],
   )
+  const jpTripThreadId = useMemo(() => {
+    if (actingAsOwner) {
+      if (ownerActiveGuestKey !== JP_TRIP_COUNTDOWN_GUEST) return ''
+      return activeThreadId || ''
+    }
+    if (String(guestKey || '').trim().toLowerCase() !== JP_TRIP_COUNTDOWN_GUEST) return ''
+    return guestChatId || ''
+  }, [actingAsOwner, ownerActiveGuestKey, activeThreadId, guestKey, guestChatId])
+  const jpTripArrived = useMemo(() => {
+    if (!jpTripThreadId) return false
+    if (actingAsOwner) {
+      const thread = threads.find((entry) => entry.id === jpTripThreadId)
+      return Boolean(thread?.jpTripArrivedAtIso)
+    }
+    return Boolean(ownThread?.jpTripArrivedAtIso)
+  }, [actingAsOwner, jpTripThreadId, threads, ownThread])
+  const [jpTripConfirmBusy, setJpTripConfirmBusy] = useState(false)
+  const [jpTripArrivedLocal, setJpTripArrivedLocal] = useState(false)
   const showJpTripCountdown = (
     canSeeJpTripCountdown({
       actingAsOwner,
@@ -688,7 +786,80 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     })
     && jpTripDaysLeft != null
     && jpTripDaysLeft >= 0
+    && !jpTripArrived
+    && !jpTripArrivedLocal
   )
+
+  const confirmJpTripArrival = async () => {
+    if (!actingAsOwner || !jpTripThreadId || jpTripConfirmBusy) return
+    setJpTripConfirmBusy(true)
+    try {
+      await confirmJpTripArrived(jpTripThreadId)
+      setJpTripArrivedLocal(true)
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || '到着の確認に失敗しました。')
+    } finally {
+      setJpTripConfirmBusy(false)
+    }
+  }
+
+  const [jpTripExpanded, setJpTripExpanded] = useState(false)
+  const [jpTripAddressCopied, setJpTripAddressCopied] = useState(false)
+  const jpTripDockRef = useRef(null)
+  const jpTripTokyoToday = useMemo(
+    () => tokyoCalendarYmd(new Date(tripNowMs)),
+    [tripNowMs],
+  )
+
+  useEffect(() => {
+    if (!showJpTripCountdown) return
+    setJpTripExpanded(false)
+    writeJpTripExpanded(false)
+  }, [showJpTripCountdown, jpTripTokyoToday])
+
+  // Each time the chat frame opens, start from the compact corner bubble.
+  useEffect(() => {
+    if (!open || !showJpTripCountdown) return
+    setJpTripExpanded(false)
+    writeJpTripExpanded(false)
+  }, [open, showJpTripCountdown])
+
+  useEffect(() => {
+    if (!showJpTripCountdown || !jpTripExpanded) return undefined
+    const onPointerDown = (event) => {
+      const node = jpTripDockRef.current
+      if (!node || node.contains(event.target)) return
+      setJpTripExpanded(false)
+      writeJpTripExpanded(false)
+    }
+    const onKeyDown = (event) => {
+      if (event.key !== 'Escape') return
+      setJpTripExpanded(false)
+      writeJpTripExpanded(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [showJpTripCountdown, jpTripExpanded])
+
+  useEffect(() => {
+    if (!jpTripAddressCopied) return undefined
+    const id = window.setTimeout(() => setJpTripAddressCopied(false), 1600)
+    return () => window.clearTimeout(id)
+  }, [jpTripAddressCopied])
+
+  const setJpTripOpen = (expanded) => {
+    setJpTripExpanded(expanded)
+    writeJpTripExpanded(expanded)
+  }
+
+  const copyJpTripHotelAddress = async () => {
+    const ok = await copyTextToClipboard(JP_TRIP_ITINERARY.hotel.address)
+    if (ok) setJpTripAddressCopied(true)
+  }
 
   const callListenThreadIds = useMemo(() => {
     if (actingAsOwner) {
@@ -3756,24 +3927,117 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
           {showJpTripCountdown ? (
             <div
-              className={`hana-chat-trip-countdown${jpTripDaysLeft === 0 ? ' is-today' : ''}`}
-              role="status"
-              aria-live="polite"
+              ref={jpTripDockRef}
+              className={`hana-chat-trip-dock${jpTripExpanded ? ' is-expanded' : ' is-collapsed'}${jpTripDaysLeft === 0 ? ' is-today' : ''}`}
             >
-              <span className="hana-chat-trip-countdown-petal" aria-hidden="true" />
-              <div className="hana-chat-trip-countdown-copy">
-                <span className="hana-chat-trip-countdown-kicker">はなの日本旅</span>
-                {jpTripDaysLeft === 0 ? (
-                  <strong className="hana-chat-trip-countdown-title">今日出発！</strong>
-                ) : (
-                  <strong className="hana-chat-trip-countdown-title">
-                    <span className="hana-chat-trip-countdown-label">出発まであと</span>
-                    <span className="hana-chat-trip-countdown-num">{jpTripDaysLeft}</span>
-                    <span className="hana-chat-trip-countdown-label">日</span>
-                  </strong>
-                )}
-              </div>
-              <span className="hana-chat-trip-countdown-date" aria-hidden="true">12/17</span>
+              {jpTripExpanded ? (
+                <div className="hana-chat-trip-panel" role="dialog" aria-label="はなの日本旅">
+                  <div className="hana-chat-trip-panel-head">
+                    <span className="hana-chat-trip-countdown-petal" aria-hidden="true" />
+                    <div className="hana-chat-trip-countdown-copy">
+                      <span className="hana-chat-trip-countdown-kicker">はなの日本旅</span>
+                      {jpTripDaysLeft === 0 ? (
+                        <strong className="hana-chat-trip-countdown-title">今日出発！</strong>
+                      ) : (
+                        <strong className="hana-chat-trip-countdown-title">
+                          <span className="hana-chat-trip-countdown-label">出発まであと</span>
+                          <span className="hana-chat-trip-countdown-num">{jpTripDaysLeft}</span>
+                          <span className="hana-chat-trip-countdown-label">日</span>
+                        </strong>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      className="hana-chat-trip-panel-collapse"
+                      aria-label="閉じる"
+                      title="閉じる"
+                      onClick={() => setJpTripOpen(false)}
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="hana-chat-trip-itinerary">
+                    {JP_TRIP_ITINERARY.flights.map((flight) => (
+                      <section key={flight.id} className="hana-chat-trip-card is-flight">
+                        <header className="hana-chat-trip-card-head">
+                          <span className="hana-chat-trip-card-icon" aria-hidden="true">✈</span>
+                          <span className="hana-chat-trip-card-date">{flight.dateLabel}</span>
+                        </header>
+                        <ol className="hana-chat-trip-flight-legs">
+                          {flight.legs.map((leg, index) => (
+                            <li key={`${flight.id}-${leg.time}`} className="hana-chat-trip-flight-leg">
+                              <time className="hana-chat-trip-flight-time">{leg.time}</time>
+                              <span className="hana-chat-trip-flight-place">{leg.place}</span>
+                              {index < flight.legs.length - 1 ? (
+                                <span className="hana-chat-trip-flight-arrow" aria-hidden="true">↓</span>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ol>
+                      </section>
+                    ))}
+
+                    <section className="hana-chat-trip-card is-hotel">
+                      <header className="hana-chat-trip-card-head">
+                        <span className="hana-chat-trip-card-icon" aria-hidden="true">🏨</span>
+                        <span className="hana-chat-trip-card-date">{JP_TRIP_ITINERARY.hotel.stayLabel}</span>
+                      </header>
+                      <strong className="hana-chat-trip-hotel-name">{JP_TRIP_ITINERARY.hotel.name}</strong>
+                      <div className="hana-chat-trip-hotel-address-row">
+                        <p className="hana-chat-trip-hotel-address">
+                          <span aria-hidden="true">📍</span>
+                          {JP_TRIP_ITINERARY.hotel.address}
+                        </p>
+                        <button
+                          type="button"
+                          className={`hana-chat-trip-copy${jpTripAddressCopied ? ' is-copied' : ''}`}
+                          onClick={() => { void copyJpTripHotelAddress() }}
+                        >
+                          {jpTripAddressCopied ? 'コピー済' : 'コピー'}
+                        </button>
+                      </div>
+                      <p className="hana-chat-trip-hotel-hours">
+                        <span>{JP_TRIP_ITINERARY.hotel.checkIn}チェックイン</span>
+                        <span aria-hidden="true">→</span>
+                        <span>{JP_TRIP_ITINERARY.hotel.checkOut}チェックアウト</span>
+                      </p>
+                    </section>
+
+                    {jpTripDaysLeft === 0 && actingAsOwner ? (
+                      <button
+                        type="button"
+                        className="hana-chat-trip-arrived-btn"
+                        disabled={jpTripConfirmBusy || !jpTripThreadId}
+                        onClick={() => { void confirmJpTripArrival() }}
+                      >
+                        {jpTripConfirmBusy ? '確認中…' : '日本に着いた ✓'}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="hana-chat-trip-bubble"
+                  aria-label={
+                    jpTripDaysLeft === 0
+                      ? 'はなの日本旅、今日出発。詳細を開く'
+                      : `はなの日本旅、出発まであと${jpTripDaysLeft}日。詳細を開く`
+                  }
+                  title="はなの日本旅"
+                  onClick={() => setJpTripOpen(true)}
+                >
+                  {jpTripDaysLeft === 0 ? (
+                    <span className="hana-chat-trip-bubble-today">出発</span>
+                  ) : (
+                    <>
+                      <span className="hana-chat-trip-bubble-num">{jpTripDaysLeft}</span>
+                      <span className="hana-chat-trip-bubble-unit">日</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           ) : null}
 

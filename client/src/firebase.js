@@ -1479,6 +1479,9 @@ function serializeChatThread(id, data) {
     guestStatus: normalizeChatPresenceMode(data?.guestStatus),
     hanaStatus: normalizeChatPresenceMode(data?.hanaStatus),
     lastEffect: serializeChatEffect(data?.lastEffect),
+    jpTripArrivedAtIso: data?.jpTripArrivedAtIso
+      || data?.jpTripArrivedAt?.toDate?.()?.toISOString?.()
+      || null,
   }
 }
 
@@ -1537,6 +1540,19 @@ export async function pulseChatPresence(threadId, role) {
     ? { hanaOnlineAt: serverTimestamp(), hanaOnlineAtIso: nowIso }
     : { guestOnlineAt: serverTimestamp(), guestOnlineAtIso: nowIso }
   await setDoc(doc(db, CHAT_THREADS_COLLECTION, threadId), patch, { merge: true })
+}
+
+/**
+ * Hana confirms arrival in Japan — hides the shared trip countdown for both sides.
+ * @param {string} threadId
+ */
+export async function confirmJpTripArrived(threadId) {
+  if (!threadId) return
+  const nowIso = new Date().toISOString()
+  await setDoc(doc(db, CHAT_THREADS_COLLECTION, threadId), {
+    jpTripArrivedAt: serverTimestamp(),
+    jpTripArrivedAtIso: nowIso,
+  }, { merge: true })
 }
 
 /**
