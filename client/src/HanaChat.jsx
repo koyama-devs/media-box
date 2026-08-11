@@ -5,11 +5,12 @@ import hanachanArt from './assets/hanachan.svg'
 import {
   addChatReminder,
   dueChatReminders,
+  loadAllLocalChatPins,
   loadChatPins,
   markChatReminderDone,
   remindAtFromChoice,
   toggleChatPin,
-  unpinChatMessage,
+  unpinChatMessageEverywhere
 } from './chatExtras'
 import ChatImageLightbox from './ChatImageLightbox'
 import ChatNatsuFireworks from './ChatNatsuFireworks'
@@ -48,6 +49,7 @@ import {
   markThreadRead,
   messageEditWindowMsFromMinutes,
   migrateLegacyGuestThread,
+  migrateLocalPinsToThread,
   normalizeChatPresenceMode,
   OWNER_PROFILE,
   pulseChatPresence,
@@ -70,7 +72,9 @@ import {
   suggestHanaChat,
   threadUnreadCount,
   toggleChatReaction,
+  toggleThreadChatPin,
   translateChatMessage,
+  unpinThreadChatMessage,
   updateChatMessage,
   uploadChatAttachment,
 } from './firebase'
@@ -220,6 +224,66 @@ function isOwnerAssistableGuestMessage(message) {
   if (message.sticker || message.imageUrl || message.fileUrl || message.effect) return false
   return Boolean(String(message.rawText || message.text || '').trim())
 }
+
+function pinnedMessagesEqual(a, b) {
+  if (a === b) return true
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+  for (let i = 0; i < a.length; i += 1) {
+    if (
+      a[i]?.messageId !== b[i]?.messageId
+      || a[i]?.pinnedAt !== b[i]?.pinnedAt
+      || a[i]?.text !== b[i]?.text
+    ) return false
+  }
+  return true
+}
+
+/**
+ * Keep previous thread object when the snapshot only changed our own typing /
+ * presence pulse (or identical pin arrays). Stops heartbeats from re-rendering
+ * the whole chat + every memoized bubble.
+ */
+function threadSnapshotEqualForUi(prev, next, ignoreKeys) {
+  if (prev === next) return true
+  if (!prev || !next || prev.id !== next.id) return false
+  const ignore = ignoreKeys instanceof Set
+    ? ignoreKeys
+    : new Set(Array.isArray(ignoreKeys) ? ignoreKeys : [ignoreKeys])
+  const keys = new Set([...Object.keys(prev), ...Object.keys(next)])
+  for (const key of keys) {
+    if (ignore.has(key)) continue
+    if (key === 'pinnedMessages') {
+      if (!pinnedMessagesEqual(prev.pinnedMessages, next.pinnedMessages)) return false
+      continue
+    }
+    if (key === 'lastEffect') {
+      if ((prev.lastEffect?.nonce || '') !== (next.lastEffect?.nonce || '')) return false
+      continue
+    }
+    if (prev[key] !== next[key]) return false
+  }
+  return true
+}
+
+const OWNER_THREAD_ECHO_KEYS = new Set(['hanaTypingAt', 'hanaOnlineAt'])
+const GUEST_THREAD_ECHO_KEYS = new Set(['guestTypingAt', 'guestOnlineAt'])
+
+function mergeThreadListPreservingRefs(prev, next, ignoreKeys) {
+  if (!Array.isArray(next)) return prev
+  if (!Array.isArray(prev) || !prev.length) return next
+  if (prev.length !== next.length) return next
+  let changed = false
+  const merged = next.map((thread) => {
+    const old = prev.find((entry) => entry.id === thread.id)
+    if (old && threadSnapshotEqualForUi(old, thread, ignoreKeys)) {
+      return old
+    }
+    changed = true
+    return thread
+  })
+  return changed ? merged : prev
+}
+
 const TYPING_IDLE_MS = 3_000
 const TYPING_VISIBLE_MS = 6_000
 
@@ -560,6 +624,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const typingNudgeRef = useRef(() => {})
   const draftRef = useRef(draft)
   draftRef.current = draft
+  const pinMigrateDoneRef = useRef('')
   const threadsRef = useRef(threads)
   threadsRef.current = threads
   /** Keep last snapshot per thread so open/switch never flashes an empty list. */
@@ -630,9 +695,18 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   }, [actingAsOwner])
 
   useEffect(() => {
-    setPins(loadChatPins(extrasProfileId))
     setDueReminders(dueChatReminders(extrasProfileId))
-  }, [extrasProfileId, open])
+    // Prefer the profile bucket, then fold in any older pin keys on this device
+    // (human threads also sync from Firestore after migration).
+    const primary = loadChatPins(extrasProfileId)
+    const all = loadAllLocalChatPins()
+    const byId = new Map()
+    for (const pin of [...primary, ...all]) {
+      const id = String(pin?.messageId || '').trim()
+      if (id && !byId.has(id)) byId.set(id, pin)
+    }
+    setPins([...byId.values()])
+  }, [extrasProfileId, open, actingAsOwner, channel])
 
   useEffect(() => {
     if (!open || !actionNote) return undefined
@@ -1006,7 +1080,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       return undefined
     }
     return subscribeChatThreads(
-      (next) => setThreads(next),
+      (next) => setThreads((prev) => mergeThreadListPreservingRefs(prev, next, OWNER_THREAD_ECHO_KEYS)),
       (err) => setError(getFirebaseErrorMessage(err) || 'スレッドの読み込みに失敗しました。'),
     )
   }, [hidden, actingAsOwner])
@@ -1160,7 +1234,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     }
     return subscribeOwnChatThread(
       guestChatId,
-      (next) => setOwnThread(next),
+      (next) => setOwnThread((prev) => (
+        threadSnapshotEqualForUi(prev, next, GUEST_THREAD_ECHO_KEYS) ? prev : next
+      )),
       () => {},
     )
   }, [hidden, actingAsOwner, guestChatId])
@@ -1470,6 +1546,82 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     }
     return ownThread
   }, [actingAsOwner, threads, activeThreadId, ownThread])
+
+  const sharedThreadPins = useMemo(() => {
+    if (!(actingAsOwner || guestOnHuman)) return []
+    const threadId = actingAsOwner ? activeThreadId : guestChatId
+    const list = Array.isArray(activeThreadMeta?.pinnedMessages)
+      ? activeThreadMeta.pinnedMessages
+      : []
+    return list.map((pin) => ({
+      ...pin,
+      threadId: threadId || '',
+    }))
+  }, [
+    actingAsOwner,
+    guestOnHuman,
+    activeThreadId,
+    guestChatId,
+    activeThreadMeta?.pinnedMessages,
+  ])
+
+  // Lift older device-local pins into the shared thread so both sides see them.
+  // Run once per open thread — not on every threads[] presence/typing snapshot.
+  useEffect(() => {
+    if (!open || !(actingAsOwner || guestOnHuman)) return undefined
+    const threadId = actingAsOwner ? activeThreadId : guestChatId
+    if (!threadId) return undefined
+    const guestKeyForPins = actingAsOwner
+      ? String(ownerActiveGuestKey || '').trim().toLowerCase()
+      : String(guestKey || guestProfile?.key || '').trim().toLowerCase()
+    const migrateKey = `${threadId}::${guestKeyForPins}`
+    if (pinMigrateDoneRef.current === migrateKey) return undefined
+
+    const localPins = loadAllLocalChatPins()
+    if (!localPins.length) {
+      pinMigrateDoneRef.current = migrateKey
+      return undefined
+    }
+
+    const related = new Set([threadId])
+    if (guestKeyForPins) related.add(`guest-${guestKeyForPins}`)
+    const ownId = String(ownThread?.id || '').trim()
+    if (ownId) related.add(ownId)
+    // Snapshot current related thread ids without depending on threads[] identity.
+    threadsRef.current.forEach((thread) => {
+      if (!thread?.id) return
+      if (thread.id === threadId) related.add(thread.id)
+      if (guestKeyForPins && (
+        thread.guestKey === guestKeyForPins
+        || thread.id === `guest-${guestKeyForPins}`
+      )) {
+        related.add(thread.id)
+      }
+    })
+
+    pinMigrateDoneRef.current = migrateKey
+    void migrateLocalPinsToThread({
+      threadId,
+      relatedThreadIds: [...related],
+      localPins,
+      includeOrphanPins: true,
+      guestKey: guestKeyForPins,
+    }).catch(() => {
+      // Allow a retry next open if the write failed.
+      if (pinMigrateDoneRef.current === migrateKey) pinMigrateDoneRef.current = ''
+    })
+    return undefined
+  }, [
+    open,
+    actingAsOwner,
+    guestOnHuman,
+    activeThreadId,
+    guestChatId,
+    ownerActiveGuestKey,
+    guestKey,
+    guestProfile?.key,
+    ownThread?.id,
+  ])
 
   const typingThreadId = actingAsOwner ? activeThreadId : guestChatId
   const typingRole = actingAsOwner ? 'hana' : 'guest'
@@ -2335,16 +2487,23 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   }
 
   // Grow the composer with the draft, then let it scroll once it hits the line cap.
+  const composerMetricsRef = useRef(null)
   const resizeComposer = useCallback(() => {
     const el = inputRef.current
     if (!el) return
-    const styles = window.getComputedStyle(el)
-    const lineHeight = Number.parseFloat(styles.lineHeight) || 20
-    const borderY = (Number.parseFloat(styles.borderTopWidth) || 0)
-      + (Number.parseFloat(styles.borderBottomWidth) || 0)
-    const paddingY = (Number.parseFloat(styles.paddingTop) || 0)
-      + (Number.parseFloat(styles.paddingBottom) || 0)
-    // scrollHeight covers content + padding but never the border on border-box inputs.
+    let metrics = composerMetricsRef.current
+    if (!metrics) {
+      const styles = window.getComputedStyle(el)
+      metrics = {
+        lineHeight: Number.parseFloat(styles.lineHeight) || 20,
+        borderY: (Number.parseFloat(styles.borderTopWidth) || 0)
+          + (Number.parseFloat(styles.borderBottomWidth) || 0),
+        paddingY: (Number.parseFloat(styles.paddingTop) || 0)
+          + (Number.parseFloat(styles.paddingBottom) || 0),
+      }
+      composerMetricsRef.current = metrics
+    }
+    const { lineHeight, borderY, paddingY } = metrics
     const maxHeight = Math.round((lineHeight * COMPOSER_MAX_LINES) + paddingY + borderY)
     el.style.height = 'auto'
     const contentHeight = el.scrollHeight + borderY
@@ -2353,13 +2512,18 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   }, [])
 
   useEffect(() => {
+    composerMetricsRef.current = null
     resizeComposer()
-  }, [resizeComposer, draft, open, editingId, replyTo])
+  }, [resizeComposer, open, editingId, replyTo])
 
   useEffect(() => {
     if (!open) return undefined
-    window.addEventListener('resize', resizeComposer)
-    return () => window.removeEventListener('resize', resizeComposer)
+    const onResize = () => {
+      composerMetricsRef.current = null
+      resizeComposer()
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
   }, [open, resizeComposer])
 
   useEffect(() => {
@@ -2617,6 +2781,19 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     window.setTimeout(() => setCopyNote(''), 1400)
   }, [])
 
+  // Only receipt fields — not typing/presence — so pulses do not bust bubble memo.
+  const deliveryReadMeta = useMemo(() => ({
+    hanaLastReadAt: activeThreadMeta?.hanaLastReadAt || null,
+    guestLastReadAt: activeThreadMeta?.guestLastReadAt || null,
+    unreadByHana: activeThreadMeta?.unreadByHana,
+    unreadByGuest: activeThreadMeta?.unreadByGuest,
+  }), [
+    activeThreadMeta?.hanaLastReadAt,
+    activeThreadMeta?.guestLastReadAt,
+    activeThreadMeta?.unreadByHana,
+    activeThreadMeta?.unreadByGuest,
+  ])
+
   const resolveDelivery = useCallback((message) => {
     if (message.deleted) return null
     if (actingAsOwner || guestOnHuman) {
@@ -2624,13 +2801,13 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       const sender = message.sender || (message.role === 'hana' ? 'hana' : 'guest')
       return getMessageDeliveryStatus(
         { sender, createdAt: message.createdAt },
-        activeThreadMeta,
+        deliveryReadMeta,
         viewer,
       )
     }
     if (message.role === 'guest') return 'sent'
     return null
-  }, [actingAsOwner, guestOnHuman, activeThreadMeta])
+  }, [actingAsOwner, guestOnHuman, deliveryReadMeta])
 
   /** Unread by partner → free edit/delete; after read → admin window. */
   const canMutateMessage = useCallback((message) => {
@@ -2641,7 +2818,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         const sender = message.sender || (message.role === 'hana' ? 'hana' : 'guest')
         return getMessageDeliveryStatus(
           { sender, createdAt: message.createdAt },
-          activeThreadMeta,
+          deliveryReadMeta,
           viewer,
         )
       }
@@ -2652,7 +2829,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       unreadByPartner: delivery === 'sent',
       windowMs: editWindowMs,
     })
-  }, [actingAsOwner, guestOnHuman, activeThreadMeta, editWindowMs])
+  }, [actingAsOwner, guestOnHuman, deliveryReadMeta, editWindowMs])
 
   const labelForRole = useCallback((role) => {
     if (role === 'hanachan') return 'はなちゃん'
@@ -3271,6 +3448,64 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   const currentThreadId = actingAsOwner ? activeThreadId : (guestOnHuman ? guestChatId : 'ai')
 
+  const visiblePins = useMemo(() => {
+    const byId = new Map()
+    const take = (list) => {
+      for (const pin of list || []) {
+        const messageId = String(pin?.messageId || '').trim()
+        if (!messageId || byId.has(messageId)) continue
+        byId.set(messageId, {
+          ...pin,
+          messageId,
+          threadId: pin.threadId || currentThreadId || '',
+        })
+      }
+    }
+
+    if (actingAsOwner || guestOnHuman) {
+      take(sharedThreadPins)
+      const threadIds = new Set(
+        [currentThreadId, activeThreadId, guestChatId, ownThread?.id]
+          .map((id) => String(id || '').trim())
+          .filter(Boolean),
+      )
+      const guestKeyForPins = actingAsOwner
+        ? String(ownerActiveGuestKey || '').trim().toLowerCase()
+        : String(guestKey || guestProfile?.key || '').trim().toLowerCase()
+      const localForThread = pins.filter((pin) => {
+        const pinThread = String(pin?.threadId || '').trim()
+        if (!pinThread) return true
+        if (threadIds.has(pinThread)) return true
+        if (guestKeyForPins && (
+          pinThread === `guest-${guestKeyForPins}`
+          || pinThread.includes(guestKeyForPins)
+        )) return true
+        return false
+      })
+      take(localForThread)
+      return [...byId.values()]
+    }
+
+    take(pins.filter((pin) => (
+      !currentThreadId
+      || pin.threadId === currentThreadId
+      || (!pin.threadId && currentThreadId === 'ai')
+    )))
+    return [...byId.values()]
+  }, [
+    actingAsOwner,
+    guestOnHuman,
+    sharedThreadPins,
+    pins,
+    currentThreadId,
+    activeThreadId,
+    guestChatId,
+    ownThread?.id,
+    ownerActiveGuestKey,
+    guestKey,
+    guestProfile?.key,
+  ])
+
   const notifyAction = (text) => {
     setActionNote(text)
   }
@@ -3280,6 +3515,24 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     const threadId = currentThreadId || ''
 
     if (actionId === 'pin') {
+      if (actingAsOwner || guestOnHuman) {
+        if (!threadId || threadId === 'ai') {
+          notifyAction('ピン留めできません')
+          return true
+        }
+        void toggleThreadChatPin({
+          threadId,
+          message,
+          pinnedBy: actingAsOwner ? 'hana' : (guestProfile?.key || guestKey || 'guest'),
+        })
+          .then((result) => {
+            notifyAction(result.pinned ? 'ピン留めしました' : 'ピンを外しました')
+          })
+          .catch((err) => {
+            notifyAction(getFirebaseErrorMessage(err) || err?.message || 'ピン留めに失敗しました')
+          })
+        return true
+      }
       const result = toggleChatPin(extrasProfileId, message, { threadId })
       setPins(result.list)
       notifyAction(result.pinned ? 'ピン留めしました' : 'ピンを外しました')
@@ -4190,22 +4443,34 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             </div>
           ) : null}
 
-          {pins.filter((pin) => !currentThreadId || pin.threadId === currentThreadId || (!pin.threadId && currentThreadId === 'ai')).length > 0 ? (
+          {visiblePins.length > 0 ? (
             <div
               className={`hana-chat-pin-strip${showJpTripCountdown ? ' has-trip-dock' : ''}`}
               aria-label="ピン留め"
             >
-              {pins
-                .filter((pin) => !currentThreadId || pin.threadId === currentThreadId || (!pin.threadId && currentThreadId === 'ai'))
-                .slice(0, 3)
-                .map((pin) => (
+              {visiblePins.slice(0, 3).map((pin) => (
                   <div key={pin.messageId} className="hana-chat-pin-chip">
                     <span>📌 {pin.text}</span>
                     <button
                       type="button"
                       className="hana-chat-pin-chip-remove"
                       aria-label="ピンを外す"
-                      onClick={() => setPins(unpinChatMessage(extrasProfileId, pin.messageId))}
+                      onClick={() => {
+                        if (actingAsOwner || guestOnHuman) {
+                          const threadId = actingAsOwner ? activeThreadId : guestChatId
+                          if (!threadId) return
+                          // Drop local copies too so merge UI does not bring the pin back.
+                          setPins(unpinChatMessageEverywhere(pin.messageId))
+                          void unpinThreadChatMessage({
+                            threadId,
+                            messageId: pin.messageId,
+                          }).catch((err) => {
+                            notifyAction(getFirebaseErrorMessage(err) || 'ピンを外せませんでした')
+                          })
+                          return
+                        }
+                        setPins(unpinChatMessageEverywhere(pin.messageId))
+                      }}
                     >
                       ×
                     </button>

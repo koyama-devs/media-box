@@ -17,7 +17,6 @@ import { getAvatarPresetSrc } from './avatarPresets'
 import {
     addChatReminder,
     remindAtFromChoice,
-    toggleChatPin,
 } from './chatExtras'
 import { renderChatTextWithLinks } from './chatLinkify'
 import { readDefaultReaction } from './chatSettings'
@@ -61,6 +60,7 @@ import {
     subscribeToSharedPhotoAlbums,
     subscribeToSharedPlaylists,
     toggleChatReaction,
+    toggleThreadChatPin,
     translateChatMessage,
     updateChatMessage,
     upsertChatAccount,
@@ -917,11 +917,23 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
 
   const handleMenuAction = (actionId, message) => {
     if (!message || message.deleted) return false
-    const profileId = OWNER_PROFILE.key
 
     if (actionId === 'pin') {
-      const result = toggleChatPin(profileId, message, { threadId: activeId || '' })
-      setStatusNote(result.pinned ? 'ピン留めしました' : 'ピンを外しました')
+      if (!activeId) {
+        setStatusNote('スレッドを選んでください')
+        return true
+      }
+      void toggleThreadChatPin({
+        threadId: activeId,
+        message,
+        pinnedBy: OWNER_PROFILE.key,
+      })
+        .then((result) => {
+          setStatusNote(result.pinned ? 'ピン留めしました' : 'ピンを外しました')
+        })
+        .catch((err) => {
+          setStatusNote(getFirebaseErrorMessage(err) || 'ピン留めに失敗しました')
+        })
       return true
     }
     if (actionId === 'remind') {

@@ -38,6 +38,30 @@ export function loadChatPins(profileId) {
   return Array.isArray(list) ? list : []
 }
 
+/** Scan every local pin bucket (older builds used varying profile ids). */
+export function loadAllLocalChatPins() {
+  if (typeof window === 'undefined') return []
+  const merged = []
+  const seen = new Set()
+  try {
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i)
+      if (!key || !key.startsWith('hana-chat-pins-')) continue
+      const list = readList(key)
+      if (!Array.isArray(list)) continue
+      for (const entry of list) {
+        const messageId = String(entry?.messageId || '').trim()
+        if (!messageId || seen.has(messageId)) continue
+        seen.add(messageId)
+        merged.push(entry)
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return merged
+}
+
 export function isMessagePinned(profileId, messageId) {
   return loadChatPins(profileId).some((entry) => entry.messageId === messageId)
 }
@@ -73,6 +97,24 @@ export function unpinChatMessage(profileId, messageId) {
   const next = loadChatPins(profileId).filter((entry) => entry.messageId !== messageId)
   writeList(key, next)
   return next
+}
+
+/** Remove a pin from every localStorage pin bucket on this device. */
+export function unpinChatMessageEverywhere(messageId) {
+  const mid = String(messageId || '').trim()
+  if (!mid || typeof window === 'undefined') return loadAllLocalChatPins()
+  try {
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i)
+      if (!key || !key.startsWith('hana-chat-pins-')) continue
+      const list = readList(key)
+      if (!Array.isArray(list)) continue
+      writeList(key, list.filter((entry) => String(entry?.messageId || '') !== mid))
+    }
+  } catch {
+    /* ignore */
+  }
+  return loadAllLocalChatPins()
 }
 
 export function loadChatReminders(profileId) {

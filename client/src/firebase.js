@@ -1563,7 +1563,170 @@ function serializeChatThread(id, data) {
     jpTripArrivedAtIso: data?.jpTripArrivedAtIso
       || data?.jpTripArrivedAt?.toDate?.()?.toISOString?.()
       || null,
+    pinnedMessages: serializeThreadPinnedMessages(data?.pinnedMessages),
   }
+}
+
+const THREAD_PIN_LIMIT = 20
+
+export function serializeThreadPinnedMessages(raw) {
+  if (!Array.isArray(raw)) return []
+  const out = []
+  const seen = new Set()
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const messageId = String(entry.messageId || entry.id || '').trim()
+    if (!messageId || seen.has(messageId)) continue
+    seen.add(messageId)
+    out.push({
+      messageId,
+      text: String(entry.text || '').slice(0, 500),
+      sender: String(entry.sender || entry.role || ''),
+      createdAt: entry.createdAt || null,
+      pinnedAt: entry.pinnedAt || null,
+      pinnedBy: String(entry.pinnedBy || ''),
+    })
+    if (out.length >= THREAD_PIN_LIMIT) break
+  }
+  return out
+}
+
+/**
+ * Shared thread pins — visible to both Hana and the guest on this thread.
+ * @returns {Promise<{ pinned: boolean, list: Array }>}
+ */
+export async function toggleThreadChatPin({
+  threadId,
+  message,
+  pinnedBy = '',
+} = {}) {
+  const tid = String(threadId || '').trim()
+  const messageId = String(message?.serverId || message?.id || '').trim()
+  if (!tid) throw new Error('スレッドがありません。')
+  if (!messageId || messageId.startsWith('pending-')) {
+    throw new Error('送信が終わるまでピン留めできません。')
+  }
+
+  const threadRef = doc(db, CHAT_THREADS_COLLECTION, tid)
+  const snap = await getDoc(threadRef)
+  const list = serializeThreadPinnedMessages(snap.data()?.pinnedMessages)
+  const existing = list.findIndex((entry) => entry.messageId === messageId)
+  let next
+  let pinned
+  if (existing >= 0) {
+    next = list.filter((_, index) => index !== existing)
+    pinned = false
+  } else {
+    const preview = String(message?.rawText || message?.text || '').trim()
+      || (message?.imageUrl || message?.fileKind === 'image' ? '写真' : '')
+      || (message?.fileKind === 'video' || String(message?.fileMime || '').startsWith('video/') ? '動画' : '')
+      || (message?.sticker ? 'スタンプ' : '')
+      || (message?.fileUrl ? (message?.fileName || 'ファイル') : '')
+      || 'メッセージ'
+    next = [
+      {
+        messageId,
+        text: preview.slice(0, 500),
+        sender: String(message?.sender || message?.role || ''),
+        createdAt: message?.createdAt || message?.createdAtIso || null,
+        pinnedAt: new Date().toISOString(),
+        pinnedBy: String(pinnedBy || '').trim().toLowerCase(),
+      },
+      ...list,
+    ].slice(0, THREAD_PIN_LIMIT)
+    pinned = true
+  }
+  await setDoc(threadRef, { pinnedMessages: next }, { merge: true })
+  await mirrorPinnedMessagesToCanonical(tid, snap.data(), next)
+  return { pinned, list: next }
+}
+
+export async function unpinThreadChatMessage({ threadId, messageId } = {}) {
+  const tid = String(threadId || '').trim()
+  const mid = String(messageId || '').trim()
+  if (!tid || !mid) return []
+  const threadRef = doc(db, CHAT_THREADS_COLLECTION, tid)
+  const snap = await getDoc(threadRef)
+  const next = serializeThreadPinnedMessages(snap.data()?.pinnedMessages)
+    .filter((entry) => entry.messageId !== mid)
+  await setDoc(threadRef, { pinnedMessages: next }, { merge: true })
+  await mirrorPinnedMessagesToCanonical(tid, snap.data(), next)
+  return next
+}
+
+async function mirrorPinnedMessagesToCanonical(threadId, threadData, pinnedMessages) {
+  const tid = String(threadId || '').trim()
+  const guestKey = String(
+    threadData?.guestKey
+    || (tid.match(/^guest-([a-z0-9_-]+)$/i) || [])[1]
+    || '',
+  ).trim().toLowerCase()
+  if (!guestKey) return
+  const canon = `guest-${guestKey}`
+  if (canon === tid) return
+  await setDoc(
+    doc(db, CHAT_THREADS_COLLECTION, canon),
+    { pinnedMessages },
+    { merge: true },
+  )
+}
+
+/**
+ * One-shot: push device-local pins for this conversation into the shared
+ * thread doc so the other side (and refresh) can see them.
+ */
+export async function migrateLocalPinsToThread({
+  threadId,
+  relatedThreadIds = [],
+  localPins = [],
+  includeOrphanPins = false,
+  guestKey = '',
+} = {}) {
+  const tid = String(threadId || '').trim()
+  if (!tid) return null
+  const related = new Set(
+    [tid, ...relatedThreadIds].map((id) => String(id || '').trim()).filter(Boolean),
+  )
+  const key = String(guestKey || '').trim().toLowerCase()
+  const locals = (Array.isArray(localPins) ? localPins : [])
+    .filter((entry) => {
+      const pinThread = String(entry?.threadId || '').trim()
+      if (!pinThread) return includeOrphanPins
+      if (related.has(pinThread)) return true
+      if (key && (
+        pinThread === `guest-${key}`
+        || pinThread.endsWith(`-${key}`)
+        || pinThread.includes(key)
+      )) return true
+      return false
+    })
+    .map((entry) => ({
+      messageId: String(entry?.messageId || '').trim(),
+      text: String(entry?.text || '').slice(0, 500),
+      sender: String(entry?.sender || ''),
+      createdAt: entry?.createdAt || null,
+      pinnedAt: entry?.pinnedAt || new Date().toISOString(),
+      pinnedBy: String(entry?.pinnedBy || 'local'),
+    }))
+    .filter((entry) => entry.messageId && !entry.messageId.startsWith('pending-'))
+  if (!locals.length) return null
+
+  const threadRef = doc(db, CHAT_THREADS_COLLECTION, tid)
+  const snap = await getDoc(threadRef)
+  const remote = serializeThreadPinnedMessages(snap.data()?.pinnedMessages)
+  const byId = new Map()
+  for (const entry of remote) byId.set(entry.messageId, entry)
+  let added = 0
+  for (const entry of locals) {
+    if (byId.has(entry.messageId)) continue
+    byId.set(entry.messageId, entry)
+    added += 1
+  }
+  if (!added) return remote
+  const next = [...byId.values()].slice(0, THREAD_PIN_LIMIT)
+  await setDoc(threadRef, { pinnedMessages: next }, { merge: true })
+  await mirrorPinnedMessagesToCanonical(tid, snap.data() || { guestKey: key }, next)
+  return next
 }
 
 const PRESENCE_ONLINE_MS = 45_000
