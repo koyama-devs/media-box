@@ -3409,6 +3409,13 @@ body.hana-chat-scroll-lock #root {
   flex-shrink: 0;
 }
 
+/* Trip countdown bubble sits top-right (z-index 55) and was covering the pin ×. */
+.hana-chat-pin-strip.has-trip-dock {
+  position: relative;
+  z-index: 60;
+  padding-right: 72px;
+}
+
 .hana-chat-pin-chip {
   display: flex;
   align-items: flex-start;
@@ -3473,6 +3480,12 @@ body.hana-chat-scroll-lock #root {
   cursor: pointer;
   line-height: 1;
   flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  font-size: 1.05rem;
 }
 
 .hana-chat-pin-chip-remove:hover,

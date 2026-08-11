@@ -4191,7 +4191,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           ) : null}
 
           {pins.filter((pin) => !currentThreadId || pin.threadId === currentThreadId || (!pin.threadId && currentThreadId === 'ai')).length > 0 ? (
-            <div className="hana-chat-pin-strip" aria-label="ピン留め">
+            <div
+              className={`hana-chat-pin-strip${showJpTripCountdown ? ' has-trip-dock' : ''}`}
+              aria-label="ピン留め"
+            >
               {pins
                 .filter((pin) => !currentThreadId || pin.threadId === currentThreadId || (!pin.threadId && currentThreadId === 'ai'))
                 .slice(0, 3)
@@ -4200,6 +4203,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     <span>📌 {pin.text}</span>
                     <button
                       type="button"
+                      className="hana-chat-pin-chip-remove"
                       aria-label="ピンを外す"
                       onClick={() => setPins(unpinChatMessage(extrasProfileId, pin.messageId))}
                     >
