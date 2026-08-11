@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './Admin.css'
 import ChatImageLightbox from './ChatImageLightbox'
-import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
+import ChatSwipeBubble, { canMutateOwnMessage, useIsCoarsePointer } from './ChatSwipeBubble'
 import EmotionMomentLayer, { EMOTION_MOMENTS } from './EmotionMoment'
 import FlowerRainLayer, { CHAT_PARTY_REACTION } from './FlowerRain'
 import HanaCall from './HanaCall'
@@ -118,6 +118,7 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
   const [remindMessage, setRemindMessage] = useState(null)
   const [previewImage, setPreviewImage] = useState(null)
   const [defaultReaction] = useState(() => readDefaultReaction())
+  const coarsePointer = useIsCoarsePointer()
   const [accountForm, setAccountForm] = useState(EMPTY_ACCOUNT_FORM)
   const [editingAccountKey, setEditingAccountKey] = useState(null)
   const [accountFormOpen, setAccountFormOpen] = useState(false)
@@ -1753,6 +1754,7 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
                               defaultReaction={defaultReaction}
                               reactions={message.reactions || {}}
                               reactorId={OWNER_PROFILE.key}
+                              coarsePointer={coarsePointer}
                               copyText={message.deleted || showsImage ? '' : (message.rawText || message.text || '')}
                               onReply={() => startReply(message)}
                               onEdit={() => startEdit(message)}

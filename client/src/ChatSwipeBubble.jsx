@@ -155,34 +155,70 @@ async function copyTextToClipboard(text) {
   return legacyCopy()
 }
 
-function useIsCoarsePointer() {
-  const [coarse, setCoarse] = useState(() => {
-    if (typeof window === 'undefined') return false
-    return (
-      'ontouchstart' in window
-      || (navigator.maxTouchPoints || 0) > 0
-      || window.matchMedia('(pointer: coarse)').matches
-      || window.matchMedia('(hover: none)').matches
-    )
-  })
+function computeIsCoarsePointer() {
+  if (typeof window === 'undefined') return false
+  return (
+    'ontouchstart' in window
+    || (navigator.maxTouchPoints || 0) > 0
+    || window.matchMedia('(pointer: coarse)').matches
+    || window.matchMedia('(hover: none)').matches
+    || !window.matchMedia('(hover: hover) and (pointer: fine)').matches
+  )
+}
+
+/** One shared matchMedia listener for the whole app (not per bubble). */
+let sharedCoarsePointer = null
+let sharedCoarseMedia = null
+const sharedCoarseSubscribers = new Set()
+
+function ensureSharedCoarsePointer() {
+  if (typeof window === 'undefined') return false
+  if (sharedCoarseMedia) return sharedCoarsePointer
+  sharedCoarsePointer = computeIsCoarsePointer()
+  sharedCoarseMedia = window.matchMedia('(hover: hover) and (pointer: fine)')
+  const sync = () => {
+    sharedCoarsePointer = computeIsCoarsePointer()
+    sharedCoarseSubscribers.forEach((fn) => {
+      try { fn(sharedCoarsePointer) } catch { /* ignore */ }
+    })
+  }
+  sharedCoarseMedia.addEventListener('change', sync)
+  return sharedCoarsePointer
+}
+
+/**
+ * Coarse-pointer / touch detection. Prefer calling once in the chat shell and
+ * passing `coarsePointer` into bubbles so rows do not each subscribe.
+ */
+export function useIsCoarsePointer() {
+  const [coarse, setCoarse] = useState(() => ensureSharedCoarsePointer())
 
   useEffect(() => {
-    const sync = () => {
-      setCoarse(
-        'ontouchstart' in window
-        || (navigator.maxTouchPoints || 0) > 0
-        || window.matchMedia('(pointer: coarse)').matches
-        || window.matchMedia('(hover: none)').matches
-        || !window.matchMedia('(hover: hover) and (pointer: fine)').matches,
-      )
-    }
-    sync()
-    const media = window.matchMedia('(hover: hover) and (pointer: fine)')
-    media.addEventListener('change', sync)
-    return () => media.removeEventListener('change', sync)
+    ensureSharedCoarsePointer()
+    const onChange = (next) => setCoarse(next)
+    sharedCoarseSubscribers.add(onChange)
+    setCoarse(sharedCoarsePointer)
+    return () => { sharedCoarseSubscribers.delete(onChange) }
   }, [])
 
   return coarse
+}
+
+/** Parent override skips per-row subscription; otherwise use shared listener. */
+function useSwipeMode(coarsePointer) {
+  const needsDetect = typeof coarsePointer !== 'boolean'
+  const [coarse, setCoarse] = useState(() => (
+    needsDetect ? ensureSharedCoarsePointer() : coarsePointer
+  ))
+  useEffect(() => {
+    if (!needsDetect) return undefined
+    ensureSharedCoarsePointer()
+    const onChange = (next) => setCoarse(next)
+    sharedCoarseSubscribers.add(onChange)
+    setCoarse(sharedCoarsePointer)
+    return () => { sharedCoarseSubscribers.delete(onChange) }
+  }, [needsDetect])
+  return needsDetect ? coarse : coarsePointer
 }
 
 function isIgnoredPressTarget(target) {
@@ -234,6 +270,8 @@ function ChatSwipeBubble({
   reactorId = '',
   reactionEmojis = CHAT_REACTION_EMOJIS,
   copyText = '',
+  /** When boolean, skips per-row detection (hoist from chat shell). */
+  coarsePointer = null,
   onCopy,
   onReply,
   onEdit,
@@ -243,7 +281,7 @@ function ChatSwipeBubble({
   onEffect,
   children,
 }) {
-  const swipeMode = useIsCoarsePointer()
+  const swipeMode = useSwipeMode(coarsePointer)
   const rootRef = useRef(null)
   const startX = useRef(0)
   const startY = useRef(0)
