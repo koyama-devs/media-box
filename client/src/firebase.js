@@ -2477,12 +2477,13 @@ export async function resolveGuestThreadWithHistory({
   rows.sort((a, b) => {
     const score = (entry) => {
       const hasHistory = (String(entry.lastText || '').trim() || entry._hasMessages) ? 40 : 0
-      // Prefer a legacy UUID that actually has chat over an empty canonical shell.
-      const legacyWithKey = key && entry.guestKey === key && entry.id !== canon && entry._hasMessages ? 12 : 0
+      // Prefer canonical guest-{key} when it already has history so new sends
+      // land where reopen will look.
+      const canonWithHistory = canon && entry.id === canon && entry._hasMessages ? 16 : 0
       const keyHit = key && entry.guestKey === key ? 4 : 0
       const canonHit = canon && entry.id === canon ? 2 : 0
       const preferredHit = preferredId && entry.id === preferredId ? 1 : 0
-      return hasHistory + legacyWithKey + keyHit + canonHit + preferredHit
+      return hasHistory + canonWithHistory + keyHit + canonHit + preferredHit
     }
     const diff = score(b) - score(a)
     if (diff !== 0) return diff
@@ -2582,27 +2583,6 @@ export async function sendChatMessage({
   const key = guestKey || getGuestProfile(String(threadId).replace(/^guest-/, ''))?.key || ''
   const safeClientId = String(clientId || '').trim().slice(0, 64)
 
-  await setDoc(
-    threadRef,
-    {
-      guestLabel: label,
-      ...(key ? { guestKey: key } : {}),
-      lastText: trimmed.slice(0, 160),
-      updatedAt: serverTimestamp(),
-      updatedAtIso: nowIso,
-      ...(role === 'guest'
-        ? {
-            unreadByHana: true,
-            unreadCountHana: increment(1),
-          }
-        : {
-            unreadByGuest: true,
-            unreadCountGuest: increment(1),
-          }),
-    },
-    { merge: true },
-  )
-
   const stickerId = normalizeChatSticker(sticker)
   const effectId = normalizeChatEffect(effect)
   const emoji = String(effectEmoji || '').slice(0, 8)
@@ -2639,7 +2619,31 @@ export async function sendChatMessage({
     payload.replyToSender = String(replyTo.sender || 'guest')
   }
 
-  const messageRef = await addDoc(messagesRef, payload)
+  // Atomic: never update thread preview without the message doc (and vice versa).
+  const messageRef = doc(messagesRef)
+  const batch = writeBatch(db)
+  batch.set(messageRef, payload)
+  batch.set(
+    threadRef,
+    {
+      guestLabel: label,
+      ...(key ? { guestKey: key } : {}),
+      lastText: trimmed.slice(0, 160),
+      updatedAt: serverTimestamp(),
+      updatedAtIso: nowIso,
+      ...(role === 'guest'
+        ? {
+            unreadByHana: true,
+            unreadCountHana: increment(1),
+          }
+        : {
+            unreadByGuest: true,
+            unreadCountGuest: increment(1),
+          }),
+    },
+    { merge: true },
+  )
+  await batch.commit()
   return messageRef.id
 }
 

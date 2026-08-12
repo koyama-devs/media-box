@@ -736,14 +736,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       const thread = [...matches].sort((a, b) => {
         const score = (entry) => {
           const hasText = String(entry.lastText || '').trim() ? 40 : 0
-          // Prefer a keyed non-canonical thread over an empty guest-{key} shell.
-          const legacyHint = entry.guestKey === profile.key && entry.id !== canonicalId
-            && String(entry.lastText || '').trim()
-            ? 12
-            : (entry.guestKey === profile.key && entry.id !== canonicalId ? 6 : 0)
-          const canonHit = entry.id === canonicalId ? 2 : 0
+          // Prefer the live canonical guest-{key} shell once it has chat, so a
+          // send never "vanishes" into a legacy UUID the roster reopens later.
+          const canonHit = entry.id === canonicalId ? 16 : 0
           const keyHit = entry.guestKey === profile.key ? 1 : 0
-          return hasText + legacyHint + canonHit + keyHit
+          return hasText + canonHit + keyHit
         }
         const diff = score(b) - score(a)
         if (diff !== 0) return diff
@@ -2919,12 +2916,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     const localBest = [...localMatches].sort((a, b) => {
       const score = (entry) => {
         const hasText = String(entry.lastText || '').trim() ? 40 : 0
-        const legacyHint = key && entry.guestKey === key && entry.id !== canon
-          ? (String(entry.lastText || '').trim() ? 12 : 6)
-          : 0
-        return hasText + legacyHint
-          + (entry.id === canon ? 2 : 0)
-          + (entry.guestKey === key ? 1 : 0)
+        const canonHit = canon && entry.id === canon ? 16 : 0
+        const keyHit = key && entry.guestKey === key ? 1 : 0
+        return hasText + canonHit + keyHit
       }
       const diff = score(b) - score(a)
       if (diff !== 0) return diff
@@ -3675,6 +3669,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     const nowIso = new Date().toISOString()
     const pendingReply = replyTo
     const pendingEditId = editingId
+    let pendingSendId = ''
     clearComposerExtras()
 
     try {
@@ -3695,9 +3690,26 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       if (actingAsOwner) {
         if (!activeThreadId) {
           setError('返信する相手を選んでください。')
+          setDraft(text)
+          draftRef.current = text
           return
         }
+        // Always prefer canonical guest-{key} when known so reopen finds the send.
+        const canonId = ownerActiveGuestKey ? `guest-${ownerActiveGuestKey}` : ''
+        const threadId = (
+          (canonId && (
+            activeThreadId === canonId
+            || threadsRef.current.some((t) => t.id === canonId)
+          ))
+            ? canonId
+            : activeThreadId
+        )
+        if (threadId !== activeThreadId) {
+          showThreadMessages(threadId, [activeThreadId, canonId].filter(Boolean))
+          setActiveThreadId(threadId)
+        }
         const pendingId = nextChatPendingId('msg')
+        pendingSendId = pendingId
         setHanaMessages((prev) => [
           ...prev,
           {
@@ -3721,16 +3733,49 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         ])
         scrollToLatestRef.current()
         const serverId = await sendChatMessage({
-          threadId: activeThreadId,
+          threadId,
           text,
           sender: 'hana',
           clientId: pendingId,
           replyTo: pendingReply,
+          guestKey: ownerActiveGuestKey || '',
+          guestLabel: ownerActiveGuestLabel,
         })
         if (serverId) {
           setHanaMessages((prev) => prev.map((m) => (
-            m.id === pendingId ? { ...m, serverId } : m
+            m.id === pendingId
+              ? {
+                  ...m,
+                  id: serverId,
+                  serverId,
+                  pending: false,
+                  clientId: pendingId,
+                }
+              : m
           )))
+          const cached = messageCacheRef.current.get(threadId) || []
+          const withoutPending = cached.filter((m) => m.id !== pendingId && m.id !== serverId)
+          messageCacheRef.current.set(threadId, [
+            ...withoutPending,
+            {
+              id: serverId,
+              clientId: pendingId,
+              role: 'hana',
+              sender: 'hana',
+              text,
+              rawText: text,
+              createdAt: nowIso,
+              createdAtIso: nowIso,
+              pending: false,
+              replyTo: pendingReply
+                ? {
+                    id: pendingReply.id,
+                    text: pendingReply.text,
+                    sender: pendingReply.sender || pendingReply.role,
+                  }
+                : null,
+            },
+          ])
         }
         scrollToLatestRef.current()
       } else if (channel === 'human' || wantsHumanHana(text)) {
@@ -3740,6 +3785,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         const threadId = guestChatId || ensureGuestChatId(guestKey || 'guest')
         if (!guestChatId) setGuestChatId(threadId)
         const pendingId = nextChatPendingId('msg')
+        pendingSendId = pendingId
         setHanaMessages((prev) => [
           ...prev,
           {
@@ -3773,7 +3819,15 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         })
         if (serverId) {
           setHanaMessages((prev) => prev.map((m) => (
-            m.id === pendingId ? { ...m, serverId } : m
+            m.id === pendingId
+              ? {
+                  ...m,
+                  id: serverId,
+                  serverId,
+                  pending: false,
+                  clientId: pendingId,
+                }
+              : m
           )))
         }
         setChannel('human')
@@ -3838,6 +3892,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       }
     } catch (err) {
       console.error(err)
+      if (pendingSendId) {
+        setHanaMessages((prev) => prev.filter((m) => m.id !== pendingSendId))
+        setDraft(text)
+        draftRef.current = text
+      }
       const msg = getFirebaseErrorMessage(err) || ''
       const looksQuota = /quota|credit|resource-exhausted|429/i.test(`${err?.code || ''} ${msg} ${err?.message || ''}`)
       if (!actingAsOwner && channel === 'ai' && looksQuota && !pendingEditId) {
