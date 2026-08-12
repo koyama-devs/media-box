@@ -1,6 +1,24 @@
 {
-  "updatedAt": "2026-08-03T10:23:43.809Z",
+  "updatedAt": "2026-08-12T09:21:06.816Z",
   "releases": [
+    {
+      "version": "mspvn8ex-zzpsu0",
+      "notes": "Restore chat bubble URL autolink so http/https links are tappable again.",
+      "builtAt": "2026-08-12T09:18:56.616Z",
+      "previousVersion": "mspukf27-7nu8f7",
+      "previousHostingVersionId": "9b0e4831dcf7caf1",
+      "hostingVersionId": "0d7c77e057af3151",
+      "recordedAt": "2026-08-12T09:18:57.618Z"
+    },
+    {
+      "version": "mspukf27-7nu8f7",
+      "notes": "Rebuild and redeploy current chat fixes.",
+      "builtAt": "2026-08-12T08:48:36.632Z",
+      "previousVersion": "msptt8oz-l0jc4d",
+      "previousHostingVersionId": "e03096455e2ae954",
+      "hostingVersionId": "9b0e4831dcf7caf1",
+      "recordedAt": "2026-08-12T08:48:37.661Z"
+    },
     {
       "version": "msd2luto-1pwke7",
       "notes": "チャットヘッダー修正：夏まつりバナーの重なりを解消、オンライン／オフライン文字を削除（アバターの点のみ）。",

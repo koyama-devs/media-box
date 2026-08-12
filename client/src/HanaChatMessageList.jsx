@@ -13,6 +13,41 @@ import OwnerMessageAssist from './OwnerMessageAssist'
 
 /** Stable empty reactions object so `|| {}` does not defeat memo. */
 export const EMPTY_CHAT_REACTIONS = Object.freeze({})
+const URL_RE = /(https?:\/\/[^\s<>"'`]+)/gi
+
+function renderMessageWithLinks(text) {
+  const raw = String(text || '')
+  if (!raw) return null
+  const parts = []
+  let lastIndex = 0
+  let match = URL_RE.exec(raw)
+  while (match) {
+    const url = match[0]
+    const start = match.index
+    if (start > lastIndex) {
+      parts.push(raw.slice(lastIndex, start))
+    }
+    parts.push(
+      <a
+        key={`url-${start}-${url}`}
+        className="hana-chat-autolink"
+        href={url}
+        target="_blank"
+        rel="noreferrer noopener"
+        data-no-bubble-press="true"
+      >
+        {url}
+      </a>,
+    )
+    lastIndex = start + url.length
+    match = URL_RE.exec(raw)
+  }
+  if (lastIndex < raw.length) {
+    parts.push(raw.slice(lastIndex))
+  }
+  URL_RE.lastIndex = 0
+  return parts
+}
 
 /**
  * One message row. Memoized so draft/typing re-renders in the parent do not
@@ -190,7 +225,7 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
                   <p className="hana-chat-effect-msg-caption">{message.text}</p>
                 </div>
               ) : (
-                <p>{message.text}</p>
+                <p>{renderMessageWithLinks(message.text)}</p>
               )}
               {translation ? (
                 <p className="hana-chat-translation">{translation}</p>
