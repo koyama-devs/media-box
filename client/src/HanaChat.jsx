@@ -2525,9 +2525,16 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       composerMetricsRef.current = metrics
     }
     const { lineHeight, borderY, paddingY } = metrics
+    const singleLine = Math.round(lineHeight + paddingY + borderY)
     const maxHeight = Math.round((lineHeight * COMPOSER_MAX_LINES) + paddingY + borderY)
-    el.style.height = 'auto'
-    const contentHeight = el.scrollHeight + borderY
+    // Collapse first — height:auto keeps a stale multi-line scrollHeight when empty.
+    el.style.height = '0px'
+    el.style.overflowY = 'hidden'
+    if (!String(el.value || '').length) {
+      el.style.height = `${singleLine}px`
+      return
+    }
+    const contentHeight = Math.max(singleLine, el.scrollHeight + borderY)
     el.style.height = `${Math.min(contentHeight, maxHeight)}px`
     el.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden'
   }, [])
@@ -2536,6 +2543,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     composerMetricsRef.current = null
     resizeComposer()
   }, [resizeComposer, open, editingId, replyTo])
+
+  // Keep height in sync when draft is cleared programmatically (send / sticker / cancel edit).
+  useEffect(() => {
+    resizeComposer()
+  }, [draft, resizeComposer])
 
   useEffect(() => {
     if (!open) return undefined

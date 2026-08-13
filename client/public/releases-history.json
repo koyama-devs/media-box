@@ -1,6 +1,15 @@
 {
-  "updatedAt": "2026-08-12T09:21:06.816Z",
+  "updatedAt": "2026-08-12T13:46:48.532Z",
   "releases": [
+    {
+      "version": "msq5498i-2jwbpw",
+      "notes": "Fix empty composer staying multi-line tall by resetting textarea height when draft is blank.",
+      "builtAt": "2026-08-12T13:44:22.471Z",
+      "previousVersion": "mspvn8ex-zzpsu0",
+      "previousHostingVersionId": "0d7c77e057af3151",
+      "hostingVersionId": "fc1efa99749cfa53",
+      "recordedAt": "2026-08-12T13:44:30.871Z"
+    },
     {
       "version": "mspvn8ex-zzpsu0",
       "notes": "Restore chat bubble URL autolink so http/https links are tappable again.",
