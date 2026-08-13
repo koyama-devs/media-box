@@ -4,7 +4,14 @@ import './App.css'
 import hanachanArt from './assets/hanachan.svg'
 import { AVATAR_PRESETS, getAvatarPresetSrc } from './avatarPresets'
 import { clearBookBookmark, getAllBookBookmarks, getBookBookmark } from './bookProgress'
-import { requestChatCardShare, CHAT_PLAY_TRACK_EVENT } from './chatCardShare'
+import {
+  requestChatCardShare,
+  CHAT_PLAY_TRACK_EVENT,
+  CHAT_TOGGLE_TRACK_EVENT,
+  CHAT_OPEN_MAIN_PLAYER_EVENT,
+  CHAT_CLOSE_EVENT,
+  publishChatPlaybackState,
+} from './chatCardShare'
 import DailyKotoba from './DailyKotoba'
 import {
     ACCOUNT_INACTIVE_LOGIN_MESSAGE,
@@ -693,6 +700,10 @@ const sessionAvatarSrc = useMemo(
 
   // Ref tới player hiện tại (audio hoặc video)
   const mediaRef = useRef(null)
+  const selectedItemIdRef = useRef(null)
+  const isMediaPlayingRef = useRef(false)
+  const previewUrlRef = useRef(null)
+  const loadingPreviewRef = useRef(false)
   const initialLocalPlaylistsRef = useRef(loadCustomPlaylists())
   const remotePlaylistsHashRef = useRef('')
   const remoteAlbumsHashRef = useRef('')
@@ -2935,9 +2946,81 @@ const playPrevious = useCallback(() => {
     selectItem,
   ])
 
-  // Chat bubble「聴く」: play in-app immediately (skip the welcome postcard).
+  // Chat bubble song mini-player: toggle play/pause, or open main player.
+  selectedItemIdRef.current = selectedItemId
+  isMediaPlayingRef.current = isMediaPlaying
+  previewUrlRef.current = previewUrl
+  loadingPreviewRef.current = loadingPreview
+
+  useEffect(() => {
+    publishChatPlaybackState({
+      trackId: selectedItemId || '',
+      playing: isMediaPlaying,
+    })
+  }, [selectedItemId, isMediaPlaying])
+
+  const playTrackFromChat = useCallback((trackId, { forcePlay = true } = {}) => {
+    const id = String(trackId || '').trim()
+    if (!id) return false
+    const playable = itemsRef.current.some(
+      (item) => item.id === id && (item.kind === 'audio' || item.kind === 'video'),
+    )
+    if (!playable) return false
+    try {
+      sessionStorage.setItem(`hana-postcard-welcome-${id}`, '1')
+    } catch {
+      /* ignore */
+    }
+    closeListeningPostcard()
+    skipTodayFromDeepLinkRef.current = true
+    setTodayOpen(false)
+
+    if (selectedItemIdRef.current === id) {
+      const media = mediaRef.current
+      if (!forcePlay && media && !media.paused) {
+        media.pause()
+        return true
+      }
+      shouldAutoPlayRef.current = true
+      if (media && previewUrlRef.current && !loadingPreviewRef.current) {
+        if (media.ended) media.currentTime = 0
+        const playPromise = media.play()
+        if (playPromise) {
+          playPromise
+            .then(() => {
+              shouldAutoPlayRef.current = false
+            })
+            .catch(() => {
+              /* canPlay may retry */
+            })
+        }
+        return true
+      }
+    }
+    selectItem(id, true)
+    return true
+  }, [closeListeningPostcard, selectItem])
+
   useEffect(() => {
     const onPlayTrackFromChat = (event) => {
+      const trackId = String(event?.detail?.trackId || '').trim()
+      if (!trackId) return
+      if (playTrackFromChat(trackId, { forcePlay: true }) && event?.detail) {
+        event.detail.accepted = true
+      }
+    }
+
+    const onToggleTrackFromChat = (event) => {
+      const trackId = String(event?.detail?.trackId || '').trim()
+      if (!trackId) return
+      const sameTrack = selectedItemIdRef.current === trackId
+      const media = mediaRef.current
+      const isPlaying = Boolean(media && !media.paused) || isMediaPlayingRef.current
+      const ok = playTrackFromChat(trackId, { forcePlay: !(sameTrack && isPlaying) })
+      if (ok && event?.detail) event.detail.accepted = true
+    }
+
+    const onOpenMainPlayerFromChat = (event) => {
       const trackId = String(event?.detail?.trackId || '').trim()
       if (!trackId) return
       const playable = itemsRef.current.some(
@@ -2953,35 +3036,22 @@ const playPrevious = useCallback(() => {
       closeListeningPostcard()
       skipTodayFromDeepLinkRef.current = true
       setTodayOpen(false)
-      if (selectedItemId === trackId) {
-        shouldAutoPlayRef.current = true
-        const media = mediaRef.current
-        if (media && previewUrl && !loadingPreview) {
-          if (media.ended) media.currentTime = 0
-          const playPromise = media.play()
-          if (playPromise) {
-            playPromise
-              .then(() => {
-                shouldAutoPlayRef.current = false
-              })
-              .catch(() => {
-                /* canPlay may retry */
-              })
-          }
-          return
-        }
+      if (selectedItemIdRef.current !== trackId) {
+        const keepPlaying = Boolean(mediaRef.current && !mediaRef.current.paused)
+        selectItem(trackId, keepPlaying)
       }
-      selectItem(trackId, true)
+      window.dispatchEvent(new CustomEvent(CHAT_CLOSE_EVENT))
     }
+
     window.addEventListener(CHAT_PLAY_TRACK_EVENT, onPlayTrackFromChat)
-    return () => window.removeEventListener(CHAT_PLAY_TRACK_EVENT, onPlayTrackFromChat)
-  }, [
-    closeListeningPostcard,
-    selectedItemId,
-    previewUrl,
-    loadingPreview,
-    selectItem,
-  ])
+    window.addEventListener(CHAT_TOGGLE_TRACK_EVENT, onToggleTrackFromChat)
+    window.addEventListener(CHAT_OPEN_MAIN_PLAYER_EVENT, onOpenMainPlayerFromChat)
+    return () => {
+      window.removeEventListener(CHAT_PLAY_TRACK_EVENT, onPlayTrackFromChat)
+      window.removeEventListener(CHAT_TOGGLE_TRACK_EVENT, onToggleTrackFromChat)
+      window.removeEventListener(CHAT_OPEN_MAIN_PLAYER_EVENT, onOpenMainPlayerFromChat)
+    }
+  }, [playTrackFromChat, closeListeningPostcard, selectItem])
 
   const openListeningPostcard = useCallback((item, mode = 'share') => {
     if (!item || item.kind !== 'audio') return

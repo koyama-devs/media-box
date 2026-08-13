@@ -1470,6 +1470,9 @@ body.hana-chat-scroll-lock #root {
 .hana-chat-image-card {
   display: flex;
   flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+  border-radius: 12px;
 }
 
 .hana-chat-song-card-link {
@@ -1495,6 +1498,108 @@ body.hana-chat-scroll-lock #root {
   color: rgba(186, 230, 253, 0.95);
   font-size: 0.66rem;
   font-weight: 700;
+}
+
+.hana-chat-song-player {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 34px 34px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 10px;
+  background: rgba(14, 10, 12, 0.55);
+  border-top: 1px solid rgba(255, 248, 240, 0.1);
+}
+
+.hana-chat-song-disc {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 50%, #1a1214 0 18%, transparent 19%),
+    repeating-radial-gradient(circle at 50% 50%,
+      rgba(255, 248, 240, 0.08) 0 1px,
+      transparent 1px 3px),
+    linear-gradient(145deg, #3a2a2e, #1a1216);
+  box-shadow: inset 0 0 0 1px rgba(255, 248, 240, 0.18);
+  flex-shrink: 0;
+}
+
+.hana-chat-song-disc-label {
+  position: absolute;
+  inset: 34%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #f0c9bc, #e89aaa 55%, #b86b7a);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+.hana-chat-song-disc.is-spinning {
+  animation: hana-chat-song-spin 2.4s linear infinite;
+}
+
+@keyframes hana-chat-song-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.hana-chat-song-player-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.74rem;
+  font-weight: 650;
+  color: rgba(255, 248, 240, 0.95);
+}
+
+.hana-chat-song-player-btn {
+  width: 34px;
+  height: 34px;
+  margin: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 248, 240, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 248, 240, 0.08);
+  color: rgba(255, 248, 240, 0.95);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.hana-chat-song-player-btn.is-toggle {
+  background: rgba(232, 154, 170, 0.28);
+  border-color: rgba(232, 154, 170, 0.45);
+}
+
+.hana-chat-song-player-btn.is-toggle.is-playing {
+  background: rgba(186, 230, 253, 0.22);
+  border-color: rgba(186, 230, 253, 0.42);
+}
+
+.hana-chat-song-player-btn:hover,
+.hana-chat-song-player-btn:focus-visible {
+  background: rgba(255, 248, 240, 0.16);
+}
+
+.hana-chat-song-player-btn.is-toggle:hover,
+.hana-chat-song-player-btn.is-toggle:focus-visible {
+  background: rgba(232, 154, 170, 0.4);
+}
+
+.hana-chat-image-card .hana-chat-image-link {
+  border-radius: 12px 12px 0 0;
+}
+
+.hana-chat-image-card .hana-chat-image {
+  border-radius: 12px 12px 0 0;
+  max-width: 100%;
+}
+
+.hana-chat-image-card:not(:has(.hana-chat-song-player)) .hana-chat-image-link,
+.hana-chat-image-card:not(:has(.hana-chat-song-player)) .hana-chat-image {
+  border-radius: 12px;
 }
 
 .hana-chat-image {
@@ -3409,11 +3514,9 @@ body.hana-chat-scroll-lock #root {
   flex-shrink: 0;
 }
 
-/* Trip countdown bubble sits top-right (z-index 55) and was covering the pin ×. */
+/* Trip countdown lives in the header now — no extra pin-strip padding. */
 .hana-chat-pin-strip.has-trip-dock {
-  position: relative;
-  z-index: 60;
-  padding-right: 72px;
+  padding-right: 0;
 }
 
 .hana-chat-pin-chip {
@@ -3519,8 +3622,8 @@ body.hana-chat-scroll-lock #root {
 
 .hana-chat-trip-dock {
   position: absolute;
-  z-index: 55;
-  top: calc(48px + 6px);
+  z-index: 70;
+  top: calc(48px + 4px);
   left: 10px;
   right: 10px;
   flex-shrink: 0;
@@ -3528,36 +3631,76 @@ body.hana-chat-scroll-lock #root {
 }
 
 .hana-chat-trip-dock.is-collapsed {
-  left: auto;
-  width: auto;
+  display: none;
 }
 
-.hana-chat-trip-dock .hana-chat-trip-bubble,
 .hana-chat-trip-dock .hana-chat-trip-panel {
   pointer-events: auto;
 }
 
-.hana-chat-trip-bubble {
+.hana-chat-trip-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  min-width: 30px;
+  margin: 0;
+  padding: 3px 6px;
+  border: 1px solid rgba(232, 154, 170, 0.42);
+  border-radius: 999px;
+  background:
+    radial-gradient(ellipse at 30% 20%, rgba(255, 190, 205, 0.35), transparent 62%),
+    rgba(42, 24, 28, 0.88);
+  color: rgba(255, 248, 240, 0.95);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+}
+
+.hana-chat-trip-chip-count {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0;
-  min-width: 52px;
-  width: auto;
-  height: 52px;
-  padding: 0 8px;
-  border: 1px solid rgba(232, 154, 170, 0.42);
-  border-radius: 999px;
-  background:
-    radial-gradient(ellipse at 30% 20%, rgba(255, 190, 205, 0.42), transparent 58%),
-    rgba(42, 24, 28, 0.92);
-  box-shadow:
-    0 8px 20px rgba(14, 8, 10, 0.35),
-    0 0 0 1px rgba(255, 248, 240, 0.06) inset;
-  color: rgba(255, 248, 240, 0.96);
-  cursor: pointer;
-  animation: hana-trip-countdown-in 0.28s ease-out;
+  gap: 1px;
+  line-height: 1;
+}
+
+.hana-chat-trip-chip.is-today {
+  border-color: rgba(232, 154, 170, 0.62);
+}
+
+.hana-chat-trip-chip.is-open {
+  background: rgba(232, 154, 170, 0.28);
+  border-color: rgba(232, 154, 170, 0.55);
+}
+
+.hana-chat-trip-chip-unit {
+  font-size: 0.52rem;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  color: rgba(240, 201, 188, 0.82);
+}
+
+.hana-chat-trip-chip-num {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #f2b8c4;
+}
+
+.hana-chat-trip-chip-today {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #f2b8c4;
+}
+
+.hana-chat-trip-bubble {
+  display: none;
 }
 
 .hana-chat-trip-dock.is-today .hana-chat-trip-bubble {
@@ -3891,13 +4034,14 @@ body.hana-chat-scroll-lock #root {
 /* Mobile open chat: header uses safe-area height variable. */
 @media (max-width: 640px) {
   .hana-chat.is-open .hana-chat-trip-dock {
-    top: calc(var(--hana-chat-header-h, 48px) + 6px);
-    left: 12px;
-    right: 12px;
+    top: calc(var(--hana-chat-header-h, 48px) + 4px);
+    left: 10px;
+    right: 10px;
   }
 
-  .hana-chat.is-open .hana-chat-trip-dock.is-collapsed {
-    left: auto;
+  .hana-chat-trip-chip {
+    min-width: 28px;
+    padding: 3px 5px;
   }
 }
 
