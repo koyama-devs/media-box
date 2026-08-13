@@ -78,6 +78,7 @@ import {
   unpinThreadChatMessage,
   updateChatMessage,
   uploadChatAttachment,
+  ensureWeightGardenDefaults,
 } from './firebase'
 import FlowerRainLayer, {
   CHAT_PARTY_REACTION,
@@ -91,6 +92,7 @@ import HanaSticker, {
   stickerSetsForViewer,
   suggestHanaStickers,
 } from './HanaStickers'
+import ChatWeightGarden, { WeightGardenChip } from './ChatWeightGarden'
 import NatsuKingyo from './NatsuKingyo'
 import {
   collectUnansweredOwnerAssistMessages,
@@ -107,6 +109,9 @@ const DEFAULT_OWNER_GUEST_KEY = 'gabusan'
 const JP_TRIP_DEPARTURE_YMD = '2026-12-17'
 const JP_TRIP_COUNTDOWN_GUEST = 'gabusan'
 const JP_TRIP_EXPAND_KEY = 'hana-chat-jp-trip-expanded'
+/** Shared sakura weight garden — visible only to Hana ↔ gabusan. */
+const WEIGHT_GARDEN_GUEST = 'gabusan'
+const WEIGHT_GARDEN_EXPAND_KEY = 'hana-chat-weight-garden-expanded'
 const JP_TRIP_HOTEL_ADDRESS = '〒557-0004 大阪府大阪市西成区萩之茶屋2丁目8番12号'
 const JP_TRIP_ITINERARY = {
   flights: [
@@ -166,6 +171,21 @@ function canSeeJpTripCountdown({ actingAsOwner, guestKey, ownerThreadGuestKey })
     return String(ownerThreadGuestKey || '').trim().toLowerCase() === JP_TRIP_COUNTDOWN_GUEST
   }
   return String(guestKey || '').trim().toLowerCase() === JP_TRIP_COUNTDOWN_GUEST
+}
+
+function canSeeWeightGarden({ actingAsOwner, guestKey, ownerThreadGuestKey }) {
+  if (actingAsOwner) {
+    return String(ownerThreadGuestKey || '').trim().toLowerCase() === WEIGHT_GARDEN_GUEST
+  }
+  return String(guestKey || '').trim().toLowerCase() === WEIGHT_GARDEN_GUEST
+}
+
+function writeWeightGardenExpanded(expanded) {
+  try {
+    sessionStorage.setItem(WEIGHT_GARDEN_EXPAND_KEY, expanded ? '1' : '0')
+  } catch {
+    /* ignore */
+  }
 }
 
 function defaultJpTripExpanded() {
@@ -928,10 +948,88 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     return () => window.clearTimeout(id)
   }, [jpTripAddressCopied])
 
+  const [weightGardenExpanded, setWeightGardenExpanded] = useState(false)
+  const weightGardenDockRef = useRef(null)
+  const weightGardenChipRef = useRef(null)
+
   const setJpTripOpen = (expanded) => {
     setJpTripExpanded(expanded)
     writeJpTripExpanded(expanded)
+    if (expanded) {
+      setWeightGardenExpanded(false)
+      writeWeightGardenExpanded(false)
+    }
   }
+
+  const weightGardenThreadId = useMemo(() => {
+    if (actingAsOwner) {
+      if (ownerActiveGuestKey !== WEIGHT_GARDEN_GUEST) return ''
+      return activeThreadId || ''
+    }
+    if (String(guestKey || '').trim().toLowerCase() !== WEIGHT_GARDEN_GUEST) return ''
+    return guestChatId || ''
+  }, [actingAsOwner, ownerActiveGuestKey, activeThreadId, guestKey, guestChatId])
+
+  const showWeightGarden = canSeeWeightGarden({
+    actingAsOwner,
+    guestKey,
+    ownerThreadGuestKey: ownerActiveGuestKey,
+  }) && Boolean(weightGardenThreadId)
+
+  const weightGardenData = useMemo(() => {
+    if (!weightGardenThreadId) return null
+    if (actingAsOwner) {
+      const thread = threads.find((entry) => entry.id === weightGardenThreadId)
+      return thread?.weightGarden || null
+    }
+    return ownThread?.weightGarden || null
+  }, [actingAsOwner, weightGardenThreadId, threads, ownThread])
+
+  const setWeightGardenOpen = (expanded) => {
+    setWeightGardenExpanded(expanded)
+    writeWeightGardenExpanded(expanded)
+    if (expanded) {
+      setJpTripExpanded(false)
+      writeJpTripExpanded(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!showWeightGarden) {
+      setWeightGardenExpanded(false)
+      return undefined
+    }
+    void ensureWeightGardenDefaults(weightGardenThreadId).catch(() => {
+      /* defaults are optional; serialize falls back client-side */
+    })
+    return undefined
+  }, [showWeightGarden, weightGardenThreadId])
+
+  useEffect(() => {
+    if (!open || !showWeightGarden) return
+    setWeightGardenExpanded(false)
+    writeWeightGardenExpanded(false)
+  }, [open, showWeightGarden])
+
+  useEffect(() => {
+    if (!showWeightGarden || !weightGardenExpanded) return undefined
+    const onPointerDown = (event) => {
+      const dock = weightGardenDockRef.current
+      const chip = weightGardenChipRef.current
+      if (dock?.contains(event.target) || chip?.contains(event.target)) return
+      setWeightGardenOpen(false)
+    }
+    const onKeyDown = (event) => {
+      if (event.key !== 'Escape') return
+      setWeightGardenOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [showWeightGarden, weightGardenExpanded])
 
   const copyJpTripHotelAddress = async () => {
     const ok = await copyTextToClipboard(JP_TRIP_ITINERARY.hotel.address)
@@ -4406,6 +4504,14 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               )}
             </div>
             <div className="hana-chat-header-actions">
+              {showWeightGarden ? (
+                <WeightGardenChip
+                  chipRef={weightGardenChipRef}
+                  garden={weightGardenData}
+                  expanded={weightGardenExpanded}
+                  onToggle={() => setWeightGardenOpen(!weightGardenExpanded)}
+                />
+              ) : null}
               {showJpTripCountdown ? (
                 <button
                   ref={jpTripChipRef}
@@ -4618,6 +4724,18 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               </button>
             </div>
           </header>
+
+          {showWeightGarden && weightGardenExpanded ? (
+            <div ref={weightGardenDockRef} className="hana-chat-weight-dock">
+              <ChatWeightGarden
+                garden={weightGardenData}
+                canEdit={!actingAsOwner}
+                threadId={weightGardenThreadId}
+                onClose={() => setWeightGardenOpen(false)}
+                onError={(message) => setError(message)}
+              />
+            </div>
+          ) : null}
 
           {showJpTripCountdown && jpTripExpanded ? (
             <div

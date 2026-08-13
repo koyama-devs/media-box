@@ -3724,6 +3724,349 @@ body.hana-chat-scroll-lock #root {
   color: #f2b8c4;
 }
 
+.hana-chat-weight-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  min-width: 34px;
+  margin: 0;
+  padding: 3px 7px;
+  border: 1px solid rgba(240, 180, 200, 0.45);
+  border-radius: 999px;
+  background:
+    radial-gradient(ellipse at 30% 20%, rgba(255, 200, 220, 0.4), transparent 62%),
+    rgba(42, 24, 32, 0.9);
+  color: rgba(255, 248, 240, 0.95);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+}
+
+.hana-chat-weight-chip.is-open {
+  background: rgba(232, 154, 170, 0.3);
+  border-color: rgba(232, 154, 170, 0.55);
+}
+
+.hana-chat-weight-chip.is-full {
+  border-color: rgba(255, 190, 210, 0.7);
+}
+
+.hana-chat-weight-chip-count {
+  display: flex;
+  align-items: baseline;
+  gap: 1px;
+  line-height: 1;
+}
+
+.hana-chat-weight-chip-num {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #f2b8c4;
+}
+
+.hana-chat-weight-chip-unit {
+  font-size: 0.55rem;
+  color: rgba(240, 201, 188, 0.85);
+}
+
+.hana-chat-weight-chip-full {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #f7c4d0;
+}
+
+.hana-chat-weight-dock {
+  position: absolute;
+  z-index: 71;
+  top: calc(var(--hana-chat-header-h, 48px) + 4px);
+  left: 10px;
+  right: 10px;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.hana-chat-weight-dock .hana-chat-weight-panel {
+  pointer-events: auto;
+  max-height: min(70vh, 520px);
+  overflow: auto;
+  padding: 12px 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(232, 154, 170, 0.35);
+  background:
+    linear-gradient(180deg, rgba(58, 32, 40, 0.96), rgba(32, 18, 24, 0.97));
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+  color: rgba(255, 248, 240, 0.95);
+}
+
+.hana-chat-weight-panel-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.hana-chat-weight-panel-copy {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.hana-chat-weight-kicker {
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  color: rgba(240, 201, 188, 0.75);
+}
+
+.hana-chat-weight-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.hana-chat-weight-collapse {
+  border: 0;
+  background: transparent;
+  color: rgba(255, 248, 240, 0.7);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  min-width: 28px;
+  min-height: 28px;
+}
+
+.hana-chat-weight-bloom {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0 10px;
+}
+
+.hana-chat-weight-tree {
+  position: relative;
+  width: 120px;
+  height: 88px;
+}
+
+.hana-chat-weight-trunk {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 6px;
+  height: 28px;
+  margin-left: -3px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #6b4a3a, #3a261c);
+}
+
+.hana-chat-weight-canopy {
+  position: absolute;
+  left: 50%;
+  top: 4px;
+  width: 96px;
+  height: 64px;
+  margin-left: -48px;
+}
+
+.hana-chat-weight-petal {
+  position: absolute;
+  width: 14px;
+  height: 18px;
+  border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+  background: rgba(255, 210, 225, 0.18);
+  border: 1px solid rgba(255, 248, 240, 0.12);
+  transform-origin: 50% 90%;
+  left: calc(50% - 7px);
+  top: calc(50% - 20px);
+  transform: rotate(calc(var(--petal-i) * 30deg)) translateY(-22px);
+  transition: background 0.35s ease, border-color 0.35s ease, box-shadow 0.35s ease;
+}
+
+.hana-chat-weight-petal.is-on {
+  background: linear-gradient(160deg, #ffe0ea, #f2a8bc 55%, #e8899e);
+  border-color: rgba(255, 248, 240, 0.35);
+  box-shadow: 0 0 8px rgba(242, 168, 188, 0.35);
+}
+
+.hana-chat-weight-bloom.is-full .hana-chat-weight-petal.is-on {
+  animation: hana-weight-petal-sway 2.8s ease-in-out infinite;
+  animation-delay: calc(var(--petal-i) * 0.08s);
+}
+
+@keyframes hana-weight-petal-sway {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.12); }
+}
+
+.hana-chat-weight-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.hana-chat-weight-stat {
+  display: grid;
+  gap: 2px;
+  padding: 8px 6px;
+  border-radius: 12px;
+  background: rgba(255, 248, 240, 0.06);
+  text-align: center;
+}
+
+.hana-chat-weight-stat-label {
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+  color: rgba(240, 201, 188, 0.72);
+}
+
+.hana-chat-weight-stat strong {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+}
+
+.hana-chat-weight-stat strong span {
+  margin-left: 2px;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: rgba(240, 201, 188, 0.8);
+}
+
+.hana-chat-weight-encourage {
+  margin: 0 0 10px;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: rgba(255, 230, 236, 0.9);
+}
+
+.hana-chat-weight-owner-hint,
+.hana-chat-weight-empty {
+  margin: 0 0 10px;
+  font-size: 0.72rem;
+  color: rgba(240, 201, 188, 0.72);
+}
+
+.hana-chat-weight-form {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr auto;
+  gap: 8px;
+  align-items: end;
+  margin-bottom: 8px;
+}
+
+.hana-chat-weight-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  font-size: 0.62rem;
+  color: rgba(240, 201, 188, 0.78);
+}
+
+.hana-chat-weight-field input {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 248, 240, 0.16);
+  background: rgba(0, 0, 0, 0.25);
+  color: rgba(255, 248, 240, 0.95);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.hana-chat-weight-save,
+.hana-chat-weight-goal-btn {
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(232, 154, 170, 0.45);
+  background: rgba(232, 154, 170, 0.28);
+  color: rgba(255, 248, 240, 0.95);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.hana-chat-weight-goal-btn.is-quiet,
+.hana-chat-weight-goal-edit {
+  border-color: rgba(255, 248, 240, 0.18);
+  background: transparent;
+  color: rgba(240, 201, 188, 0.85);
+}
+
+.hana-chat-weight-goal-row {
+  margin-bottom: 10px;
+}
+
+.hana-chat-weight-goal-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+}
+
+.hana-chat-weight-goal-edit {
+  margin: 0;
+  padding: 4px 0;
+  font: inherit;
+  font-size: 0.68rem;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.hana-chat-weight-logs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.hana-chat-weight-logs li {
+  display: grid;
+  grid-template-columns: 40px 64px 1fr;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 0.72rem;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(255, 248, 240, 0.05);
+}
+
+.hana-chat-weight-logs time {
+  color: rgba(240, 201, 188, 0.7);
+  font-variant-numeric: tabular-nums;
+}
+
+.hana-chat-weight-logs strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.hana-chat-weight-logs span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255, 248, 240, 0.72);
+}
+
+@media (max-width: 640px) {
+  .hana-chat-weight-form {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .hana-chat-weight-form .hana-chat-weight-save {
+    grid-column: 1 / -1;
+  }
+}
+
 .hana-chat-trip-bubble {
   display: none;
 }

@@ -1572,6 +1572,7 @@ function serializeChatThread(id, data) {
     jpTripArrivedAtIso: data?.jpTripArrivedAtIso
       || data?.jpTripArrivedAt?.toDate?.()?.toISOString?.()
       || null,
+    weightGarden: serializeWeightGarden(data?.weightGarden),
     pinnedMessages: serializeThreadPinnedMessages(data?.pinnedMessages),
   }
 }
@@ -1806,6 +1807,121 @@ export async function confirmJpTripArrived(threadId) {
     jpTripArrivedAt: serverTimestamp(),
     jpTripArrivedAtIso: nowIso,
   }, { merge: true })
+}
+
+/** Default start/goal for Gabu sakura weight garden (kg). */
+export const WEIGHT_GARDEN_DEFAULT_START_KG = 65
+export const WEIGHT_GARDEN_DEFAULT_GOAL_KG = 55
+export const WEIGHT_GARDEN_STAGE_COUNT = 12
+export const WEIGHT_GARDEN_LOG_LIMIT = 60
+
+function clampWeightKg(value, fallback) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(80, Math.max(40, Math.round(n * 10) / 10))
+}
+
+export function serializeWeightGarden(raw) {
+  const startKg = clampWeightKg(raw?.startKg, WEIGHT_GARDEN_DEFAULT_START_KG)
+  const goalKg = clampWeightKg(raw?.goalKg, WEIGHT_GARDEN_DEFAULT_GOAL_KG)
+  const logs = []
+  if (Array.isArray(raw?.logs)) {
+    for (const entry of raw.logs) {
+      if (!entry || typeof entry !== 'object') continue
+      const kg = Number(entry.kg)
+      if (!Number.isFinite(kg) || kg < 30 || kg > 200) continue
+      const atIso = String(entry.atIso || entry.at || '').trim()
+      if (!atIso) continue
+      logs.push({
+        kg: Math.round(kg * 10) / 10,
+        atIso,
+        note: String(entry.note || '').trim().slice(0, 80),
+      })
+      if (logs.length >= WEIGHT_GARDEN_LOG_LIMIT) break
+    }
+  }
+  return { startKg, goalKg, logs }
+}
+
+export function weightGardenProgress(garden) {
+  const data = serializeWeightGarden(garden)
+  const currentKg = data.logs.length
+    ? data.logs[0].kg
+    : data.startKg
+  const span = data.startKg - data.goalKg
+  const gained = data.startKg - currentKg
+  const ratio = span > 0 ? gained / span : 0
+  const progress = Math.min(1, Math.max(0, ratio))
+  const stage = Math.round(progress * WEIGHT_GARDEN_STAGE_COUNT)
+  const remaining = Math.max(0, Math.round((currentKg - data.goalKg) * 10) / 10)
+  const reached = currentKg <= data.goalKg
+  return {
+    ...data,
+    currentKg,
+    progress,
+    stage: reached ? WEIGHT_GARDEN_STAGE_COUNT : stage,
+    remaining,
+    reached,
+  }
+}
+
+/** Seed defaults on the thread if weightGarden is missing. */
+export async function ensureWeightGardenDefaults(threadId) {
+  const tid = String(threadId || '').trim()
+  if (!tid) return null
+  const ref = doc(db, CHAT_THREADS_COLLECTION, tid)
+  const snap = await getDoc(ref)
+  const existing = snap.exists() ? snap.data()?.weightGarden : null
+  if (existing && typeof existing === 'object') {
+    return serializeWeightGarden(existing)
+  }
+  const weightGarden = serializeWeightGarden({
+    startKg: WEIGHT_GARDEN_DEFAULT_START_KG,
+    goalKg: WEIGHT_GARDEN_DEFAULT_GOAL_KG,
+    logs: [],
+  })
+  await setDoc(ref, { weightGarden }, { merge: true })
+  return weightGarden
+}
+
+/** Guest logs a weigh-in (newest first). */
+export async function logWeightGardenEntry(threadId, { kg, note = '' } = {}) {
+  const tid = String(threadId || '').trim()
+  if (!tid) throw new Error('スレッドがありません。')
+  const nextKg = Number(kg)
+  if (!Number.isFinite(nextKg) || nextKg < 30 || nextKg > 200) {
+    throw new Error('体重を正しく入力してください。')
+  }
+  const ref = doc(db, CHAT_THREADS_COLLECTION, tid)
+  const snap = await getDoc(ref)
+  const prev = serializeWeightGarden(snap.exists() ? snap.data()?.weightGarden : null)
+  const entry = {
+    kg: Math.round(nextKg * 10) / 10,
+    atIso: new Date().toISOString(),
+    note: String(note || '').trim().slice(0, 80),
+  }
+  const weightGarden = {
+    startKg: prev.startKg,
+    goalKg: prev.goalKg,
+    logs: [entry, ...prev.logs].slice(0, WEIGHT_GARDEN_LOG_LIMIT),
+  }
+  await setDoc(ref, { weightGarden }, { merge: true })
+  return weightGardenProgress(weightGarden)
+}
+
+/** Guest updates the goal weight (40–80 kg). */
+export async function setWeightGardenGoal(threadId, goalKg) {
+  const tid = String(threadId || '').trim()
+  if (!tid) throw new Error('スレッドがありません。')
+  const ref = doc(db, CHAT_THREADS_COLLECTION, tid)
+  const snap = await getDoc(ref)
+  const prev = serializeWeightGarden(snap.exists() ? snap.data()?.weightGarden : null)
+  const weightGarden = {
+    ...prev,
+    goalKg: clampWeightKg(goalKg, prev.goalKg),
+  }
+  await setDoc(ref, { weightGarden }, { merge: true })
+  return weightGardenProgress(weightGarden)
 }
 
 /**
