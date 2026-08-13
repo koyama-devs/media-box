@@ -1,6 +1,15 @@
 {
-  "updatedAt": "2026-08-13T03:36:23.016Z",
+  "updatedAt": "2026-08-13T03:52:00.867Z",
   "releases": [
+    {
+      "version": "msqzeqp3-cq5ros",
+      "notes": "Chat song-card 聴く now autoplays the track in-app instead of opening the welcome postcard again.",
+      "builtAt": "2026-08-13T03:52:00.297Z",
+      "previousVersion": "msqyq6t3-iu44id",
+      "previousHostingVersionId": "6f3677f11ee02cda",
+      "hostingVersionId": null,
+      "recordedAt": "2026-08-13T03:52:00.861Z"
+    },
     {
       "version": "msqyq6t3-iu44id",
       "notes": "Wire song-card share into the active Hana chat thread so sharing a track no longer asks to pick a destination when already chatting.",

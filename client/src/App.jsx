@@ -4,7 +4,7 @@ import './App.css'
 import hanachanArt from './assets/hanachan.svg'
 import { AVATAR_PRESETS, getAvatarPresetSrc } from './avatarPresets'
 import { clearBookBookmark, getAllBookBookmarks, getBookBookmark } from './bookProgress'
-import { requestChatCardShare } from './chatCardShare'
+import { requestChatCardShare, CHAT_PLAY_TRACK_EVENT } from './chatCardShare'
 import DailyKotoba from './DailyKotoba'
 import {
     ACCOUNT_INACTIVE_LOGIN_MESSAGE,
@@ -2929,6 +2929,54 @@ const playPrevious = useCallback(() => {
     closeListeningPostcard,
     customSpaces,
     openListeningSpace,
+    selectedItemId,
+    previewUrl,
+    loadingPreview,
+    selectItem,
+  ])
+
+  // Chat bubble「聴く」: play in-app immediately (skip the welcome postcard).
+  useEffect(() => {
+    const onPlayTrackFromChat = (event) => {
+      const trackId = String(event?.detail?.trackId || '').trim()
+      if (!trackId) return
+      const playable = itemsRef.current.some(
+        (item) => item.id === trackId && (item.kind === 'audio' || item.kind === 'video'),
+      )
+      if (!playable) return
+      if (event?.detail) event.detail.accepted = true
+      try {
+        sessionStorage.setItem(`hana-postcard-welcome-${trackId}`, '1')
+      } catch {
+        /* ignore */
+      }
+      closeListeningPostcard()
+      skipTodayFromDeepLinkRef.current = true
+      setTodayOpen(false)
+      if (selectedItemId === trackId) {
+        shouldAutoPlayRef.current = true
+        const media = mediaRef.current
+        if (media && previewUrl && !loadingPreview) {
+          if (media.ended) media.currentTime = 0
+          const playPromise = media.play()
+          if (playPromise) {
+            playPromise
+              .then(() => {
+                shouldAutoPlayRef.current = false
+              })
+              .catch(() => {
+                /* canPlay may retry */
+              })
+          }
+          return
+        }
+      }
+      selectItem(trackId, true)
+    }
+    window.addEventListener(CHAT_PLAY_TRACK_EVENT, onPlayTrackFromChat)
+    return () => window.removeEventListener(CHAT_PLAY_TRACK_EVENT, onPlayTrackFromChat)
+  }, [
+    closeListeningPostcard,
     selectedItemId,
     previewUrl,
     loadingPreview,

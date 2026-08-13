@@ -10,6 +10,7 @@ import {
 import { CHAT_PARTY_REACTION } from './FlowerRain'
 import HanaSticker, { isHanaSticker } from './HanaStickers'
 import OwnerMessageAssist from './OwnerMessageAssist'
+import { requestChatTrackPlay, trackIdFromShareUrl } from './chatCardShare'
 
 /** Stable empty reactions object so `|| {}` does not defeat memo. */
 export const EMPTY_CHAT_REACTIONS = Object.freeze({})
@@ -205,9 +206,20 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
                     <a
                       className="hana-chat-song-card-link"
                       href={songShare.shareUrl}
-                      target="_blank"
-                      rel="noreferrer noopener"
                       data-no-bubble-press="true"
+                      onClick={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        const trackId = trackIdFromShareUrl(songShare.shareUrl)
+                        if (!trackId) {
+                          window.location.assign(songShare.shareUrl)
+                          return
+                        }
+                        const result = requestChatTrackPlay(trackId)
+                        if (!result?.accepted) {
+                          window.location.assign(songShare.shareUrl)
+                        }
+                      }}
                     >
                       <strong>{songShare.title}</strong>
                       <span>聴く</span>
