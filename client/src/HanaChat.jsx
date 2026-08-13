@@ -14,6 +14,7 @@ import {
 } from './chatExtras'
 import ChatImageLightbox from './ChatImageLightbox'
 import ChatNatsuFireworks from './ChatNatsuFireworks'
+import { CHAT_CARD_SHARE_EVENT } from './chatCardShare'
 import { playChatNotifySound, unlockChatNotifySound } from './chatNotifySound'
 import {
   readDefaultReaction,
@@ -3312,6 +3313,189 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       if (imageInputRef.current) imageInputRef.current.value = ''
     }
   }
+
+  /** Listening postcard → active human thread (owner inbox guest, or guest↔hana). */
+  const sendSongCardShare = useCallback(async ({ file, title, shareUrl }) => {
+    if (!(file instanceof File)) return
+    if (actingAsOwner && !activeThreadId) {
+      setError('送信先のチャットを選んでください。')
+      return
+    }
+    const role = actingAsOwner ? 'hana' : 'guest'
+    const threadId = actingAsOwner
+      ? activeThreadId
+      : (guestChatId || ensureGuestChatId(guestKey || 'guest'))
+    if (!threadId) {
+      setError('送信先のチャットを選んでください。')
+      return
+    }
+    if (!actingAsOwner) {
+      if (!guestChatId) setGuestChatId(threadId)
+      if (channel !== 'human') {
+        setChannel('human')
+        setAiMessages((prev) => {
+          if (prev.some((m) => m.id === HUMAN_SWITCH_NOTICE_ID || m.kind === 'human-switch')) {
+            return prev
+          }
+          return [
+            ...prev,
+            {
+              id: HUMAN_SWITCH_NOTICE_ID,
+              kind: 'human-switch',
+              role: 'hanachan',
+              sender: 'hanachan',
+              text: HUMAN_SWITCH_INTENT,
+              createdAt: new Date().toISOString(),
+              createdAtIso: new Date().toISOString(),
+            },
+          ]
+        })
+      }
+    }
+
+    const caption = [String(title || '').trim() || '曲カード', String(shareUrl || '').trim()]
+      .filter(Boolean)
+      .join('\n')
+      .slice(0, 2000)
+    const pendingId = nextStickerPendingId()
+    const localUrl = URL.createObjectURL(file)
+    const guestMeta = actingAsOwner
+      ? {}
+      : {
+          guestLabel: guestThreadLabel,
+          guestKey: guestProfile?.key || guestKey || '',
+        }
+
+    setOpen(true)
+    setError('')
+    setBusy(true)
+    try {
+      flushSync(() => {
+        setHanaMessages((prev) => [
+          ...prev,
+          {
+            id: pendingId,
+            clientId: pendingId,
+            pending: true,
+            uploading: true,
+            role,
+            sender: role,
+            text: caption,
+            rawText: caption,
+            imageUrl: localUrl,
+            fileUrl: '',
+            fileKind: 'image',
+            fileName: file.name || 'listening-card.png',
+            fileMime: String(file.type || 'image/png'),
+            fileSize: Math.max(0, Number(file.size) || 0),
+            createdAt: new Date().toISOString(),
+            createdAtIso: new Date().toISOString(),
+            replyTo: null,
+          },
+        ])
+      })
+      scrollToLatestRef.current()
+
+      const uploaded = await uploadChatAttachment(threadId, file)
+      const imageUrl = uploaded.kind === 'image' ? uploaded.url : ''
+      setHanaMessages((prev) => prev.map((m) => (
+        m.id === pendingId
+          ? {
+              ...m,
+              uploading: false,
+              fileKind: uploaded.kind,
+              fileName: uploaded.fileName,
+              fileMime: uploaded.fileMime,
+              fileSize: uploaded.fileSize,
+            }
+          : m
+      )))
+      const serverId = await sendChatMessage({
+        threadId,
+        text: caption,
+        sender: role,
+        ...(imageUrl ? { imageUrl } : {}),
+        fileKind: uploaded.kind,
+        fileName: uploaded.fileName,
+        fileMime: uploaded.fileMime,
+        fileSize: uploaded.fileSize,
+        clientId: pendingId,
+        ...guestMeta,
+      })
+      if (imageUrl) {
+        await new Promise((resolve) => {
+          const img = new Image()
+          img.onload = () => resolve()
+          img.onerror = () => resolve()
+          img.src = imageUrl
+        })
+      }
+      setHanaMessages((prev) => prev.map((m) => (
+        m.id === pendingId
+          ? {
+              ...m,
+              imageUrl: imageUrl || m.imageUrl,
+              serverId: serverId || m.serverId,
+              uploading: false,
+            }
+          : m
+      )))
+      URL.revokeObjectURL(localUrl)
+      if (!actingAsOwner) setChannel('human')
+    } catch (err) {
+      URL.revokeObjectURL(localUrl)
+      setHanaMessages((prev) => prev.filter((m) => m.id !== pendingId))
+      setError(getFirebaseErrorMessage(err) || err?.message || '曲カードを送れませんでした。')
+    } finally {
+      setBusy(false)
+      scrollToLatestRef.current()
+    }
+  }, [
+    actingAsOwner,
+    activeThreadId,
+    channel,
+    guestChatId,
+    guestKey,
+    guestProfile?.key,
+    guestThreadLabel,
+  ])
+
+  const sendSongCardShareRef = useRef(sendSongCardShare)
+  sendSongCardShareRef.current = sendSongCardShare
+
+  const songShareTargetRef = useRef({
+    actingAsOwner: false,
+    activeThreadId: null,
+    guestChatId: '',
+    guestKey: '',
+  })
+  songShareTargetRef.current = {
+    actingAsOwner,
+    activeThreadId,
+    guestChatId,
+    guestKey: guestProfile?.key || guestKey || '',
+  }
+
+  useEffect(() => {
+    const onShareSongCard = (event) => {
+      const detail = event?.detail
+      if (!detail || !(detail.file instanceof File)) return
+      const target = songShareTargetRef.current
+      const threadId = target.actingAsOwner
+        ? target.activeThreadId
+        : (target.guestChatId || ensureGuestChatId(target.guestKey || 'guest'))
+      if (!threadId) {
+        detail.accepted = false
+        detail.reason = '送信先のチャットを選んでください。'
+        return
+      }
+      detail.accepted = true
+      detail.reason = ''
+      void sendSongCardShareRef.current?.(detail)
+    }
+    window.addEventListener(CHAT_CARD_SHARE_EVENT, onShareSongCard)
+    return () => window.removeEventListener(CHAT_CARD_SHARE_EVENT, onShareSongCard)
+  }, [])
 
   const playStandaloneEffect = async (payload) => {
     if (!canUseReactions) return

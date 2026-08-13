@@ -49,6 +49,16 @@ function renderMessageWithLinks(text) {
   return parts
 }
 
+function songShareMetaFromText(text) {
+  const raw = String(text || '').trim()
+  if (!raw) return null
+  const match = raw.match(/https?:\/\/[^\s<>"'`]+/i)
+  if (!match) return null
+  const shareUrl = match[0]
+  const title = raw.replace(shareUrl, '').trim() || '曲カード'
+  return { shareUrl, title }
+}
+
 /**
  * One message row. Memoized so draft/typing re-renders in the parent do not
  * remount ~300 swipe bubbles.
@@ -77,6 +87,7 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
   const showsVideo = Boolean(attachment && attachment.kind === 'video')
   const showsFile = Boolean(attachment && attachment.kind === 'file')
   const showsMedia = showsImage || showsVideo || showsFile
+  const songShare = showsImage ? songShareMetaFromText(message.rawText || message.text) : null
   const effectEmoji = !message.deleted && message.effect
     ? (String(message.effectEmoji || '').trim()
       || EMOTION_MOMENTS.find((item) => item.id === message.effect)?.emoji
@@ -164,31 +175,45 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
               {showsSticker ? (
                 <HanaSticker id={message.sticker} size={104} title={message.text} />
               ) : showsImage ? (
-                <button
-                  type="button"
-                  className="hana-chat-image-link"
-                  disabled={Boolean(message.uploading)}
-                  aria-label="画像を拡大表示"
-                  onClick={(event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    if (message.uploading) return
-                    onOpenImage({
-                      src: attachment.url,
-                      alt: attachment.fileName || message.text || '写真',
-                    })
-                  }}
-                >
-                  <img
-                    className="hana-chat-image"
-                    src={attachment.url}
-                    alt={attachment.fileName || message.text || '写真'}
-                    loading="lazy"
-                  />
-                  {message.uploading ? (
-                    <span className="hana-chat-image-status">送信中…</span>
+                <div className="hana-chat-image-card">
+                  <button
+                    type="button"
+                    className="hana-chat-image-link"
+                    disabled={Boolean(message.uploading)}
+                    aria-label="画像を拡大表示"
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      if (message.uploading) return
+                      onOpenImage({
+                        src: attachment.url,
+                        alt: attachment.fileName || message.text || '写真',
+                      })
+                    }}
+                  >
+                    <img
+                      className="hana-chat-image"
+                      src={attachment.url}
+                      alt={attachment.fileName || message.text || '写真'}
+                      loading="lazy"
+                    />
+                    {message.uploading ? (
+                      <span className="hana-chat-image-status">送信中…</span>
+                    ) : null}
+                  </button>
+                  {songShare ? (
+                    <a
+                      className="hana-chat-song-card-link"
+                      href={songShare.shareUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      data-no-bubble-press="true"
+                    >
+                      <strong>{songShare.title}</strong>
+                      <span>聴く</span>
+                    </a>
                   ) : null}
-                </button>
+                </div>
               ) : showsVideo ? (
                 <div className="hana-chat-video-wrap" data-no-bubble-press="true">
                   <video

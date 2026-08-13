@@ -1,6 +1,15 @@
 {
-  "updatedAt": "2026-08-12T13:46:48.532Z",
+  "updatedAt": "2026-08-13T03:36:23.016Z",
   "releases": [
+    {
+      "version": "msqyq6t3-iu44id",
+      "notes": "Wire song-card share into the active Hana chat thread so sharing a track no longer asks to pick a destination when already chatting.",
+      "builtAt": "2026-08-13T03:32:58.245Z",
+      "previousVersion": "msq5498i-2jwbpw",
+      "previousHostingVersionId": "fc1efa99749cfa53",
+      "hostingVersionId": "6f3677f11ee02cda",
+      "recordedAt": "2026-08-13T03:32:58.613Z"
+    },
     {
       "version": "msq5498i-2jwbpw",
       "notes": "Fix empty composer staying multi-line tall by resetting textarea height when draft is blank.",
