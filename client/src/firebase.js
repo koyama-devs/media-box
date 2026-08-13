@@ -1056,13 +1056,22 @@ export function classifyChatAttachment(fileOrMime) {
   ).trim().toLowerCase()
   if (mime.startsWith('image/')) return 'image'
   if (mime.startsWith('video/')) return 'video'
+  if (mime.startsWith('audio/')) return 'file'
   // Some Android pickers omit mime — fall back to extension.
   if (typeof fileOrMime !== 'string') {
     const name = String(fileOrMime?.name || '').toLowerCase()
     if (/\.(jpe?g|png|gif|webp|heic|heif|bmp)$/i.test(name)) return 'image'
     if (/\.(mp4|mov|webm|m4v|3gp|mkv)$/i.test(name)) return 'video'
+    if (/\.(mp3|m4a|aac|wav|ogg|flac|opus|oga|caf)$/i.test(name)) return 'file'
   }
   return 'file'
+}
+
+/** True when a chat attachment should render an inline audio player. */
+export function isChatAudioAttachment(fileMime = '', fileName = '') {
+  const mime = String(fileMime || '').toLowerCase()
+  if (mime.startsWith('audio/')) return true
+  return /\.(mp3|m4a|aac|wav|ogg|flac|opus|oga|caf)$/i.test(String(fileName || ''))
 }
 
 export function formatChatFileSize(bytes) {

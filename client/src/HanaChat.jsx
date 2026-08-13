@@ -3173,17 +3173,13 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     }
   }
 
-  /** Pick photo/video → Storage → chat message(s). */
+  /** Pick photo / video / audio (or other file) → Storage → chat message(s). */
   const handleSendMedia = async (fileOrFiles) => {
     const files = (
       Array.isArray(fileOrFiles) || (typeof FileList !== 'undefined' && fileOrFiles instanceof FileList)
         ? [...fileOrFiles]
         : [fileOrFiles]
-    ).filter((file) => {
-      if (!file) return false
-      const kind = classifyChatAttachment(file)
-      return kind === 'image' || kind === 'video'
-    })
+    ).filter(Boolean)
     if (!files.length || busy) return
     if (actingAsOwner && !activeThreadId) {
       setError('返信する相手を選んでください。')
@@ -3218,7 +3214,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         const pendingId = nextStickerPendingId()
         const localUrl = URL.createObjectURL(file)
         const kind = classifyChatAttachment(file)
-        const label = kind === 'video' ? '動画' : '写真'
+        const label = kind === 'video'
+          ? '動画'
+          : kind === 'image'
+            ? '写真'
+            : (String(file.name || '').trim() || 'ファイル')
         try {
           // Paint the optimistic bubble before compression / Storage upload.
           flushSync(() => {
@@ -3234,7 +3234,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 text: label,
                 rawText: label,
                 imageUrl: kind === 'image' ? localUrl : '',
-                fileUrl: kind === 'video' ? localUrl : '',
+                fileUrl: kind === 'image' ? '' : localUrl,
                 fileKind: kind,
                 fileName: file.name || label,
                 fileMime: String(file.type || ''),
@@ -3301,13 +3301,13 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           URL.revokeObjectURL(localUrl)
           setHanaMessages((prev) => prev.filter((m) => m.id !== pendingId))
           if (batch.length === 1) {
-            setError(getFirebaseErrorMessage(err) || err?.message || 'メディアを送れませんでした。')
+            setError(getFirebaseErrorMessage(err) || err?.message || 'ファイルを送れませんでした。')
           }
         }
       }
       if (!actingAsOwner) setChannel('human')
       if (failed > 0 && batch.length > 1) {
-        setError(`${failed}件のメディアを送れませんでした。`)
+        setError(`${failed}件のファイルを送れませんでした。`)
       }
     } finally {
       setBusy(false)
@@ -5034,7 +5034,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 <input
                   ref={imageInputRef}
                   type="file"
-                  accept="image/*,video/*"
+                  accept="image/*,video/*,audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus,.caf"
                   multiple
                   className="sr-only"
                   tabIndex={-1}
@@ -5349,8 +5349,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               <button
                 type="button"
                 className="hana-chat-composer-action is-camera"
-                title="写真・動画を送る（複数可）"
-                aria-label="写真・動画を送る（複数可）"
+                title="写真・動画・音声を送る（複数可）"
+                aria-label="写真・動画・音声を送る（複数可）"
                 disabled={busy || (actingAsOwner && !activeThreadId)}
                 onMouseDown={(event) => event.preventDefault()}
                 onPointerDown={(event) => event.preventDefault()}
