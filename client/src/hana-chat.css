@@ -4067,8 +4067,833 @@ body.hana-chat-scroll-lock #root {
   }
 }
 
-.hana-chat-trip-bubble {
+.hana-chat-poke-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  min-height: 32px;
+  min-width: 32px;
+  margin: 0;
+  padding: 3px 8px;
+  border: 1px solid rgba(186, 230, 253, 0.4);
+  border-radius: 999px;
+  background:
+    radial-gradient(ellipse at 30% 20%, rgba(186, 230, 253, 0.28), transparent 62%),
+    rgba(24, 28, 42, 0.9);
+  color: rgba(255, 248, 240, 0.95);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+}
+
+.hana-chat-poke-chip.is-open {
+  background: rgba(186, 230, 253, 0.22);
+}
+
+.hana-chat-poke-chip.is-star {
+  border-color: rgba(250, 204, 21, 0.55);
+}
+
+.hana-chat-poke-chip-mark {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.hana-chat-poke-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f2b8c4;
+  box-shadow: 0 0 0 2px rgba(24, 28, 42, 0.9);
+}
+
+.hana-chat-poke-dock {
+  position: absolute;
+  z-index: 72;
+  top: calc(var(--hana-chat-header-h, 48px) + 4px);
+  left: 10px;
+  right: 10px;
+  pointer-events: none;
+}
+
+.hana-chat-poke-dock .hana-chat-poke-panel {
+  pointer-events: auto;
+  max-height: min(74vh, 560px);
+  overflow: auto;
+  padding: 12px 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(186, 230, 253, 0.28);
+  background: linear-gradient(180deg, rgba(32, 36, 52, 0.97), rgba(18, 20, 32, 0.98));
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+  color: rgba(255, 248, 240, 0.95);
+}
+
+.hana-chat-poke-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.hana-chat-poke-copy {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.hana-chat-poke-kicker {
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  color: rgba(186, 230, 253, 0.75);
+}
+
+.hana-chat-poke-title {
+  font-size: 0.95rem;
+}
+
+.hana-chat-poke-collapse {
+  border: 0;
+  background: transparent;
+  color: rgba(255, 248, 240, 0.7);
+  font-size: 1.2rem;
+  min-width: 28px;
+  min-height: 28px;
+  cursor: pointer;
+}
+
+.hana-chat-poke-trainers {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 8px;
+}
+
+.hana-chat-poke-seat {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 8px 4px 6px;
+  border-radius: 14px;
+  background: rgba(255, 248, 240, 0.05);
+}
+
+.hana-chat-poke-seat.is-mine {
+  box-shadow: inset 0 0 0 1px rgba(186, 230, 253, 0.45);
+}
+
+.hana-chat-poke-seat.is-done {
+  background: rgba(247, 227, 161, 0.12);
+}
+
+.hana-chat-poke-seat-face {
+  position: relative;
+  width: 44px;
+  height: 44px;
+}
+
+.hana-chat-poke-seat-face img,
+.hana-chat-poke-seat-fallback {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: rgba(255, 248, 240, 0.12);
+}
+
+.hana-chat-poke-seat-fallback {
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+}
+
+.hana-chat-poke-stamp {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #f7e3a1;
+  color: #3a2418;
+  font-size: 0.62rem;
+  font-style: normal;
+  display: grid;
+  place-items: center;
+}
+
+.hana-chat-poke-seat strong {
+  font-size: 0.68rem;
+}
+
+.hana-chat-poke-lives {
+  display: flex;
+  gap: 3px;
+}
+
+.hana-chat-poke-lives span {
+  width: 10px;
+  height: 14px;
+  border-radius: 2px;
+  background:
+    repeating-linear-gradient(-45deg, #6a3050 0 4px, #3a1830 4px 8px);
+  box-shadow: inset 0 0 0 1px rgba(255, 248, 240, 0.2);
+}
+
+.hana-chat-poke-lives span.is-used {
+  background: #f7e3a1;
+  opacity: 0.85;
+}
+
+.hana-chat-poke-link {
+  width: 18px;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(242, 184, 196, 0.2), #f2b8c4, rgba(186, 230, 253, 0.2));
+}
+
+.hana-chat-poke-star-chip {
+  display: grid;
+  justify-items: center;
+  min-width: 28px;
+  color: rgba(240, 201, 188, 0.55);
+  font-size: 0.62rem;
+}
+
+.hana-chat-poke-star-chip.is-on {
+  color: #f7e3a1;
+}
+
+.hana-chat-poke-path {
+  display: flex;
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  gap: 0;
+}
+
+.hana-chat-poke-path li {
+  flex: 1;
+  position: relative;
+}
+
+.hana-chat-poke-path li + li::before {
+  content: '';
+  position: absolute;
+  left: -8%;
+  top: 13px;
+  width: 16%;
+  height: 2px;
+  background: rgba(255, 248, 240, 0.16);
+}
+
+.hana-chat-poke-path button {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: rgba(240, 201, 188, 0.7);
+  font: inherit;
+  font-size: 0.58rem;
+  cursor: pointer;
+}
+
+.hana-chat-poke-path i {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 248, 240, 0.18);
+  font-style: normal;
+  font-weight: 700;
+}
+
+.hana-chat-poke-path .is-now button,
+.hana-chat-poke-path .is-cleared button {
+  color: #f7e3a1;
+}
+
+.hana-chat-poke-path .is-now i {
+  background: rgba(247, 227, 161, 0.25);
+  border-color: #f7e3a1;
+}
+
+.hana-chat-poke-tabs button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.hana-chat-poke-tabs svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.hana-chat-poke-tile {
+  position: relative;
+  min-height: 78px;
+  padding: 0;
+  overflow: hidden;
+  perspective: 240px;
+}
+
+.hana-chat-poke-tile-back {
+  display: block;
+  width: 100%;
+  height: 78px;
+  background:
+    repeating-linear-gradient(135deg, rgba(120, 40, 70, 0.9) 0 8px, rgba(50, 18, 40, 0.95) 8px 16px);
+  box-shadow: inset 0 0 0 3px rgba(232, 198, 120, 0.35);
+}
+
+.hana-chat-poke-tile-back::after {
+  content: '◆';
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: rgba(247, 227, 161, 0.55);
+  font-size: 1.1rem;
+}
+
+.hana-chat-poke-tile-face {
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  height: 78px;
+}
+
+.hana-chat-poke-tile-face b {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.hana-chat-poke-tile-face em {
+  font-size: 0.58rem;
+  font-style: normal;
+}
+
+.hana-chat-poke-tile.is-energy .hana-chat-poke-tile-face b {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #fff6, #7ad0ff);
+}
+
+.hana-chat-poke-duel {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 10px;
+}
+
+.hana-chat-poke-duel-side {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  opacity: 0.55;
+}
+
+.hana-chat-poke-duel-side.is-ready {
+  opacity: 1;
+}
+
+.hana-chat-poke-duel-side img {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.hana-chat-poke-duel-side em {
+  font-size: 0.62rem;
+  font-style: normal;
+}
+
+.hana-chat-poke-mini-card {
+  width: 28px;
+  height: 38px;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  background:
+    repeating-linear-gradient(-45deg, #6a3050 0 4px, #3a1830 4px 8px);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.hana-chat-poke-duel-side.is-ready .hana-chat-poke-mini-card {
+  background: #f7e3a1;
+  color: #3a2418;
+}
+
+.hana-chat-poke-vs {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #f2b8c4;
+}
+
+.hana-chat-poke-gym {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.hana-chat-poke-gym-orb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 248, 240, 0.08);
+  font-size: 0.72rem;
+}
+
+.hana-chat-poke-cover {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  margin: 0 0 8px;
+}
+
+.hana-chat-poke-cover i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 248, 240, 0.18);
+}
+
+.hana-chat-poke-cover i.is-on {
+  background: #f7e3a1;
+}
+
+.hana-chat-poke-choices button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.hana-chat-poke-choices button img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.hana-chat-poke-duo .is-on,
+.hana-chat-poke-duo .is-star {
+  color: #f7e3a1;
+}
+
+.hana-chat-poke-cheer-banner {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(232, 154, 170, 0.18);
+  font-size: 0.74rem;
+}
+
+.hana-chat-poke-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.hana-chat-poke-tabs button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: 1;
+  min-height: 32px;
+  border: 1px solid rgba(255, 248, 240, 0.12);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.hana-chat-poke-tabs button.is-on {
+  background: rgba(186, 230, 253, 0.18);
+  border-color: rgba(186, 230, 253, 0.4);
+}
+
+.hana-chat-poke-tabs .hana-chat-poke-dot {
+  top: 4px;
+  right: 8px;
+}
+
+.hana-chat-poke-card {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  max-width: 180px;
+  margin: 0 auto 10px;
+  aspect-ratio: 3 / 4;
+  padding: 0;
+  border: 1px solid rgba(255, 248, 240, 0.18);
+  border-radius: 14px;
+  background:
+    linear-gradient(160deg, rgba(255, 248, 240, 0.08), rgba(80, 50, 70, 0.4));
+  color: inherit;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.hana-chat-poke-card-back,
+.hana-chat-poke-card-front {
+  grid-area: 1 / 1;
+}
+
+.hana-chat-poke-card-front {
   display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px;
+}
+
+.hana-chat-poke-card.is-flip .hana-chat-poke-card-back {
+  display: none;
+}
+
+.hana-chat-poke-card.is-flip .hana-chat-poke-card-front {
+  display: flex;
+}
+
+.hana-chat-poke-card img {
+  width: 92px;
+  height: 92px;
+  object-fit: contain;
+}
+
+.hana-chat-poke-card em {
+  font-size: 0.62rem;
+  color: rgba(240, 201, 188, 0.7);
+}
+
+.hana-chat-poke-types {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+
+.hana-chat-poke-types span {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(186, 230, 253, 0.16);
+  font-size: 0.68rem;
+}
+
+.hana-chat-poke-flavor,
+.hana-chat-poke-hint,
+.hana-chat-poke-q,
+.hana-chat-poke-ok,
+.hana-chat-poke-verdict,
+.hana-chat-poke-err,
+.hana-chat-poke-credit,
+.hana-chat-poke-score {
+  margin: 0 0 8px;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: rgba(255, 230, 236, 0.9);
+}
+
+.hana-chat-poke-credit {
+  font-size: 0.58rem;
+  color: rgba(240, 201, 188, 0.55);
+}
+
+.hana-chat-poke-evo {
+  display: flex;
+  gap: 6px;
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  font-size: 0.68rem;
+}
+
+.hana-chat-poke-evo .is-now {
+  color: #f2b8c4;
+  font-weight: 700;
+}
+
+.hana-chat-poke-choices,
+.hana-chat-poke-cheers,
+.hana-chat-poke-prompts {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.hana-chat-poke-choices {
+  grid-template-columns: 1fr 1fr;
+}
+
+.hana-chat-poke-choices button,
+.hana-chat-poke-cheers button,
+.hana-chat-poke-prompts button,
+.hana-chat-poke-party-picks button,
+.hana-chat-poke-album button {
+  min-height: 34px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 248, 240, 0.14);
+  background: rgba(255, 248, 240, 0.06);
+  color: inherit;
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.hana-chat-poke-choices button.is-picked,
+.hana-chat-poke-cheers button.is-on,
+.hana-chat-poke-prompts button.is-on,
+.hana-chat-poke-party-picks button.is-on {
+  border-color: rgba(186, 230, 253, 0.5);
+  background: rgba(186, 230, 253, 0.18);
+}
+
+.hana-chat-poke-album ul,
+.hana-chat-poke-party-picks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.hana-chat-poke-album li {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  padding: 6px;
+  border-radius: 10px;
+  background: rgba(255, 248, 240, 0.05);
+  font-size: 0.62rem;
+  text-align: center;
+}
+
+.hana-chat-poke-album img,
+.hana-chat-poke-slot {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+}
+
+.hana-chat-poke-album li.is-foil {
+  box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.4);
+}
+
+.hana-chat-poke-err {
+  color: #f2b8c4;
+}
+
+.hana-chat-poke-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.hana-chat-poke-tile {
+  position: relative;
+  min-height: 78px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 248, 240, 0.16);
+  background:
+    linear-gradient(165deg, rgba(90, 50, 80, 0.7), rgba(30, 20, 40, 0.9));
+  color: rgba(255, 248, 240, 0.85);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.hana-chat-poke-tile.is-open {
+  background: rgba(255, 248, 240, 0.08);
+  font-weight: 600;
+}
+
+.hana-chat-poke-tile.is-rare {
+  box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.55);
+  color: #f7e3a1;
+}
+
+.hana-chat-poke-gift {
+  display: block;
+  width: 100%;
+  margin: 0 0 10px;
+  min-height: 36px;
+  border-radius: 12px;
+  border: 1px solid rgba(186, 230, 253, 0.35);
+  background: rgba(186, 230, 253, 0.12);
+  color: inherit;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.hana-chat-poke-regions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+}
+
+.hana-chat-poke-regions li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(255, 248, 240, 0.05);
+  font-size: 0.68rem;
+}
+
+.hana-chat-tcg {
+  position: relative;
+  width: 100%;
+  max-width: 220px;
+  margin: 0 auto 10px;
+  padding: 10px 10px 8px;
+  border-radius: 14px;
+  border: 2px solid rgba(232, 198, 120, 0.55);
+  background:
+    linear-gradient(180deg, #f4e4c4 0%, #e8d0a8 40%, #d9b888 100%);
+  color: #3a2418;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+
+.hana-chat-tcg.is-foil::after {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    115deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.35) 45%,
+    transparent 70%
+  );
+  background-size: 220% 100%;
+  animation: hana-chat-tcg-shimmer 2.8s linear infinite;
+}
+
+@keyframes hana-chat-tcg-shimmer {
+  from { background-position: 120% 0; }
+  to { background-position: -80% 0; }
+}
+
+.hana-chat-tcg-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.hana-chat-tcg-name {
+  flex: 1;
+  font-size: 0.82rem;
+  letter-spacing: 0.02em;
+}
+
+.hana-chat-tcg-hp {
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.hana-chat-tcg-pip {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(58, 36, 24, 0.35);
+  background: #c4b8a8;
+  flex-shrink: 0;
+}
+
+.hana-chat-tcg-pip.is-fire { background: #e07a4a; }
+.hana-chat-tcg-pip.is-water { background: #4a90d9; }
+.hana-chat-tcg-pip.is-grass { background: #5aaa4a; }
+.hana-chat-tcg-pip.is-electric { background: #e8c84a; }
+.hana-chat-tcg-pip.is-ice { background: #8ad4e0; }
+.hana-chat-tcg-pip.is-fighting { background: #c04a3a; }
+.hana-chat-tcg-pip.is-poison { background: #a45ac0; }
+.hana-chat-tcg-pip.is-ground { background: #c8a05a; }
+.hana-chat-tcg-pip.is-flying { background: #8cb8e8; }
+.hana-chat-tcg-pip.is-psychic { background: #e070a8; }
+.hana-chat-tcg-pip.is-bug { background: #9cbc3a; }
+.hana-chat-tcg-pip.is-rock { background: #b8a068; }
+.hana-chat-tcg-pip.is-ghost { background: #6a5a98; }
+.hana-chat-tcg-pip.is-dragon { background: #6a58c8; }
+.hana-chat-tcg-pip.is-dark { background: #5a4a48; }
+.hana-chat-tcg-pip.is-steel { background: #a8b0bc; }
+.hana-chat-tcg-pip.is-fairy { background: #e8a0c0; }
+.hana-chat-tcg-pip.is-normal { background: #c4b8a8; }
+
+.hana-chat-tcg-art {
+  display: grid;
+  place-items: center;
+  height: 132px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #8ec8e8, #f0f6fa);
+  overflow: hidden;
+}
+
+.hana-chat-tcg-art img {
+  width: 118px;
+  height: 118px;
+  object-fit: contain;
+}
+
+.hana-chat-tcg-moves {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+}
+
+.hana-chat-tcg-moves li {
+  display: grid;
+  grid-template-columns: 12px 1fr auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  border-top: 1px solid rgba(58, 36, 24, 0.12);
+  font-size: 0.7rem;
+}
+
+.hana-chat-tcg-moves em {
+  font-style: normal;
+}
+
+.hana-chat-tcg-weak {
+  font-size: 0.62rem;
+  color: rgba(58, 36, 24, 0.78);
 }
 
 .hana-chat-trip-dock.is-today .hana-chat-trip-bubble {

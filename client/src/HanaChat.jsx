@@ -2,102 +2,104 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import { createPortal, flushSync } from 'react-dom'
 import { setAppUnreadBadge } from './appBadge'
 import hanachanArt from './assets/hanachan.svg'
+import { CHAT_CARD_SHARE_EVENT, CHAT_CLOSE_EVENT } from './chatCardShare'
 import {
-  addChatReminder,
-  dueChatReminders,
-  loadAllLocalChatPins,
-  loadChatPins,
-  markChatReminderDone,
-  remindAtFromChoice,
-  toggleChatPin,
-  unpinChatMessageEverywhere
+    addChatReminder,
+    dueChatReminders,
+    loadAllLocalChatPins,
+    loadChatPins,
+    markChatReminderDone,
+    remindAtFromChoice,
+    toggleChatPin,
+    unpinChatMessageEverywhere
 } from './chatExtras'
 import ChatImageLightbox from './ChatImageLightbox'
 import ChatNatsuFireworks from './ChatNatsuFireworks'
-import { CHAT_CARD_SHARE_EVENT, CHAT_CLOSE_EVENT } from './chatCardShare'
 import { playChatNotifySound, unlockChatNotifySound } from './chatNotifySound'
+import ChatPokeZukan, { PokeZukanChip } from './ChatPokeZukan'
 import {
-  readDefaultReaction,
-  readEnterToSend,
-  readMessageSound,
-  readStickerSet,
-  writeDefaultReaction,
-  writeEnterToSend,
-  writeMessageSound,
-  writeStickerSet,
+    readDefaultReaction,
+    readEnterToSend,
+    readMessageSound,
+    readStickerSet,
+    writeDefaultReaction,
+    writeEnterToSend,
+    writeMessageSound,
+    writeStickerSet,
 } from './chatSettings'
 import { canMutateOwnMessage, useIsCoarsePointer } from './ChatSwipeBubble'
+import ChatWeightGarden, { WeightGardenChip } from './ChatWeightGarden'
 import EmotionMomentLayer, { EMOTION_MOMENTS, triggerEmotionMoment } from './EmotionMoment'
 import {
-  analyzeGuestMessageForOwner,
-  applyReactionLocally,
-  broadcastChatEffect,
-  CHAT_PRESENCE_MODES,
-  CHAT_REACTION_EMOJIS,
-  chatWithHanachan,
-  classifyChatAttachment,
-  confirmJpTripArrived,
-  DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
-  deleteChatMessage,
-  ensureChatThread,
-  ensureDefaultChatAccounts,
-  ensureGuestChatId,
-  getFirebaseErrorMessage,
-  getGuestProfile,
-  getMessageDeliveryStatus,
-  isAdminUser,
-  listGuestProfiles,
-  markThreadRead,
-  messageEditWindowMsFromMinutes,
-  migrateLegacyGuestThread,
-  migrateLocalPinsToThread,
-  normalizeChatPresenceMode,
-  OWNER_PROFILE,
-  pulseChatPresence,
-  resolveAvatarSrc,
-  resolveChatPresence,
-  resolveGuestDisplayName,
-  resolveGuestThreadWithHistory,
-  resolveSessionProfile,
-  sendChatMessage,
-  setChatPresenceStatus,
-  setChatProfileStatus,
-  setChatTyping,
-  sortChatMessages,
-  subscribeChatAccounts,
-  subscribeChatMessages,
-  subscribeChatProfiles,
-  subscribeChatThreads,
-  subscribeOwnChatThread,
-  subscribeToAuthUser,
-  suggestHanaChat,
-  threadUnreadCount,
-  toggleChatReaction,
-  toggleThreadChatPin,
-  translateChatMessage,
-  unpinThreadChatMessage,
-  updateChatMessage,
-  uploadChatAttachment,
-  ensureWeightGardenDefaults,
+    analyzeGuestMessageForOwner,
+    applyReactionLocally,
+    broadcastChatEffect,
+    CHAT_PRESENCE_MODES,
+    CHAT_REACTION_EMOJIS,
+    chatWithHanachan,
+    classifyChatAttachment,
+    confirmJpTripArrived,
+    DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
+    deleteChatMessage,
+    ensureChatThread,
+    ensureDefaultChatAccounts,
+    ensureGuestChatId,
+    ensureWeightGardenDefaults,
+    getFirebaseErrorMessage,
+    getGuestProfile,
+    getMessageDeliveryStatus,
+    isAdminUser,
+    listGuestProfiles,
+    markThreadRead,
+    messageEditWindowMsFromMinutes,
+    migrateLegacyGuestThread,
+    migrateLocalPinsToThread,
+    normalizeChatPresenceMode,
+    OWNER_PROFILE,
+    pulseChatPresence,
+    resolveAvatarSrc,
+    resolveChatPresence,
+    resolveGuestDisplayName,
+    resolveGuestThreadWithHistory,
+    resolveSessionProfile,
+    sendChatMessage,
+    setChatPresenceStatus,
+    setChatProfileStatus,
+    setChatTyping,
+    sortChatMessages,
+    subscribeChatAccounts,
+    subscribeChatMessages,
+    subscribeChatProfiles,
+    subscribeChatThreads,
+    subscribeOwnChatThread,
+    subscribeToAuthUser,
+    suggestHanaChat,
+    threadUnreadCount,
+    toggleChatReaction,
+    toggleThreadChatPin,
+    translateChatMessage,
+    unpinThreadChatMessage,
+    updateChatMessage,
+    uploadChatAttachment,
 } from './firebase'
 import FlowerRainLayer, {
-  CHAT_PARTY_REACTION,
-  triggerFlowerRain,
-  triggerPartyBurst,
+    CHAT_PARTY_REACTION,
+    triggerFlowerRain,
+    triggerPartyBurst,
 } from './FlowerRain'
 import './hana-chat.css'
 import HanaCall from './HanaCall'
 import HanaChatMessageList, { EMPTY_CHAT_REACTIONS } from './HanaChatMessageList'
 import HanaSticker, {
-  stickerSetsForViewer,
-  suggestHanaStickers,
+    stickerSetsForViewer,
+    suggestHanaStickers,
 } from './HanaStickers'
-import ChatWeightGarden, { WeightGardenChip } from './ChatWeightGarden'
 import NatsuKingyo from './NatsuKingyo'
 import {
-  collectUnansweredOwnerAssistMessages,
-  ownerAssistShouldCollapse,
+    collectUnansweredOwnerAssistMessages,
+    ownerAssistShouldCollapse,
 } from './OwnerMessageAssist'
+import { POKE_ZUKAN_GUEST, tokyoZukanYmd } from './pokeZukan'
 import { bindForegroundPush, ensureWebPush } from './webPush'
 
 const AI_HISTORY_PREFIX = 'hana-chat-ai-history-'
@@ -178,6 +180,13 @@ function canSeeWeightGarden({ actingAsOwner, guestKey, ownerThreadGuestKey }) {
     return String(ownerThreadGuestKey || '').trim().toLowerCase() === WEIGHT_GARDEN_GUEST
   }
   return String(guestKey || '').trim().toLowerCase() === WEIGHT_GARDEN_GUEST
+}
+
+function canSeePokeZukan({ actingAsOwner, guestKey, ownerThreadGuestKey }) {
+  if (actingAsOwner) {
+    return String(ownerThreadGuestKey || '').trim().toLowerCase() === POKE_ZUKAN_GUEST
+  }
+  return String(guestKey || '').trim().toLowerCase() === POKE_ZUKAN_GUEST
 }
 
 function writeWeightGardenExpanded(expanded) {
@@ -951,6 +960,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [weightGardenExpanded, setWeightGardenExpanded] = useState(false)
   const weightGardenDockRef = useRef(null)
   const weightGardenChipRef = useRef(null)
+  const [pokeZukanExpanded, setPokeZukanExpanded] = useState(false)
+  const pokeZukanDockRef = useRef(null)
+  const pokeZukanChipRef = useRef(null)
 
   const setJpTripOpen = (expanded) => {
     setJpTripExpanded(expanded)
@@ -958,6 +970,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     if (expanded) {
       setWeightGardenExpanded(false)
       writeWeightGardenExpanded(false)
+      setPokeZukanExpanded(false)
     }
   }
 
@@ -991,8 +1004,82 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     if (expanded) {
       setJpTripExpanded(false)
       writeJpTripExpanded(false)
+      setPokeZukanExpanded(false)
     }
   }
+
+  const pokeZukanThreadId = useMemo(() => {
+    if (actingAsOwner) {
+      if (ownerActiveGuestKey !== POKE_ZUKAN_GUEST) return ''
+      return activeThreadId || ''
+    }
+    if (String(guestKey || '').trim().toLowerCase() !== POKE_ZUKAN_GUEST) return ''
+    return guestChatId || ''
+  }, [actingAsOwner, ownerActiveGuestKey, activeThreadId, guestKey, guestChatId])
+
+  const showPokeZukan = canSeePokeZukan({
+    actingAsOwner,
+    guestKey,
+    ownerThreadGuestKey: ownerActiveGuestKey,
+  }) && Boolean(pokeZukanThreadId)
+
+  const pokeZukanData = useMemo(() => {
+    if (!pokeZukanThreadId) return null
+    if (actingAsOwner) {
+      const thread = threads.find((entry) => entry.id === pokeZukanThreadId)
+      return thread?.pokeZukan || null
+    }
+    return ownThread?.pokeZukan || null
+  }, [actingAsOwner, pokeZukanThreadId, threads, ownThread])
+
+  const pokeZukanPending = useMemo(() => {
+    if (!showPokeZukan) return false
+    const ymd = tokyoZukanYmd()
+    const data = pokeZukanData || {}
+    if (actingAsOwner) return data.hanaDoneYmd !== ymd
+    return data.guestDoneYmd !== ymd
+  }, [showPokeZukan, pokeZukanData, actingAsOwner])
+
+  const pokeZukanDuoStar = useMemo(() => {
+    const ymd = tokyoZukanYmd()
+    const data = pokeZukanData || {}
+    return data.duoStarYmd === ymd || (data.hanaDoneYmd === ymd && data.guestDoneYmd === ymd)
+  }, [pokeZukanData])
+
+  const setPokeZukanOpen = (expanded) => {
+    setPokeZukanExpanded(expanded)
+    if (expanded) {
+      setJpTripExpanded(false)
+      writeJpTripExpanded(false)
+      setWeightGardenExpanded(false)
+      writeWeightGardenExpanded(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!open || !showPokeZukan) return
+    setPokeZukanExpanded(false)
+  }, [open, showPokeZukan])
+
+  useEffect(() => {
+    if (!showPokeZukan || !pokeZukanExpanded) return undefined
+    const onPointerDown = (event) => {
+      const dock = pokeZukanDockRef.current
+      const chip = pokeZukanChipRef.current
+      if (dock?.contains(event.target) || chip?.contains(event.target)) return
+      setPokeZukanOpen(false)
+    }
+    const onKeyDown = (event) => {
+      if (event.key !== 'Escape') return
+      setPokeZukanOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [showPokeZukan, pokeZukanExpanded])
 
   useEffect(() => {
     if (!showWeightGarden) {
@@ -4504,6 +4591,15 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               )}
             </div>
             <div className="hana-chat-header-actions">
+              {showPokeZukan ? (
+                <PokeZukanChip
+                  chipRef={pokeZukanChipRef}
+                  expanded={pokeZukanExpanded}
+                  pending={pokeZukanPending}
+                  duoStar={pokeZukanDuoStar}
+                  onToggle={() => setPokeZukanOpen(!pokeZukanExpanded)}
+                />
+              ) : null}
               {showWeightGarden ? (
                 <WeightGardenChip
                   chipRef={weightGardenChipRef}
@@ -4724,6 +4820,24 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               </button>
             </div>
           </header>
+
+          {showPokeZukan && pokeZukanExpanded ? (
+            <div ref={pokeZukanDockRef} className="hana-chat-poke-dock">
+              <ChatPokeZukan
+                zukan={pokeZukanData}
+                role={actingAsOwner ? 'hana' : 'guest'}
+                threadId={pokeZukanThreadId}
+                hanaAvatar={avatarSrcForProfile(OWNER_PROFILE.key, OWNER_PROFILE.displayName)}
+                guestAvatar={actingAsOwner
+                  ? avatarSrcForProfile(ownerActiveGuestKey || 'zen', ownerActiveGuestLabel)
+                  : avatarSrcForProfile(guestProfile?.key || sessionProfile.id || 'zen', guestDisplayName)}
+                hanaName={OWNER_PROFILE.displayName}
+                guestName={actingAsOwner ? ownerActiveGuestLabel : guestDisplayName}
+                onClose={() => setPokeZukanOpen(false)}
+                onError={(message) => setError(message)}
+              />
+            </div>
+          ) : null}
 
           {showWeightGarden && weightGardenExpanded ? (
             <div ref={weightGardenDockRef} className="hana-chat-weight-dock">

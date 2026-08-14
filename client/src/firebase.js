@@ -1573,6 +1573,7 @@ function serializeChatThread(id, data) {
       || data?.jpTripArrivedAt?.toDate?.()?.toISOString?.()
       || null,
     weightGarden: serializeWeightGarden(data?.weightGarden),
+    pokeZukan: serializePokeZukan(data?.pokeZukan),
     pinnedMessages: serializeThreadPinnedMessages(data?.pinnedMessages),
   }
 }
@@ -1922,6 +1923,403 @@ export async function setWeightGardenGoal(threadId, goalKg) {
   }
   await setDoc(ref, { weightGarden }, { merge: true })
   return weightGardenProgress(weightGarden)
+}
+
+const POKE_ZUKAN_ENTRY_LIMIT = 80
+const POKE_CHEERS = new Set(['すごい！', 'がんばれ', 'いいね', '今日もエースだね'])
+
+function emptyPokeDuo() {
+  return {
+    ymd: '',
+    promptId: '',
+    promptBy: '',
+    cheer: '',
+    cheerAtIso: '',
+    cheerBy: '',
+    supportType: '',
+    supportOk: false,
+    supportBy: '',
+  }
+}
+
+function emptyExpedition() {
+  return {
+    ymd: '',
+    hunts: { hana: [], guest: [] },
+    foundRare: { hana: false, guest: false },
+    energyPick: { hana: '', guest: '' },
+    comboMove: { hana: '', guest: '' },
+    tradePick: { hana: '', guest: '' },
+    giftedSpeciesId: '',
+    giftedBy: '',
+  }
+}
+
+function serializeHuntList(raw) {
+  const out = []
+  if (!Array.isArray(raw)) return out
+  for (const id of raw) {
+    const key = String(id || '').trim().slice(0, 8)
+    if (!key || out.includes(key)) continue
+    out.push(key)
+    if (out.length >= 6) break
+  }
+  return out
+}
+
+export function serializePokeZukan(raw) {
+  const entries = {}
+  const src = raw?.entries && typeof raw.entries === 'object' ? raw.entries : {}
+  let n = 0
+  for (const [key, value] of Object.entries(src)) {
+    const id = String(Number(key) || key).trim()
+    if (!id || !value || typeof value !== 'object') continue
+    entries[id] = {
+      caughtAtIso: String(value.caughtAtIso || '').trim(),
+      photoUrl: String(value.photoUrl || '').trim(),
+      foil: Boolean(value.foil),
+      nickname: String(value.nickname || '').trim().slice(0, 24),
+    }
+    n += 1
+    if (n >= POKE_ZUKAN_ENTRY_LIMIT) break
+  }
+  const partyIds = []
+  if (Array.isArray(raw?.partyIds)) {
+    for (const id of raw.partyIds) {
+      const sid = String(Number(id) || '').trim()
+      if (!sid || partyIds.includes(sid)) continue
+      partyIds.push(sid)
+      if (partyIds.length >= 3) break
+    }
+  }
+  const duoRaw = raw?.duo && typeof raw.duo === 'object' ? raw.duo : {}
+  const cheer = String(duoRaw.cheer || '').trim()
+  const expRaw = raw?.expedition && typeof raw.expedition === 'object' ? raw.expedition : {}
+  const foundRare = expRaw.foundRare && typeof expRaw.foundRare === 'object' ? expRaw.foundRare : {}
+  const energyPick = expRaw.energyPick && typeof expRaw.energyPick === 'object' ? expRaw.energyPick : {}
+  const comboMove = expRaw.comboMove && typeof expRaw.comboMove === 'object' ? expRaw.comboMove : {}
+  const tradePick = expRaw.tradePick && typeof expRaw.tradePick === 'object' ? expRaw.tradePick : {}
+  const hunts = expRaw.hunts && typeof expRaw.hunts === 'object' ? expRaw.hunts : {}
+  return {
+    hanaStreak: Math.max(0, Number(raw?.hanaStreak) || 0),
+    guestStreak: Math.max(0, Number(raw?.guestStreak ?? raw?.gabuStreak) || 0),
+    hanaDoneYmd: String(raw?.hanaDoneYmd || '').trim(),
+    guestDoneYmd: String(raw?.guestDoneYmd || raw?.gabuDoneYmd || '').trim(),
+    duoStreak: Math.max(0, Number(raw?.duoStreak) || 0),
+    duoStars: Math.max(0, Number(raw?.duoStars) || 0),
+    duoStarYmd: String(raw?.duoStarYmd || '').trim(),
+    trainerXp: Math.max(0, Number(raw?.trainerXp) || 0),
+    partyIds,
+    partyScoreYmd: String(raw?.partyScoreYmd || '').trim(),
+    partyScore: Math.max(0, Number(raw?.partyScore) || 0),
+    duo: {
+      ...emptyPokeDuo(),
+      ymd: String(duoRaw.ymd || '').trim(),
+      promptId: String(duoRaw.promptId || '').trim().slice(0, 80),
+      promptBy: String(duoRaw.promptBy || '').trim().slice(0, 12),
+      cheer: POKE_CHEERS.has(cheer) ? cheer : cheer.slice(0, 16),
+      cheerAtIso: String(duoRaw.cheerAtIso || '').trim(),
+      cheerBy: String(duoRaw.cheerBy || '').trim().slice(0, 12),
+      supportType: String(duoRaw.supportType || '').trim().slice(0, 16),
+      supportOk: Boolean(duoRaw.supportOk),
+      supportBy: String(duoRaw.supportBy || '').trim().slice(0, 12),
+    },
+    expedition: {
+      ...emptyExpedition(),
+      ymd: String(expRaw.ymd || '').trim(),
+      hunts: {
+        hana: serializeHuntList(hunts.hana),
+        guest: serializeHuntList(hunts.guest),
+      },
+      foundRare: {
+        hana: Boolean(foundRare.hana),
+        guest: Boolean(foundRare.guest),
+      },
+      energyPick: {
+        hana: String(energyPick.hana || '').trim().slice(0, 16),
+        guest: String(energyPick.guest || '').trim().slice(0, 16),
+      },
+      comboMove: {
+        hana: String(comboMove.hana || '').trim().slice(0, 24),
+        guest: String(comboMove.guest || '').trim().slice(0, 24),
+      },
+      tradePick: {
+        hana: String(tradePick.hana || '').trim().slice(0, 12),
+        guest: String(tradePick.guest || '').trim().slice(0, 12),
+      },
+      giftedSpeciesId: String(expRaw.giftedSpeciesId || '').trim().slice(0, 12),
+      giftedBy: String(expRaw.giftedBy || '').trim().slice(0, 12),
+    },
+    entries,
+  }
+}
+
+function tokyoPokeYmd() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+}
+
+function pokeRoleKey(role) {
+  return role === 'hana' ? 'hana' : 'guest'
+}
+
+function applyDuoStar(prev, ymd) {
+  const hanaDone = prev.hanaDoneYmd === ymd
+  const guestDone = prev.guestDoneYmd === ymd
+  if (!hanaDone || !guestDone) return prev
+  if (String(prev.duoStarYmd || '') === ymd) return prev
+  return {
+    ...prev,
+    duoStars: prev.duoStars + 1,
+    duoStreak: prev.duoStreak + 1,
+    duoStarYmd: ymd,
+  }
+}
+
+async function patchPokeZukan(threadId, mutator) {
+  const tid = String(threadId || '').trim()
+  if (!tid) throw new Error('スレッドがありません。')
+  const ref = doc(db, CHAT_THREADS_COLLECTION, tid)
+  const snap = await getDoc(ref)
+  const prev = serializePokeZukan(snap.exists() ? snap.data()?.pokeZukan : null)
+  const next = serializePokeZukan(mutator(prev))
+  await setDoc(ref, { pokeZukan: next }, { merge: true })
+  return next
+}
+
+export async function recordPokeZukanCatch(threadId, { role, speciesId, ymd, foil = false } = {}) {
+  const who = pokeRoleKey(role)
+  const day = String(ymd || tokyoPokeYmd())
+  const sid = String(Number(speciesId) || '').trim()
+  if (!sid) throw new Error('図鑑番号がありません。')
+  return patchPokeZukan(threadId, (prev) => {
+    const already = who === 'hana' ? prev.hanaDoneYmd === day : prev.guestDoneYmd === day
+    const entries = { ...prev.entries }
+    if (!entries[sid]) {
+      entries[sid] = {
+        caughtAtIso: new Date().toISOString(),
+        photoUrl: '',
+        foil: Boolean(foil),
+        nickname: '',
+      }
+    } else if (foil) {
+      entries[sid] = { ...entries[sid], foil: true }
+    }
+    const duo = prev.duo?.ymd === day ? prev.duo : null
+    const cheeredByPartner = Boolean(duo?.cheer) && duo.cheerBy && duo.cheerBy !== who
+    const cheerBonus = !already && cheeredByPartner
+      ? (String(duo.cheer).includes('エース') ? 2 : 1)
+      : 0
+    const next = {
+      ...prev,
+      entries,
+      hanaDoneYmd: who === 'hana' ? day : prev.hanaDoneYmd,
+      guestDoneYmd: who === 'guest' ? day : prev.guestDoneYmd,
+      hanaStreak: who === 'hana' && !already ? prev.hanaStreak + 1 : prev.hanaStreak,
+      guestStreak: who === 'guest' && !already ? prev.guestStreak + 1 : prev.guestStreak,
+      trainerXp: prev.trainerXp + cheerBonus,
+    }
+    return applyDuoStar(next, day)
+  })
+}
+
+export async function setPokeZukanDuoPrompt(threadId, { role, promptId, ymd } = {}) {
+  const who = pokeRoleKey(role)
+  const day = String(ymd || tokyoPokeYmd())
+  const id = String(promptId || '').trim()
+  if (!id) throw new Error('お題がありません。')
+  return patchPokeZukan(threadId, (prev) => {
+    const duo = prev.duo?.ymd === day ? { ...prev.duo } : { ...emptyPokeDuo(), ymd: day }
+    return {
+      ...prev,
+      duo: { ...duo, ymd: day, promptId: id, promptBy: who },
+    }
+  })
+}
+
+export async function setPokeZukanCheer(threadId, { role, cheer, ymd } = {}) {
+  const who = pokeRoleKey(role)
+  const day = String(ymd || tokyoPokeYmd())
+  const text = String(cheer || '').trim()
+  if (!POKE_CHEERS.has(text)) throw new Error('応援を選んでください。')
+  return patchPokeZukan(threadId, (prev) => {
+    const duo = prev.duo?.ymd === day ? { ...prev.duo } : { ...emptyPokeDuo(), ymd: day }
+    return {
+      ...prev,
+      duo: {
+        ...duo,
+        ymd: day,
+        cheer: text,
+        cheerAtIso: new Date().toISOString(),
+        cheerBy: who,
+      },
+    }
+  })
+}
+
+export async function setPokeZukanParty(threadId, partyIds = []) {
+  return patchPokeZukan(threadId, (prev) => ({
+    ...prev,
+    partyIds: [...partyIds].map((id) => String(Number(id) || '').trim()).filter(Boolean).slice(0, 3),
+  }))
+}
+
+export async function setPokeZukanSupport(threadId, { role, supportType, supportOk = false, ymd, score } = {}) {
+  const who = pokeRoleKey(role)
+  const day = String(ymd || tokyoPokeYmd())
+  const t = String(supportType || '').trim()
+  return patchPokeZukan(threadId, (prev) => {
+    const duo = prev.duo?.ymd === day ? { ...prev.duo } : { ...emptyPokeDuo(), ymd: day }
+    return {
+      ...prev,
+      partyScore: Number.isFinite(Number(score)) ? Math.max(0, Number(score)) : prev.partyScore,
+      partyScoreYmd: day,
+      duo: {
+        ...duo,
+        ymd: day,
+        supportType: t,
+        supportOk: Boolean(supportOk),
+        supportBy: who,
+      },
+    }
+  })
+}
+
+export async function setPokeZukanCardPhoto(threadId, { speciesId, photoUrl } = {}) {
+  const sid = String(Number(speciesId) || '').trim()
+  const url = String(photoUrl || '').trim()
+  if (!sid || !url) throw new Error('カード写真がありません。')
+  return patchPokeZukan(threadId, (prev) => {
+    const prevEntry = prev.entries[sid] || {
+      caughtAtIso: new Date().toISOString(),
+      photoUrl: '',
+      foil: false,
+      nickname: '',
+    }
+    return {
+      ...prev,
+      entries: {
+        ...prev.entries,
+        [sid]: { ...prevEntry, photoUrl: url.slice(0, 2000) },
+      },
+    }
+  })
+}
+
+function expeditionForDay(prev, ymd) {
+  if (prev.expedition?.ymd === ymd) return { ...prev.expedition }
+  return { ...emptyExpedition(), ymd }
+}
+
+export async function flipPokeHuntTile(threadId, {
+  role,
+  tileId,
+  kind,
+  speciesId,
+  ymd,
+} = {}) {
+  const who = pokeRoleKey(role)
+  const day = String(ymd || tokyoPokeYmd())
+  const tile = String(tileId || '').trim()
+  if (!tile) throw new Error('マスがありません。')
+  const sid = String(Number(speciesId) || '').trim()
+  return patchPokeZukan(threadId, (prev) => {
+    const expedition = expeditionForDay(prev, day)
+    const mine = [...(expedition.hunts[who] || [])]
+    if (mine.includes(tile) || mine.length >= 3) return prev
+    mine.push(tile)
+    const foundRare = { ...expedition.foundRare }
+    if (kind === 'rare') foundRare[who] = true
+    const foil = Boolean(foundRare[who])
+    const entries = { ...prev.entries }
+    const finished = mine.length >= 3
+    if (finished && sid && !entries[sid]) {
+      entries[sid] = {
+        caughtAtIso: new Date().toISOString(),
+        photoUrl: '',
+        foil,
+        nickname: '',
+      }
+    } else if (finished && sid && foil && entries[sid]) {
+      entries[sid] = { ...entries[sid], foil: true }
+    }
+    const already = who === 'hana' ? prev.hanaDoneYmd === day : prev.guestDoneYmd === day
+    let next = {
+      ...prev,
+      entries,
+      expedition: {
+        ...expedition,
+        ymd: day,
+        hunts: { ...expedition.hunts, [who]: mine },
+        foundRare,
+      },
+      hanaDoneYmd: who === 'hana' && finished ? day : prev.hanaDoneYmd,
+      guestDoneYmd: who === 'guest' && finished ? day : prev.guestDoneYmd,
+      hanaStreak: who === 'hana' && finished && !already ? prev.hanaStreak + 1 : prev.hanaStreak,
+      guestStreak: who === 'guest' && finished && !already ? prev.guestStreak + 1 : prev.guestStreak,
+    }
+    return applyDuoStar(next, day)
+  })
+}
+
+export async function setPokeExpeditionPick(threadId, { role, field, value, ymd } = {}) {
+  const who = pokeRoleKey(role)
+  const day = String(ymd || tokyoPokeYmd())
+  const key = String(field || '').trim()
+  if (!['energyPick', 'comboMove', 'tradePick'].includes(key)) {
+    throw new Error('選択できません。')
+  }
+  return patchPokeZukan(threadId, (prev) => {
+    const expedition = expeditionForDay(prev, day)
+    if (expedition[key]?.[who]) return prev
+    return {
+      ...prev,
+      expedition: {
+        ...expedition,
+        ymd: day,
+        [key]: { ...expedition[key], [who]: String(value || '').trim().slice(0, 24) },
+      },
+    }
+  })
+}
+
+export async function giftPokeDailyCard(threadId, { role, speciesId, ymd } = {}) {
+  const who = pokeRoleKey(role)
+  const day = String(ymd || tokyoPokeYmd())
+  const sid = String(Number(speciesId) || '').trim()
+  if (!sid) throw new Error('カードがありません。')
+  return patchPokeZukan(threadId, (prev) => {
+    const expedition = expeditionForDay(prev, day)
+    return {
+      ...prev,
+      expedition: {
+        ...expedition,
+        ymd: day,
+        giftedSpeciesId: sid,
+        giftedBy: who,
+      },
+    }
+  })
+}
+
+export async function stampPokeFoil(threadId, speciesId) {
+  const sid = String(Number(speciesId) || '').trim()
+  if (!sid) return null
+  return patchPokeZukan(threadId, (prev) => {
+    const prevEntry = prev.entries[sid]
+    if (!prevEntry) return prev
+    return {
+      ...prev,
+      entries: {
+        ...prev.entries,
+        [sid]: { ...prevEntry, foil: true },
+      },
+    }
+  })
 }
 
 /**
