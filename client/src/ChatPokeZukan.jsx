@@ -148,33 +148,44 @@ function TileFace({ kind, open }) {
 
 function TcgCard({ card, foil = false, photoUrl = '' }) {
   if (!card) return null
+  const type = card.types[0] || 'normal'
+  const art = photoUrl || card.sprite
   return (
-    <article className={`hana-chat-tcg${foil ? ' is-foil' : ''}`}>
-      <header className="hana-chat-tcg-top">
-        <strong className="hana-chat-tcg-name">{card.nameJa}</strong>
-        <span className="hana-chat-tcg-hp">HP {card.hp}</span>
-        <span className={`hana-chat-tcg-pip is-${card.types[0] || 'normal'}`} title={typeLabel(card.types[0])} />
-      </header>
-      <div className="hana-chat-tcg-art">
-        {photoUrl ? (
-          <img src={photoUrl} alt="" />
-        ) : card.sprite ? (
-          <img src={card.sprite} alt="" />
-        ) : null}
-      </div>
-      <ul className="hana-chat-tcg-moves">
-        {(card.moves || []).map((move) => (
-          <li key={move.id}>
-            <span className={`hana-chat-tcg-pip is-${move.type}`} />
-            <em>{move.nameJa}</em>
-            <strong>{move.power || '—'}</strong>
-          </li>
-        ))}
-      </ul>
-      <footer className="hana-chat-tcg-weak">
-        弱点 {(card.weaknesses || []).map((t) => typeLabel(t)).join(' / ') || '—'}
-      </footer>
-    </article>
+    <div className={`hana-chat-tcg-slab${foil ? ' is-foil' : ''}`}>
+      <i className="hana-chat-tcg-bolt is-tl" />
+      <i className="hana-chat-tcg-bolt is-tr" />
+      <i className="hana-chat-tcg-bolt is-bl" />
+      <i className="hana-chat-tcg-bolt is-br" />
+      <article className={`hana-chat-tcg is-${type}`}>
+        <div className="hana-chat-tcg-burst" aria-hidden="true" />
+        <div className="hana-chat-tcg-art">
+          {art ? <img src={art} alt="" /> : null}
+        </div>
+        <header className="hana-chat-tcg-top">
+          <strong className="hana-chat-tcg-name">{card.nameJa}</strong>
+          <span className="hana-chat-tcg-hp">
+            <small>HP</small>
+            {card.hp}
+          </span>
+          <span className={`hana-chat-tcg-pip is-${type}`} title={typeLabel(type)} />
+        </header>
+        <ul className="hana-chat-tcg-moves">
+          {(card.moves || []).map((move) => (
+            <li key={move.id}>
+              <span className={`hana-chat-tcg-pip is-${move.type}`} />
+              <em>{move.nameJa}</em>
+              <strong>{move.power || '—'}</strong>
+            </li>
+          ))}
+        </ul>
+        <footer className="hana-chat-tcg-weak">
+          <span>弱点</span>
+          {(card.weaknesses || []).map((t) => (
+            <i key={t} className={`hana-chat-tcg-pip is-${t}`} title={typeLabel(t)} />
+          ))}
+        </footer>
+      </article>
+    </div>
   )
 }
 
