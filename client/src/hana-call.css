@@ -537,6 +537,138 @@
   height: 72px;
 }
 
+.hana-call-owner-assist {
+  position: absolute;
+  z-index: 7;
+  left: 12px;
+  right: 12px;
+  bottom: 128px;
+  max-height: min(42vh, 320px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-radius: 16px;
+  background: rgba(12, 8, 10, 0.82);
+  border: 1px solid rgba(255, 248, 240, 0.16);
+  backdrop-filter: blur(14px);
+  color: #fff8f0;
+  text-align: left;
+  pointer-events: auto;
+}
+
+.hana-call-owner-assist-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.hana-call-owner-assist-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+
+.hana-call-owner-assist-log {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 44px;
+}
+
+.hana-call-owner-assist-line.is-latest .hana-call-owner-assist-speech {
+  color: #fff8f0;
+}
+
+.hana-call-owner-assist-line:not(.is-latest) {
+  opacity: 0.72;
+}
+
+.hana-call-owner-assist-badge {
+  margin: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  background: rgba(232, 154, 170, 0.28);
+  color: #ffe4ea;
+}
+
+.hana-call-owner-assist-live {
+  font-size: 0.68rem;
+  opacity: 0.78;
+}
+
+.hana-call-owner-assist-note,
+.hana-call-owner-assist-empty {
+  margin: 0;
+  font-size: 0.75rem;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.hana-call-owner-assist-speech {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  font-weight: 650;
+}
+
+.hana-call-owner-assist-vi {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  opacity: 0.82;
+}
+
+.hana-call-owner-assist-replies {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hana-call-owner-assist-replies-label {
+  margin: 0;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  opacity: 0.65;
+}
+
+.hana-call-owner-assist-reply {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 248, 240, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 248, 240, 0.08);
+  color: inherit;
+  text-align: left;
+}
+
+.hana-call-owner-assist-reply strong {
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.hana-call-owner-assist-reply span {
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
 
 
 @media (max-width: 600px) {
@@ -561,6 +693,11 @@
   .hana-call-actions {
     bottom: max(22px, env(safe-area-inset-bottom));
     gap: 12px;
+  }
+
+  .hana-call-owner-assist {
+    bottom: 118px;
+    max-height: min(36vh, 280px);
   }
 
   .hana-call-fab {

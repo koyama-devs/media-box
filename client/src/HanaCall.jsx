@@ -1,24 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-    playCallConnected,
-    playCallEnded,
-    startIncomingRingtone,
-    startOutgoingRingback,
-    stopCallSounds,
-    unlockCallSounds,
+  playCallConnected,
+  playCallEnded,
+  startIncomingRingtone,
+  startOutgoingRingback,
+  stopCallSounds,
+  unlockCallSounds,
 } from './callSounds'
 import {
-    addChatCallCandidate,
-    createChatCall,
-    getFirebaseErrorMessage,
-    subscribeChatCallCandidates,
-    subscribeChatCalls,
-    updateChatCall,
-    postChatCallLog,
-    upsertChatCallHistory,
+  addChatCallCandidate,
+  createChatCall,
+  getFirebaseErrorMessage,
+  postChatCallLog,
+  subscribeChatCallCandidates,
+  subscribeChatCalls,
+  updateChatCall,
+  upsertChatCallHistory,
 } from './firebase'
 import './hana-call.css'
+import useHanaCallOwnerAssist from './useHanaCallOwnerAssist'
 
 const TERMINAL_STATUSES = new Set(['ended', 'rejected', 'missed', 'failed'])
 const RING_MAX_AGE_MS = 90_000
@@ -291,6 +292,33 @@ export default function HanaCall({
   const failDetailRef = useRef(null)
   const lastIceServersRef = useRef([])
   const phaseRef = useRef('idle')
+  const applyingAnswerRef = useRef(false)
+  const ownerAssist = useHanaCallOwnerAssist({
+    enabled: role === 'hana',
+    phase,
+    remoteStreamRef,
+    guestName: partnerName,
+  })
+  const ownerAssistScrollRef = useRef(null)
+
+  useEffect(() => {
+    if (role !== 'hana' || phase !== 'connected') return
+    const node = ownerAssistScrollRef.current
+    if (!node) return
+    const pinLatest = () => {
+      node.scrollTop = node.scrollHeight
+    }
+    pinLatest()
+    const frame = window.requestAnimationFrame(pinLatest)
+    return () => window.cancelAnimationFrame(frame)
+  }, [
+    role,
+    phase,
+    ownerAssist.lines,
+    ownerAssist.replies,
+    ownerAssist.busy,
+    ownerAssist.listening,
+  ])
 
   const watchIds = useMemo(() => {
     const ids = new Set()
@@ -298,8 +326,9 @@ export default function HanaCall({
     ;(listenThreadIds || []).forEach((id) => {
       if (id) ids.add(id)
     })
-    return [...ids]
+    return [...ids].sort()
   }, [threadId, listenThreadIds])
+  const watchKey = watchIds.join('|')
 
   useEffect(() => {
     phaseRef.current = phase
@@ -357,6 +386,7 @@ export default function HanaCall({
     cameraOnRef.current = false
     connectedAtRef.current = 0
     announcedConnectRef.current = false
+    applyingAnswerRef.current = false
     setElapsedSec(0)
   }, [stopMedia])
 
@@ -624,8 +654,10 @@ export default function HanaCall({
 
   const startCall = useCallback(async () => {
     if (!threadId || phase !== 'idle') return
-    // Start getUserMedia in the same tap turn — before any await / audio unlock.
+    // Same-tap getUserMedia (Android), but ring the callee in Firestore immediately —
+    // do not wait for TURN / offer SDP or Hana's overlay/push is delayed many seconds.
     const mediaPromise = requestMedia()
+    const icePromise = resolveIceServers()
     onBeforeStart?.()
     setError('')
     setPermBlocked(false)
@@ -633,17 +665,9 @@ export default function HanaCall({
     setCameraOn(false)
     cameraOnRef.current = false
     let createdId = ''
+    const createdAtIso = new Date().toISOString()
     try {
-      // Wait for mic first. Do not ring / write Firestore until mic is granted,
-      // otherwise Android may deny while ringback AudioContext is starting.
-      await mediaPromise
-      unlockCallSounds()
-      startOutgoingRingback(true)
-      const createdAtIso = new Date().toISOString()
-      const [callId, iceServers] = await Promise.all([
-        createChatCall({ threadId, callerRole: role, type: 'video' }),
-        resolveIceServers(),
-      ])
+      const callId = await createChatCall({ threadId, callerRole: role, type: 'video' })
       createdId = callId
       const activeCall = {
         id: callId,
@@ -656,7 +680,6 @@ export default function HanaCall({
       setCall(activeCall)
       callRef.current = activeCall
       setPhase('calling')
-      startOutgoingRingback(true)
       void upsertChatCallHistory({
         callId,
         threadId,
@@ -665,7 +688,11 @@ export default function HanaCall({
         createdAtIso,
         type: 'video',
       })
+      await mediaPromise
+      unlockCallSounds()
+      startOutgoingRingback(true)
       if (callRef.current?.id !== callId) return
+      const iceServers = await icePromise
       lastIceServersRef.current = iceServers
       const peer = buildPeer(activeCall, iceServers)
       const offer = await peer.createOffer()
@@ -683,7 +710,7 @@ export default function HanaCall({
           threadId,
           callerRole: role,
           type: 'video',
-          createdAtIso: new Date().toISOString(),
+          createdAtIso,
         }
       }
       fail(reason, { phase: 'calling' })
@@ -828,9 +855,52 @@ export default function HanaCall({
   }, [reset, role])
   finishCallRef.current = finishCall
 
+  const applyRemoteAnswer = useCallback(async (answer) => {
+    const peer = peerRef.current
+    const active = callRef.current
+    if (!peer || !answer?.type || !answer?.sdp) return
+    // Caller only. Callee already set the offer as remoteDescription; applying
+    // the answer there InvalidStateErrors and hangs up both sides.
+    if (active?.callerRole && active.callerRole !== role) return
+    if (peer.signalingState === 'closed') return
+    if (peer.signalingState !== 'have-local-offer') return
+    if (peer.remoteDescription) return
+    if (applyingAnswerRef.current) return
+    applyingAnswerRef.current = true
+    stopCallSounds()
+    setPhase((prev) => (
+      prev === 'calling' || prev === 'preparing' ? 'connecting' : prev
+    ))
+    try {
+      await peer.setRemoteDescription(new RTCSessionDescription(answer))
+      await flushCandidates()
+      attachRemoteStream(remoteStreamRef.current)
+      if (peer.iceConnectionState === 'failed') {
+        try { peer.restartIce?.() } catch { /* ignore */ }
+      }
+    } catch (err) {
+      applyingAnswerRef.current = false
+      const name = String(err?.name || '')
+      if (name === 'InvalidStateError' || /InvalidState/i.test(String(err?.message || ''))) {
+        return
+      }
+      fail(err, { phase: 'answer' })
+      return
+    }
+    applyingAnswerRef.current = false
+  }, [attachRemoteStream, fail, flushCandidates, role])
+
+  const onIncomingRef = useRef(onIncoming)
+  onIncomingRef.current = onIncoming
+  const applyRemoteAnswerRef = useRef(applyRemoteAnswer)
+  applyRemoteAnswerRef.current = applyRemoteAnswer
+  const resetRef = useRef(reset)
+  resetRef.current = reset
+
   useEffect(() => {
-    if (watchIds.length === 0) return undefined
-    const unsubs = watchIds.map((id) => subscribeChatCalls(
+    const ids = watchKey ? watchKey.split('|').filter(Boolean) : []
+    if (ids.length === 0) return undefined
+    const unsubs = ids.map((id) => subscribeChatCalls(
       id,
       (calls) => {
         const current = callRef.current
@@ -865,30 +935,21 @@ export default function HanaCall({
               type: next.type || 'video',
             }).catch(() => {})
             playCallEnded()
-            reset()
+            resetRef.current()
             return
           }
-          // Stop ringback when they pick up; only enter connecting once answer SDP exists
-          // (status=connected without answer previously left caller ICE in a dead state).
-          if (next.answeredAtIso || next.answer || next.status === 'connected') {
+          const pickedUp = Boolean(next.answeredAtIso || next.answer || next.status === 'connected')
+          if (pickedUp) {
             stopCallSounds()
+            if (
+              phaseRef.current === 'calling'
+              || phaseRef.current === 'preparing'
+            ) {
+              setPhase('connecting')
+            }
           }
-          if (next.answer && (phaseRef.current === 'calling' || phaseRef.current === 'preparing' || phaseRef.current === 'ringing')) {
-            setPhase('connecting')
-          }
-          if (next.answer && peerRef.current && !peerRef.current.remoteDescription) {
-            setPhase('connecting')
-            void peerRef.current
-              .setRemoteDescription(new RTCSessionDescription(next.answer))
-              .then(flushCandidates)
-              .then(() => {
-                const peer = peerRef.current
-                if (peer && (peer.iceConnectionState === 'failed' || peer.connectionState === 'failed')) {
-                  try { peer.restartIce?.() } catch { /* ignore */ }
-                }
-                attachRemoteStream(remoteStreamRef.current)
-              })
-              .catch((err) => fail(err, { phase: 'answer' }))
+          if (next.answer) {
+            void applyRemoteAnswerRef.current(next.answer)
           }
           return
         }
@@ -903,27 +964,32 @@ export default function HanaCall({
           const payload = { ...incoming, threadId: id }
           setCall(payload)
           setPhase('ringing')
-          onIncoming?.(payload)
+          onIncomingRef.current?.(payload)
         }
       },
       (err) => {
-        // Keep user-facing copy soft; detail goes nowhere until a call id exists.
         setError(USER_FAIL_GENERIC)
         console.warn('[call] subscribe failed', err)
       },
     ))
     return () => unsubs.forEach((unsub) => unsub())
-  }, [attachRemoteStream, fail, flushCandidates, onIncoming, reset, role, watchIds])
+  }, [role, watchKey])
 
   // Belt-and-suspenders: answered signal kills ringback; answer SDP enters connecting.
   useEffect(() => {
     if (call?.answeredAtIso || call?.answer || call?.status === 'connected') {
       stopCallSounds()
     }
-    if (call?.answer && (phase === 'calling' || phase === 'preparing')) {
+    if (call?.answer) {
+      void applyRemoteAnswer(call.answer)
+    }
+    if (
+      (call?.answeredAtIso || call?.answer || call?.status === 'connected')
+      && (phase === 'calling' || phase === 'preparing')
+    ) {
       setPhase('connecting')
     }
-  }, [call?.answer, call?.answeredAtIso, call?.status, phase])
+  }, [applyRemoteAnswer, call?.answer, call?.answeredAtIso, call?.status, phase])
 
   // Ringtone / ringback by phase
   useEffect(() => {
@@ -933,14 +999,9 @@ export default function HanaCall({
       return () => stopCallSounds()
     }
     if (phase === 'calling') {
-      if (callRef.current?.answer) {
+      if (callRef.current?.answer || callRef.current?.answeredAtIso || callRef.current?.status === 'connected') {
         stopCallSounds()
         setPhase('connecting')
-        return undefined
-      }
-      // Picked up but answer SDP not yet — keep UI on calling, silence ringback.
-      if (callRef.current?.answeredAtIso) {
-        stopCallSounds()
         return undefined
       }
       startOutgoingRingback(true)
@@ -1161,6 +1222,59 @@ export default function HanaCall({
               {phase === 'connecting' ? <p className="hana-call-hint">ネットワークを調整しています</p> : null}
               {error ? <p className="hana-call-error">{error}</p> : null}
             </div>
+
+            {role === 'hana' && phase === 'connected' ? (
+              <aside className="hana-call-owner-assist" aria-label="はな専用・相手の文字起こし">
+                <div className="hana-call-owner-assist-head">
+                  <p className="hana-call-owner-assist-badge">はな専用</p>
+                  <span className="hana-call-owner-assist-live">
+                    {ownerAssist.unsupported
+                      ? 'このブラウザでは文字起こしできません'
+                      : ownerAssist.listening
+                        ? '相手の声を聞き取り中…'
+                        : ownerAssist.busy
+                          ? '返信案を作成中…'
+                          : '相手の発言だけ表示'}
+                  </span>
+                </div>
+                {ownerAssist.assistError ? (
+                  <p className="hana-call-owner-assist-note">{ownerAssist.assistError}</p>
+                ) : null}
+                <div className="hana-call-owner-assist-scroll" ref={ownerAssistScrollRef}>
+                <div className="hana-call-owner-assist-log">
+                  {ownerAssist.lines.length ? (
+                    ownerAssist.lines.map((line, index) => (
+                      <div
+                        key={line.id}
+                        className={`hana-call-owner-assist-line${index === ownerAssist.lines.length - 1 ? ' is-latest' : ''}`}
+                      >
+                        <p className="hana-call-owner-assist-speech">{line.text}</p>
+                        {line.translationVi ? (
+                          <p className="hana-call-owner-assist-vi">{line.translationVi}</p>
+                        ) : null}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="hana-call-owner-assist-empty">相手が話し始めるとここに文字が出ます</p>
+                  )}
+                </div>
+                {ownerAssist.replies.length ? (
+                  <div className="hana-call-owner-assist-replies">
+                    <p className="hana-call-owner-assist-replies-label">返す一言</p>
+                    {ownerAssist.replies.map((reply, index) => (
+                      <div
+                        key={`${reply.ja}-${index}`}
+                        className="hana-call-owner-assist-reply"
+                      >
+                        <strong>{reply.ja}</strong>
+                        {reply.vi ? <span>{reply.vi}</span> : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                </div>
+              </aside>
+            ) : null}
 
             <div className="hana-call-actions">
               {isRinging ? (

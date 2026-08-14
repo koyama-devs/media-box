@@ -471,6 +471,109 @@ exports.analyzeGuestMessageForOwner = onCall({ cors: true }, async (request) => 
   }
 })
 
+const LIVE_CALL_ASSIST_SYSTEM_PROMPT = `あなたは「はな」（Hana Mediaboxのオーナー本人）専用の通話アシスタントです。
+入力音声は通話相手（ゲスト）の声です。はな自身の声ではありません。
+次のJSONだけを返してください（説明・コードフェンス禁止）:
+
+{"transcript":"...","translationVi":"...","replies":[{"ja":"...","vi":"..."},{"ja":"...","vi":"..."}]}
+
+重要な本人情報：
+- 「はな」と「Mika（ミカ・みか）」は同一人物です。ゲストが Mika / ミカ / みか と呼んだら、それははな本人への呼びかけです。
+
+ルール:
+- transcript: 相手が今言った内容の文字起こし。話した言語のまま（日本語なら日本語、ベトナム語ならベトナム語）。聞き取れない・無音・ノイズのみなら空文字。
+- translationVi: はなが意味を取るための自然なベトナム語。原文がベトナム語なら軽く整える。transcriptが空なら空。
+- replies: はなが声で返す短い日本語候補を1〜2個。ゲストは主に「がぶ / gabusan」で、会話は関西弁。返信も自然な関西弁（やで／やん／へん／ちゃう／ええ／ほんま など）で、友達同士の話し方。標準語・マスコット口調・過度な敬語は避ける。各40文字以内。viはその日本語のベトナム語訳。
+- JSON以外は一切出力しない。`
+
+function parseLiveCallAssistJson(raw) {
+  const text = String(raw || '').trim()
+  if (!text) {
+    return { transcript: '', translationVi: '', replies: [] }
+  }
+  const fenced = text.match(/\{[\s\S]*\}/)
+  const jsonText = fenced ? fenced[0] : text
+  try {
+    const parsed = JSON.parse(jsonText)
+    const replies = Array.isArray(parsed?.replies)
+      ? parsed.replies
+        .map((item) => ({
+          ja: String(item?.ja || item || '').trim(),
+          vi: String(item?.vi || '').trim(),
+        }))
+        .filter((item) => item.ja)
+        .slice(0, 2)
+      : []
+    return {
+      transcript: String(parsed?.transcript || '').trim(),
+      translationVi: String(parsed?.translationVi || '').trim(),
+      replies,
+    }
+  } catch {
+    return { transcript: '', translationVi: '', replies: [] }
+  }
+}
+
+/**
+ * Owner-only live call assist: transcribe the guest's voice + draft spoken replies.
+ * Audio is processed in-memory and never written to Firestore.
+ */
+exports.assistLiveCallForOwner = onCall({
+  cors: true,
+  timeoutSeconds: 60,
+  memory: '512MiB',
+}, async (request) => {
+  const audioBase64 = String(request.data?.audioBase64 || '').replace(/\s/g, '')
+  const mimeType = String(request.data?.mimeType || 'audio/webm').trim().slice(0, 80) || 'audio/webm'
+  if (!audioBase64 || audioBase64.length < 80) {
+    return { transcript: '', translationVi: '', replies: [], reason: 'empty' }
+  }
+  if (audioBase64.length > 1_400_000) {
+    throw new HttpsError('invalid-argument', 'audio too large')
+  }
+
+  const guestName = String(request.data?.guestName || '').trim().slice(0, 40)
+  const recent = String(request.data?.recentTranscript || '').trim().slice(0, 800)
+  const key = process.env.GEMINI_API_KEY || ''
+  if (!key) {
+    return { transcript: '', translationVi: '', replies: [], reason: 'quota' }
+  }
+
+  const guest = guestName || 'ゲスト'
+  let ask = `ゲスト「${guest}」の今の発話です。はな本人だけが見る通話メモとしてJSONを返して。`
+  if (recent) ask += `\n直前までの相手の発言:\n${recent}`
+
+  try {
+    const json = await callGeminiApi({
+      apiKey: key,
+      payload: {
+        systemInstruction: { parts: [{ text: LIVE_CALL_ASSIST_SYSTEM_PROMPT }] },
+        contents: [{
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType, data: audioBase64 } },
+            { text: ask },
+          ],
+        }],
+        generationConfig: {
+          temperature: 0.35,
+          maxOutputTokens: 800,
+          responseMimeType: 'application/json',
+        },
+      },
+    })
+    const parsed = parseLiveCallAssistJson(geminiReplyText(json))
+    const ok = Boolean(parsed.transcript || parsed.translationVi || parsed.replies.length)
+    return { ...parsed, reason: ok ? null : 'empty' }
+  } catch (error) {
+    console.error('assistLiveCallForOwner', error)
+    if (error?.status === 429 || /credits? are depleted|quota|RESOURCE_EXHAUSTED/i.test(String(error?.message || ''))) {
+      return { transcript: '', translationVi: '', replies: [], reason: 'quota' }
+    }
+    throw new HttpsError('internal', '通話の文字起こしに失敗しました')
+  }
+})
+
 const BOOK_ASSIST_SYSTEM_PROMPT = `あなたは「はな」（Hana Mediaboxのオーナー本人）専用の読書アシスタントです。
 書籍ページの画像（または本文テキスト）を読み取り、次のJSONだけを返してください（説明・コードフェンス禁止）:
 
@@ -739,6 +842,103 @@ exports.notifyOnChatMessage = onDocumentCreated(
   },
 )
 
+async function notifyCallRing({ threadId, callId, after }) {
+  if (!after || after.status !== 'ringing') return null
+  const callerRole = after.callerRole === 'hana' ? 'hana' : 'guest'
+  const calleeRole = after.calleeRole === 'hana' ? 'hana' : 'guest'
+  if (!callerRole || !calleeRole) return null
+
+  const db = getFirestore()
+  const threadSnap = await db.collection(CHAT_THREADS_COLLECTION).doc(threadId).get()
+  const threadData = threadSnap.exists ? threadSnap.data() : {}
+
+  let targetUserKey = ''
+  let title = '着信'
+  if (calleeRole === 'hana') {
+    targetUserKey = OWNER_PUSH_KEY
+    title = String(threadData?.guestLabel || resolveGuestKeyFromThread(threadId, threadData) || 'ゲスト')
+  } else {
+    targetUserKey = resolveGuestKeyFromThread(threadId, threadData)
+    title = 'はな'
+  }
+  if (!targetUserKey) return null
+
+  const tokensSnap = await db
+    .collection(PUSH_TOKENS_COLLECTION)
+    .where('userKey', '==', targetUserKey)
+    .limit(50)
+    .get()
+
+  const tokenDocs = tokensSnap.docs
+    .map((document) => ({ id: document.id, token: String(document.data()?.token || '').trim() }))
+    .filter((row) => row.token)
+
+  if (!tokenDocs.length) {
+    console.info('notifyOnChatCall: no tokens for', targetUserKey)
+    return null
+  }
+
+  const tokens = tokenDocs.map((row) => row.token)
+  const response = await getMessaging().sendEachForMulticast({
+    tokens,
+    notification: {
+      title,
+      body: '通話の着信です',
+    },
+    data: {
+      threadId: String(threadId),
+      callId: String(callId || ''),
+      type: 'call',
+    },
+    android: {
+      priority: 'high',
+      notification: {
+        channelId: 'hana_chat',
+        sound: 'default',
+      },
+    },
+    apns: {
+      payload: {
+        aps: {
+          sound: 'default',
+          badge: 1,
+        },
+      },
+    },
+  })
+
+  const stale = []
+  response.responses.forEach((result, index) => {
+    if (result.success) return
+    const code = result.error?.code || ''
+    if (
+      code === 'messaging/registration-token-not-registered'
+      || code === 'messaging/invalid-registration-token'
+    ) {
+      stale.push(tokenDocs[index].id)
+    }
+    console.warn('notifyOnChatCall send fail', code, result.error?.message)
+  })
+  await Promise.all(stale.map((id) => db.collection(PUSH_TOKENS_COLLECTION).doc(id).delete().catch(() => null)))
+  console.info('notifyOnChatCall', targetUserKey, 'sent', response.successCount, 'fail', response.failureCount)
+  return null
+}
+
+exports.notifyOnChatCallCreate = onDocumentCreated(
+  {
+    document: `${CHAT_THREADS_COLLECTION}/{threadId}/calls/{callId}`,
+    region: 'asia-northeast1',
+  },
+  async (event) => {
+    const after = event.data?.data?.() || {}
+    return notifyCallRing({
+      threadId: event.params.threadId,
+      callId: event.params.callId,
+      after,
+    })
+  },
+)
+
 exports.notifyOnChatCall = onDocumentUpdated(
   {
     document: `${CHAT_THREADS_COLLECTION}/{threadId}/calls/{callId}`,
@@ -747,88 +947,13 @@ exports.notifyOnChatCall = onDocumentUpdated(
   async (event) => {
     const before = event.data?.before?.data?.() || {}
     const after = event.data?.after?.data?.() || {}
-    if (after.status !== 'ringing' || !after.offer) return null
-    if (before.status === 'ringing' && before.offer) return null
-
-    const threadId = event.params.threadId
-    const callerRole = after.callerRole === 'hana' ? 'hana' : 'guest'
-    const calleeRole = after.calleeRole === 'hana' ? 'hana' : 'guest'
-    if (!callerRole || !calleeRole) return null
-
-    const db = getFirestore()
-    const threadSnap = await db.collection(CHAT_THREADS_COLLECTION).doc(threadId).get()
-    const threadData = threadSnap.exists ? threadSnap.data() : {}
-
-    let targetUserKey = ''
-    let title = '着信'
-    if (calleeRole === 'hana') {
-      targetUserKey = OWNER_PUSH_KEY
-      title = String(threadData?.guestLabel || resolveGuestKeyFromThread(threadId, threadData) || 'ゲスト')
-    } else {
-      targetUserKey = resolveGuestKeyFromThread(threadId, threadData)
-      title = 'はな'
-    }
-    if (!targetUserKey) return null
-
-    const tokensSnap = await db
-      .collection(PUSH_TOKENS_COLLECTION)
-      .where('userKey', '==', targetUserKey)
-      .limit(50)
-      .get()
-
-    const tokenDocs = tokensSnap.docs
-      .map((document) => ({ id: document.id, token: String(document.data()?.token || '').trim() }))
-      .filter((row) => row.token)
-
-    if (!tokenDocs.length) {
-      console.info('notifyOnChatCall: no tokens for', targetUserKey)
-      return null
-    }
-
-    const tokens = tokenDocs.map((row) => row.token)
-    const response = await getMessaging().sendEachForMulticast({
-      tokens,
-      notification: {
-        title,
-        body: '通話の着信です',
-      },
-      data: {
-        threadId: String(threadId),
-        callId: String(event.params.callId || ''),
-        type: 'call',
-      },
-      android: {
-        priority: 'high',
-        notification: {
-          channelId: 'hana_chat',
-          sound: 'default',
-        },
-      },
-      apns: {
-        payload: {
-          aps: {
-            sound: 'default',
-            badge: 1,
-          },
-        },
-      },
+    if (after.status !== 'ringing') return null
+    if (before.status === 'ringing') return null
+    return notifyCallRing({
+      threadId: event.params.threadId,
+      callId: event.params.callId,
+      after,
     })
-
-    const stale = []
-    response.responses.forEach((result, index) => {
-      if (result.success) return
-      const code = result.error?.code || ''
-      if (
-        code === 'messaging/registration-token-not-registered'
-        || code === 'messaging/invalid-registration-token'
-      ) {
-        stale.push(tokenDocs[index].id)
-      }
-      console.warn('notifyOnChatCall send fail', code, result.error?.message)
-    })
-    await Promise.all(stale.map((id) => db.collection(PUSH_TOKENS_COLLECTION).doc(id).delete().catch(() => null)))
-    console.info('notifyOnChatCall', targetUserKey, 'sent', response.successCount, 'fail', response.failureCount)
-    return null
   },
 )
 

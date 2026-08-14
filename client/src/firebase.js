@@ -3569,6 +3569,36 @@ export async function analyzeGuestMessageForOwner(payload) {
 }
 
 /**
+ * Owner-only live call assist (guest audio → transcript + spoken reply drafts).
+ * Never stored in Firestore.
+ */
+export async function assistLiveCallForOwner(payload) {
+  const callable = httpsCallable(functions, 'assistLiveCallForOwner', { timeout: 60_000 })
+  const result = await callable({
+    audioBase64: String(payload?.audioBase64 || ''),
+    mimeType: String(payload?.mimeType || 'audio/webm').slice(0, 80),
+    guestName: String(payload?.guestName || '').trim().slice(0, 40),
+    recentTranscript: String(payload?.recentTranscript || '').trim().slice(0, 800),
+  })
+  const data = result?.data || {}
+  const replies = Array.isArray(data.replies)
+    ? data.replies
+      .map((item) => ({
+        ja: String(item?.ja || '').trim(),
+        vi: String(item?.vi || '').trim(),
+      }))
+      .filter((item) => item.ja)
+      .slice(0, 2)
+    : []
+  return {
+    transcript: String(data.transcript || '').trim(),
+    translationVi: String(data.translationVi || '').trim(),
+    replies,
+    reason: data.reason || null,
+  }
+}
+
+/**
  * Owner-only private assist for a book page (never stored in Firestore).
  * @param {{ text: string, title?: string, page?: number }} payload
  */
