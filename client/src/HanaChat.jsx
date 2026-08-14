@@ -144,8 +144,53 @@ const JP_TRIP_ITINERARY = {
 }
 /** Composer grows with the draft up to this many lines, then scrolls instead. */
 const COMPOSER_MAX_LINES = 5
+const COMPOSER_ATTACH_MAX = 12
 const TYPING_PULSE_MS = 2_000
 const OWNER_ASSIST_CACHE_LIMIT = 40
+
+function defaultComposerCaption(items = []) {
+  if (!items.length) return ''
+  const kinds = new Set(items.map((item) => item.kind))
+  if (kinds.size === 1 && kinds.has('image')) return '写真'
+  if (kinds.size === 1 && kinds.has('video')) return '動画'
+  return 'ファイル'
+}
+
+function localMediaFieldsFromQueue(queued) {
+  if (!queued.length) return {}
+  const attachments = queued.map((item) => ({
+    url: item.previewUrl,
+    kind: item.kind,
+    fileName: String(item.file?.name || '').trim()
+      || (item.kind === 'image' ? '写真' : item.kind === 'video' ? '動画' : 'ファイル'),
+    fileMime: String(item.file?.type || ''),
+    fileSize: Math.max(0, Number(item.file?.size) || 0),
+  }))
+  const first = attachments[0]
+  return {
+    imageUrl: first.kind === 'image' ? first.url : '',
+    fileUrl: first.kind === 'image' ? '' : first.url,
+    fileKind: first.kind,
+    fileName: first.fileName,
+    fileMime: first.fileMime,
+    fileSize: first.fileSize,
+    attachments,
+    uploading: true,
+  }
+}
+
+function uploadedMediaFields(uploadedList) {
+  if (!uploadedList.length) return {}
+  const first = uploadedList[0]
+  return {
+    ...(first.kind === 'image' ? { imageUrl: first.url } : { fileUrl: first.url }),
+    fileKind: first.kind,
+    fileName: first.fileName,
+    fileMime: first.fileMime,
+    fileSize: first.fileSize,
+    attachments: uploadedList,
+  }
+}
 
 /** YYYY-MM-DD for Asia/Tokyo (calendar day, not local browser TZ). */
 function tokyoCalendarYmd(date = new Date()) {
@@ -252,6 +297,7 @@ function isOwnerAssistableGuestMessage(message) {
   const sender = message.sender || message.role
   if (sender !== 'guest') return false
   if (message.sticker || message.imageUrl || message.fileUrl || message.effect) return false
+  if (Array.isArray(message.attachments) && message.attachments.length) return false
   return Boolean(String(message.rawText || message.text || '').trim())
 }
 
@@ -609,6 +655,13 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const stickerRef = useRef(null)
   const stickerTriggerRef = useRef(null)
   const imageInputRef = useRef(null)
+  const [composerAttach, setComposerAttach] = useState([])
+  const composerAttachRef = useRef([])
+  useEffect(() => () => {
+    for (const item of composerAttachRef.current) {
+      if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl)
+    }
+  }, [])
   const settingsRef = useRef(null)
   const callButtonsHostRef = useRef(null)
   const [callButtonsHost, setCallButtonsHost] = useState(null)
@@ -2533,6 +2586,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       fileMime: m.fileMime || '',
       fileKind: m.fileKind || '',
       fileSize: m.fileSize || 0,
+      attachments: Array.isArray(m.attachments) ? m.attachments : [],
       createdAt: m.createdAt,
       editedAt: m.editedAt,
       deleted: m.deleted,
@@ -3102,8 +3156,64 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     setEditingId(null)
   }
 
+  const clearComposerAttach = (items) => {
+    const prev = Array.isArray(items) ? items : composerAttachRef.current
+    composerAttachRef.current = []
+    setComposerAttach([])
+    for (const item of prev) {
+      if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl)
+    }
+  }
+
+  const queueComposerFiles = (fileOrFiles) => {
+    const files = (
+      Array.isArray(fileOrFiles) || (typeof FileList !== 'undefined' && fileOrFiles instanceof FileList)
+        ? [...fileOrFiles]
+        : [fileOrFiles]
+    ).filter(Boolean)
+    if (!files.length || editingId) return
+    if (actingAsOwner && !activeThreadId) {
+      setError('返信する相手を選んでください。')
+      return
+    }
+    stickerDockOpenRef.current = false
+    setStickerOpen(false)
+    setError('')
+    setComposerAttach((prev) => {
+      const next = [...prev]
+      for (const file of files) {
+        if (next.length >= COMPOSER_ATTACH_MAX) break
+        next.push({
+          id: nextChatPendingId('att'),
+          file,
+          previewUrl: URL.createObjectURL(file),
+          kind: classifyChatAttachment(file),
+        })
+      }
+      composerAttachRef.current = next
+      return next
+    })
+    if (imageInputRef.current) imageInputRef.current.value = ''
+  }
+
+  const removeComposerAttach = (id) => {
+    setComposerAttach((prev) => {
+      const next = []
+      for (const item of prev) {
+        if (item.id === id) {
+          if (item.previewUrl) URL.revokeObjectURL(item.previewUrl)
+        } else {
+          next.push(item)
+        }
+      }
+      composerAttachRef.current = next
+      return next
+    })
+  }
+
   const openOwnerThread = (threadId, label, guestKey = '', canonicalId = '') => {
     clearComposerExtras()
+    clearComposerAttach()
     const key = guestKey || (canonicalId || threadId).replace(/^guest-/, '')
     const canon = canonicalId || (key ? `guest-${key}` : '')
     const localMatches = threadsRef.current.filter((t) => (
@@ -3358,147 +3468,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     }
   }
 
-  /** Pick photo / video / audio (or other file) → Storage → chat message(s). */
-  const handleSendMedia = async (fileOrFiles) => {
-    const files = (
-      Array.isArray(fileOrFiles) || (typeof FileList !== 'undefined' && fileOrFiles instanceof FileList)
-        ? [...fileOrFiles]
-        : [fileOrFiles]
-    ).filter(Boolean)
-    if (!files.length || busy) return
-    if (actingAsOwner && !activeThreadId) {
-      setError('返信する相手を選んでください。')
-      return
-    }
-    // Cap a single picker batch so Storage / UI stay responsive.
-    const batch = files.slice(0, 12)
-    stickerDockOpenRef.current = false
-    setStickerOpen(false)
-    setBottomChromePx(0)
-    setError('')
-    setBusy(true)
-    const role = actingAsOwner ? 'hana' : 'guest'
-    const threadId = actingAsOwner
-      ? activeThreadId
-      : (guestChatId || ensureGuestChatId(guestKey || 'guest'))
-    if (!actingAsOwner) {
-      if (!guestChatId) setGuestChatId(threadId)
-      if (channel !== 'human') switchToHuman(HUMAN_SWITCH_INTENT)
-    }
-
-    const guestMeta = actingAsOwner
-      ? {}
-      : {
-          guestLabel: guestThreadLabel,
-          guestKey: guestProfile?.key || guestKey || '',
-        }
-
-    let failed = 0
-    try {
-      for (const file of batch) {
-        const pendingId = nextStickerPendingId()
-        const localUrl = URL.createObjectURL(file)
-        const kind = classifyChatAttachment(file)
-        const label = kind === 'video'
-          ? '動画'
-          : kind === 'image'
-            ? '写真'
-            : (String(file.name || '').trim() || 'ファイル')
-        try {
-          // Paint the optimistic bubble before compression / Storage upload.
-          flushSync(() => {
-            setHanaMessages((prev) => [
-              ...prev,
-              {
-                id: pendingId,
-                clientId: pendingId,
-                pending: true,
-                uploading: true,
-                role,
-                sender: role,
-                text: label,
-                rawText: label,
-                imageUrl: kind === 'image' ? localUrl : '',
-                fileUrl: kind === 'image' ? '' : localUrl,
-                fileKind: kind,
-                fileName: file.name || label,
-                fileMime: String(file.type || ''),
-                fileSize: Math.max(0, Number(file.size) || 0),
-                createdAt: new Date().toISOString(),
-                createdAtIso: new Date().toISOString(),
-                replyTo: null,
-              },
-            ])
-          })
-          scrollToLatestRef.current()
-
-          const uploaded = await uploadChatAttachment(threadId, file)
-          const imageUrl = uploaded.kind === 'image' ? uploaded.url : ''
-          const fileUrl = uploaded.kind === 'image' ? '' : uploaded.url
-          setHanaMessages((prev) => prev.map((m) => (
-            m.id === pendingId
-              ? {
-                  ...m,
-                  // Keep blob preview visible while Storage URL is still cold.
-                  uploading: false,
-                  fileKind: uploaded.kind,
-                  fileName: uploaded.fileName,
-                  fileMime: uploaded.fileMime,
-                  fileSize: uploaded.fileSize,
-                }
-              : m
-          )))
-          const serverId = await sendChatMessage({
-            threadId,
-            text: label,
-            sender: role,
-            ...(imageUrl ? { imageUrl } : {}),
-            ...(fileUrl ? { fileUrl } : {}),
-            fileKind: uploaded.kind,
-            fileName: uploaded.fileName,
-            fileMime: uploaded.fileMime,
-            fileSize: uploaded.fileSize,
-            clientId: pendingId,
-            ...guestMeta,
-          })
-          if (imageUrl) {
-            await new Promise((resolve) => {
-              const img = new Image()
-              img.onload = () => resolve()
-              img.onerror = () => resolve()
-              img.src = imageUrl
-            })
-          }
-          setHanaMessages((prev) => prev.map((m) => (
-            m.id === pendingId
-              ? {
-                  ...m,
-                  imageUrl: imageUrl || m.imageUrl,
-                  fileUrl: fileUrl || (imageUrl ? '' : m.fileUrl),
-                  serverId: serverId || m.serverId,
-                  uploading: false,
-                }
-              : m
-          )))
-          URL.revokeObjectURL(localUrl)
-        } catch (err) {
-          failed += 1
-          URL.revokeObjectURL(localUrl)
-          setHanaMessages((prev) => prev.filter((m) => m.id !== pendingId))
-          if (batch.length === 1) {
-            setError(getFirebaseErrorMessage(err) || err?.message || 'ファイルを送れませんでした。')
-          }
-        }
-      }
-      if (!actingAsOwner) setChannel('human')
-      if (failed > 0 && batch.length > 1) {
-        setError(`${failed}件のファイルを送れませんでした。`)
-      }
-    } finally {
-      setBusy(false)
-      scrollToLatestRef.current()
-      if (imageInputRef.current) imageInputRef.current.value = ''
-    }
+  /** Queue photo / video / file on the composer; send with text in one message. */
+  const handleSendMedia = (fileOrFiles) => {
+    queueComposerFiles(fileOrFiles)
   }
 
   /** Listening postcard → active human thread (owner inbox guest, or guest↔hana). */
@@ -4029,11 +4001,19 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   const handleSend = async (event) => {
     event.preventDefault()
+    const queued = editingId ? [] : composerAttachRef.current.slice()
     const text = draft.trim()
-    if (!text || busy) return
+    if (editingId) {
+      if (!text || busy) return
+    } else if ((!text && !queued.length) || busy) return
+    const sendText = text || defaultComposerCaption(queued)
     setDraft('')
     draftRef.current = ''
     typingNudgeRef.current()
+    if (queued.length) {
+      composerAttachRef.current = []
+      setComposerAttach([])
+    }
     setError('')
     setBusy(true)
     setSpeaking(true)
@@ -4082,6 +4062,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           setError('返信する相手を選んでください。')
           setDraft(text)
           draftRef.current = text
+          if (queued.length) {
+            composerAttachRef.current = queued
+            setComposerAttach(queued)
+          }
           return
         }
         // Always prefer canonical guest-{key} when known so reopen finds the send.
@@ -4100,6 +4084,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         }
         const pendingId = nextChatPendingId('msg')
         pendingSendId = pendingId
+        const localMedia = localMediaFieldsFromQueue(queued)
         setHanaMessages((prev) => [
           ...prev,
           {
@@ -4108,10 +4093,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             pending: true,
             role: 'hana',
             sender: 'hana',
-            text,
-            rawText: text,
+            text: sendText,
+            rawText: sendText,
             createdAt: nowIso,
             createdAtIso: nowIso,
+            ...localMedia,
             replyTo: pendingReply
               ? {
                   id: pendingReply.id,
@@ -4122,23 +4108,41 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           },
         ])
         scrollToLatestRef.current()
+        const uploadedList = queued.length ? await (async () => {
+          const out = []
+          for (const item of queued) {
+            const uploaded = await uploadChatAttachment(threadId, item.file)
+            out.push({
+              url: uploaded.url,
+              kind: uploaded.kind,
+              fileName: uploaded.fileName,
+              fileMime: uploaded.fileMime,
+              fileSize: uploaded.fileSize,
+            })
+          }
+          return out
+        })() : []
+        const mediaFields = uploadedMediaFields(uploadedList)
         const serverId = await sendChatMessage({
           threadId,
-          text,
+          text: sendText,
           sender: 'hana',
           clientId: pendingId,
           replyTo: pendingReply,
           guestKey: ownerActiveGuestKey || '',
           guestLabel: ownerActiveGuestLabel,
+          ...mediaFields,
         })
         if (serverId) {
           setHanaMessages((prev) => prev.map((m) => (
             m.id === pendingId
               ? {
                   ...m,
+                  ...mediaFields,
                   id: serverId,
                   serverId,
                   pending: false,
+                  uploading: false,
                   clientId: pendingId,
                 }
               : m
@@ -4152,11 +4156,12 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               clientId: pendingId,
               role: 'hana',
               sender: 'hana',
-              text,
-              rawText: text,
+              text: sendText,
+              rawText: sendText,
               createdAt: nowIso,
               createdAtIso: nowIso,
               pending: false,
+              ...mediaFields,
               replyTo: pendingReply
                 ? {
                     id: pendingReply.id,
@@ -4167,8 +4172,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             },
           ])
         }
+        for (const item of queued) {
+          if (item.previewUrl) URL.revokeObjectURL(item.previewUrl)
+        }
         scrollToLatestRef.current()
-      } else if (channel === 'human' || wantsHumanHana(text)) {
+      } else if (queued.length || channel === 'human' || wantsHumanHana(text)) {
         if (channel !== 'human') {
           switchToHuman(HUMAN_SWITCH_INTENT)
         }
@@ -4176,6 +4184,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         if (!guestChatId) setGuestChatId(threadId)
         const pendingId = nextChatPendingId('msg')
         pendingSendId = pendingId
+        const localMedia = localMediaFieldsFromQueue(queued)
         setHanaMessages((prev) => [
           ...prev,
           {
@@ -4184,10 +4193,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             pending: true,
             role: 'guest',
             sender: 'guest',
-            text,
-            rawText: text,
+            text: sendText,
+            rawText: sendText,
             createdAt: nowIso,
             createdAtIso: nowIso,
+            ...localMedia,
             replyTo: pendingReply
               ? {
                   id: pendingReply.id,
@@ -4198,27 +4208,48 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           },
         ])
         scrollToLatestRef.current()
+        const uploadedList = queued.length ? await (async () => {
+          const out = []
+          for (const item of queued) {
+            const uploaded = await uploadChatAttachment(threadId, item.file)
+            out.push({
+              url: uploaded.url,
+              kind: uploaded.kind,
+              fileName: uploaded.fileName,
+              fileMime: uploaded.fileMime,
+              fileSize: uploaded.fileSize,
+            })
+          }
+          return out
+        })() : []
+        const mediaFields = uploadedMediaFields(uploadedList)
         const serverId = await sendChatMessage({
           threadId,
-          text,
+          text: sendText,
           sender: 'guest',
           guestLabel: guestThreadLabel,
           guestKey: guestProfile?.key || guestKey || '',
           clientId: pendingId,
           replyTo: pendingReply,
+          ...mediaFields,
         })
         if (serverId) {
           setHanaMessages((prev) => prev.map((m) => (
             m.id === pendingId
               ? {
                   ...m,
+                  ...mediaFields,
                   id: serverId,
                   serverId,
                   pending: false,
+                  uploading: false,
                   clientId: pendingId,
                 }
               : m
           )))
+        }
+        for (const item of queued) {
+          if (item.previewUrl) URL.revokeObjectURL(item.previewUrl)
         }
         setChannel('human')
         scrollToLatestRef.current()
@@ -4286,6 +4317,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         setHanaMessages((prev) => prev.filter((m) => m.id !== pendingSendId))
         setDraft(text)
         draftRef.current = text
+      }
+      if (queued.length) {
+        composerAttachRef.current = queued
+        setComposerAttach(queued)
       }
       const msg = getFirebaseErrorMessage(err) || ''
       const looksQuota = /quota|credit|resource-exhausted|429/i.test(`${err?.code || ''} ${msg} ${err?.message || ''}`)
@@ -5269,11 +5304,37 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             </div>
           ) : null}
 
+          {composerAttach.length && !editingId ? (
+            <div className="hana-chat-composer-attach" aria-label="送信するファイル">
+              {composerAttach.map((item) => (
+                <div key={item.id} className={`hana-chat-composer-attach-item is-${item.kind}`}>
+                  {item.kind === 'image' ? (
+                    <img src={item.previewUrl} alt="" />
+                  ) : (
+                    <span className="hana-chat-composer-attach-label">
+                      {item.kind === 'video' ? '動画' : (item.file?.name || 'ファイル')}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className="hana-chat-composer-attach-remove"
+                    aria-label="このファイルを外す"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => removeComposerAttach(item.id)}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
           <form className="hana-chat-composer" ref={composerRef} onSubmit={handleSend}>
             <label className="sr-only" htmlFor="hana-chat-input">
               メッセージ
             </label>
-            <div className={`hana-chat-composer-field${canUseReactions && effectThreadId ? ' has-sticker' : ''}`}>
+            <div className={`hana-chat-composer-field${canUseReactions && effectThreadId ? ' has-sticker' : ''}${canUseReactions && effectThreadId && !editingId ? ' has-attach' : ''}`}>
               {canUseReactions && effectThreadId ? (
                 <input
                   ref={imageInputRef}
@@ -5285,9 +5346,33 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   aria-hidden="true"
                   onChange={(event) => {
                     const picked = event.target.files
-                    if (picked?.length) void handleSendMedia(picked)
+                    if (picked?.length) handleSendMedia(picked)
                   }}
                 />
+              ) : null}
+              {canUseReactions && effectThreadId && !editingId ? (
+                <button
+                  type="button"
+                  className="hana-chat-composer-attach-btn"
+                  title="写真・動画・ファイルを付ける"
+                  aria-label="写真・動画・ファイルを付ける"
+                  disabled={busy || (actingAsOwner && !activeThreadId)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={() => imageInputRef.current?.click()}
+                >
+                  <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">
+                    <path
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M4 8.2A2.2 2.2 0 0 1 6.2 6h1.1l1-1.5A1.4 1.4 0 0 1 9.45 3.8h5.1a1.4 1.4 0 0 1 1.15.7l1 1.5h1.1A2.2 2.2 0 0 1 20 8.2v7.6A2.2 2.2 0 0 1 17.8 18H6.2A2.2 2.2 0 0 1 4 15.8V8.2Z"
+                    />
+                    <circle cx="12" cy="12" r="2.6" fill="none" stroke="currentColor" strokeWidth="1.7" />
+                  </svg>
+                </button>
               ) : null}
               <textarea
                 ref={inputRef}
@@ -5315,7 +5400,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
                   if (!shouldSend) return
                   event.preventDefault()
-                  if (!busy && draft.trim()) {
+                  if (!busy && (draft.trim() || composerAttach.length)) {
                     event.currentTarget.form?.requestSubmit?.()
                   }
                 }}
@@ -5589,34 +5674,39 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 </div>
               ) : null}
             </div>
-            {canUseReactions && effectThreadId && !editingId && !draft.trim() ? (
+            {canUseReactions && effectThreadId && !editingId && !draft.trim() && !composerAttach.length ? (
               <button
                 type="button"
-                className="hana-chat-composer-action is-camera"
-                title="写真・動画・音声を送る（複数可）"
-                aria-label="写真・動画・音声を送る（複数可）"
-                disabled={busy || (actingAsOwner && !activeThreadId)}
+                className="hana-chat-composer-action is-mic"
+                title="音声入力（準備中）"
+                aria-label="音声入力（準備中）"
+                disabled
                 onMouseDown={(event) => event.preventDefault()}
                 onPointerDown={(event) => event.preventDefault()}
-                onClick={() => imageInputRef.current?.click()}
               >
-                <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" focusable="false">
+                <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false">
+                  <rect x="9" y="3.6" width="6" height="10.4" rx="3" fill="none" stroke="currentColor" strokeWidth="1.7" />
                   <path
+                    d="M6.6 12a5.4 5.4 0 0 0 10.8 0"
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="1.7"
                     strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M4 8.2A2.2 2.2 0 0 1 6.2 6h1.1l1-1.5A1.4 1.4 0 0 1 9.45 3.8h5.1a1.4 1.4 0 0 1 1.15.7l1 1.5h1.1A2.2 2.2 0 0 1 20 8.2v7.6A2.2 2.2 0 0 1 17.8 18H6.2A2.2 2.2 0 0 1 4 15.8V8.2Z"
                   />
-                  <circle cx="12" cy="12" r="2.6" fill="none" stroke="currentColor" strokeWidth="1.7" />
+                  <path
+                    d="M12 17.4V20.4M9.2 20.4h5.6"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                  />
                 </svg>
               </button>
             ) : (
               <button
                 type="submit"
                 className="hana-chat-composer-action is-send"
-                disabled={busy || !draft.trim() || (actingAsOwner && !activeThreadId)}
+                disabled={busy || (!draft.trim() && !composerAttach.length) || (actingAsOwner && !activeThreadId)}
                 title={editingId ? '更新' : '送る'}
                 aria-label={busy ? '送信中' : editingId ? '更新' : '送る'}
                 onMouseDown={(event) => event.preventDefault()}

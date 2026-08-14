@@ -1462,23 +1462,56 @@ export function normalizeChatFileKind(value, mime = '') {
   return classifyChatAttachment(mime)
 }
 
+function normalizeChatAttachmentRecord(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const url = normalizeChatDisplayMediaUrl(raw.url || raw.fileUrl || raw.imageUrl)
+  if (!url) return null
+  const fileMime = normalizeChatFileMime(raw.fileMime)
+  const kind = normalizeChatFileKind(raw.kind || raw.fileKind, fileMime || (raw.imageUrl ? 'image/' : ''))
+  return {
+    url,
+    kind,
+    fileName: normalizeChatFileName(raw.fileName) || (kind === 'image' ? '写真' : kind === 'video' ? '動画' : 'ファイル'),
+    fileMime,
+    fileSize: Math.max(0, Number(raw.fileSize) || 0),
+  }
+}
+
+function normalizeChatAttachments(value) {
+  if (!Array.isArray(value)) return []
+  const out = []
+  for (const item of value.slice(0, 12)) {
+    const rec = normalizeChatAttachmentRecord(item)
+    if (rec) out.push(rec)
+  }
+  return out
+}
+
 /** Resolve display attachment from a serialized chat message (legacy imageUrl supported). */
 export function getChatMessageAttachment(message) {
-  if (!message || message.deleted) return null
+  const all = getChatMessageAttachments(message)
+  return all[0] || null
+}
+
+/** All media on a chat message (caption + several files in one bubble). */
+export function getChatMessageAttachments(message) {
+  if (!message || message.deleted) return []
+  const listed = normalizeChatAttachments(message.attachments)
+  if (listed.length) return listed
   // Prefer blob: local previews while uploading so the bubble is not blank.
   const fileUrl = normalizeChatDisplayMediaUrl(message.fileUrl)
   const imageUrl = normalizeChatDisplayMediaUrl(message.imageUrl)
   const url = fileUrl || imageUrl
-  if (!url) return null
+  if (!url) return []
   const fileMime = normalizeChatFileMime(message.fileMime) || (imageUrl && !fileUrl ? 'image/*' : '')
   const kind = normalizeChatFileKind(message.fileKind, fileMime || (imageUrl ? 'image/' : ''))
-  return {
+  return [{
     url,
     kind,
     fileName: normalizeChatFileName(message.fileName) || (kind === 'image' ? '写真' : kind === 'video' ? '動画' : 'ファイル'),
     fileMime,
     fileSize: Math.max(0, Number(message.fileSize) || 0),
-  }
+  }]
 }
 
 function serializeChatMessage(id, data) {
@@ -1500,6 +1533,7 @@ function serializeChatMessage(id, data) {
     fileMime,
     fileKind: deleted ? '' : fileKind,
     fileSize: deleted ? 0 : Math.max(0, Number(data?.fileSize) || 0),
+    attachments: deleted ? [] : normalizeChatAttachments(data?.attachments),
     sender: data?.sender === 'hana' ? 'hana' : 'guest',
     createdAt: data?.createdAt?.toDate?.()?.toISOString?.() || data?.createdAtIso || null,
     createdAtIso: data?.createdAtIso ? String(data.createdAtIso) : null,
@@ -3088,6 +3122,7 @@ export async function sendChatMessage({
   fileMime,
   fileKind,
   fileSize,
+  attachments,
   clientId,
 }) {
   const trimmed = String(text || '').trim()
@@ -3135,6 +3170,34 @@ export async function sendChatMessage({
       fileKind: kind || 'file',
       fileSize: size,
     } : {}),
+  }
+  const attachmentSource = Array.isArray(attachments) && attachments.length
+    ? attachments
+    : ((file || image)
+      ? [{
+          url: file || image,
+          kind: kind || 'file',
+          fileName: name,
+          fileMime: mime,
+          fileSize: size,
+        }]
+      : [])
+  const storedAttachments = []
+  for (const item of attachmentSource.slice(0, 12)) {
+    const storedUrl = normalizeChatImageUrl(item?.url)
+    if (!storedUrl) continue
+    const itemMime = normalizeChatFileMime(item?.fileMime)
+    const itemKind = normalizeChatFileKind(item?.kind || item?.fileKind, itemMime || (kind ? `${kind}/` : ''))
+    storedAttachments.push({
+      url: storedUrl,
+      kind: itemKind || kind || 'file',
+      fileName: normalizeChatFileName(item?.fileName) || name || 'ファイル',
+      fileMime: itemMime,
+      fileSize: Math.max(0, Math.floor(Number(item?.fileSize) || 0)),
+    })
+  }
+  if (storedAttachments.length) {
+    payload.attachments = storedAttachments
   }
   if (replyTo?.id) {
     payload.replyToId = String(replyTo.id)

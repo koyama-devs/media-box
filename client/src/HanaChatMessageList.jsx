@@ -1,21 +1,120 @@
 import { memo } from 'react'
+import ChatSongMiniPlayer from './ChatSongMiniPlayer'
 import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
 import { EMOTION_MOMENTS } from './EmotionMoment'
 import {
     deliveryStatusLabel,
     formatChatFileSize,
     formatChatTimestamp,
-    getChatMessageAttachment,
+    getChatMessageAttachments,
     isChatAudioAttachment,
 } from './firebase'
 import { CHAT_PARTY_REACTION } from './FlowerRain'
 import HanaSticker, { isHanaSticker } from './HanaStickers'
 import OwnerMessageAssist from './OwnerMessageAssist'
-import ChatSongMiniPlayer from './ChatSongMiniPlayer'
 
 /** Stable empty reactions object so `|| {}` does not defeat memo. */
 export const EMPTY_CHAT_REACTIONS = Object.freeze({})
 const URL_RE = /(https?:\/\/[^\s<>"'`]+)/gi
+
+function isGenericMediaCaption(text) {
+  const value = String(text || '').trim()
+  return value === '写真' || value === '動画' || value === 'ファイル'
+}
+
+function ChatAttachmentBlock({ attachment, uploading, onOpenImage }) {
+  if (!attachment) return null
+  if (attachment.kind === 'image') {
+    return (
+      <div className="hana-chat-image-card">
+        <button
+          type="button"
+          className="hana-chat-image-link"
+          disabled={Boolean(uploading)}
+          aria-label="画像を拡大表示"
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            if (uploading) return
+            onOpenImage({
+              src: attachment.url,
+              alt: attachment.fileName || '写真',
+            })
+          }}
+        >
+          <img
+            className="hana-chat-image"
+            src={attachment.url}
+            alt={attachment.fileName || '写真'}
+            loading="lazy"
+          />
+          {uploading ? (
+            <span className="hana-chat-image-status">送信中…</span>
+          ) : null}
+        </button>
+      </div>
+    )
+  }
+  if (attachment.kind === 'video') {
+    return (
+      <div className="hana-chat-video-wrap" data-no-bubble-press="true">
+        <video
+          className="hana-chat-video"
+          src={attachment.url}
+          controls
+          playsInline
+          preload="metadata"
+        />
+        {uploading ? (
+          <span className="hana-chat-image-status">送信中…</span>
+        ) : null}
+      </div>
+    )
+  }
+  if (isChatAudioAttachment(attachment.fileMime, attachment.fileName)) {
+    return (
+      <div className="hana-chat-audio-card" data-no-bubble-press="true">
+        <div className="hana-chat-audio-meta">
+          <span className="hana-chat-file-icon" aria-hidden="true">🎵</span>
+          <span className="hana-chat-file-meta">
+            <strong className="hana-chat-file-name">{attachment.fileName || '音声'}</strong>
+            <span className="hana-chat-file-sub">
+              {attachment.fileSize ? formatChatFileSize(attachment.fileSize) : '音声ファイル'}
+            </span>
+          </span>
+        </div>
+        <audio
+          className="hana-chat-audio"
+          src={attachment.url}
+          controls
+          preload="metadata"
+          playsInline
+        />
+        {uploading ? (
+          <span className="hana-chat-image-status">送信中…</span>
+        ) : null}
+      </div>
+    )
+  }
+  return (
+    <a
+      className="hana-chat-file-card"
+      href={attachment.url}
+      target="_blank"
+      rel="noreferrer"
+      download={attachment.fileName || true}
+      data-no-bubble-press="true"
+    >
+      <span className="hana-chat-file-icon" aria-hidden="true">📄</span>
+      <span className="hana-chat-file-meta">
+        <strong className="hana-chat-file-name">{attachment.fileName}</strong>
+        <span className="hana-chat-file-sub">
+          {attachment.fileSize ? formatChatFileSize(attachment.fileSize) : 'ファイル'}
+        </span>
+      </span>
+    </a>
+  )
+}
 
 function renderMessageWithLinks(text) {
   const raw = String(text || '')
@@ -84,11 +183,13 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
 }) {
   const timeLabel = formatChatTimestamp(message.createdAt)
   const showsSticker = !message.deleted && isHanaSticker(message.sticker)
-  const attachment = !message.deleted ? getChatMessageAttachment(message) : null
-  const showsImage = Boolean(attachment && attachment.kind === 'image')
-  const showsVideo = Boolean(attachment && attachment.kind === 'video')
-  const showsFile = Boolean(attachment && attachment.kind === 'file')
-  const showsMedia = showsImage || showsVideo || showsFile
+  const attachments = !message.deleted ? getChatMessageAttachments(message) : []
+  const showsImage = attachments.some((item) => item.kind === 'image')
+  const showsVideo = attachments.some((item) => item.kind === 'video')
+  const showsFile = attachments.some((item) => item.kind === 'file')
+  const showsMedia = attachments.length > 0
+  const captionText = String(message.text || '').trim()
+  const showsCaption = Boolean(captionText) && !isGenericMediaCaption(captionText)
   const songShare = showsImage ? songShareMetaFromText(message.rawText || message.text) : null
   const effectEmoji = !message.deleted && message.effect
     ? (String(message.effectEmoji || '').trim()
@@ -156,7 +257,7 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
             reactions={reactions}
             reactorId={reactorId}
             coarsePointer={coarsePointer}
-            copyText={message.deleted || showsMedia ? '' : (message.rawText || message.text || '')}
+            copyText={message.deleted || (showsMedia && !showsCaption) ? '' : (message.rawText || message.text || '')}
             onCopy={(ok) => onBubbleAction(messageId, 'copy', ok)}
             onReply={() => onBubbleAction(messageId, 'reply')}
             onEdit={() => onBubbleAction(messageId, 'edit')}
@@ -176,94 +277,26 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
               ) : null}
               {showsSticker ? (
                 <HanaSticker id={message.sticker} size={104} title={message.text} />
-              ) : showsImage ? (
-                <div className="hana-chat-image-card">
-                  <button
-                    type="button"
-                    className="hana-chat-image-link"
-                    disabled={Boolean(message.uploading)}
-                    aria-label="画像を拡大表示"
-                    onClick={(event) => {
-                      event.preventDefault()
-                      event.stopPropagation()
-                      if (message.uploading) return
-                      onOpenImage({
-                        src: attachment.url,
-                        alt: attachment.fileName || message.text || '写真',
-                      })
-                    }}
-                  >
-                    <img
-                      className="hana-chat-image"
-                      src={attachment.url}
-                      alt={attachment.fileName || message.text || '写真'}
-                      loading="lazy"
+              ) : showsMedia ? (
+                <div className={`hana-chat-attach-stack${attachments.length > 1 ? ' is-many' : ''}`}>
+                  {attachments.map((item, index) => (
+                    <ChatAttachmentBlock
+                      key={`${item.url}-${index}`}
+                      attachment={item}
+                      uploading={message.uploading && index === 0}
+                      onOpenImage={onOpenImage}
                     />
-                    {message.uploading ? (
-                      <span className="hana-chat-image-status">送信中…</span>
-                    ) : null}
-                  </button>
+                  ))}
                   {songShare ? (
                     <ChatSongMiniPlayer
                       title={songShare.title}
                       shareUrl={songShare.shareUrl}
                     />
                   ) : null}
-                </div>
-              ) : showsVideo ? (
-                <div className="hana-chat-video-wrap" data-no-bubble-press="true">
-                  <video
-                    className="hana-chat-video"
-                    src={attachment.url}
-                    controls
-                    playsInline
-                    preload="metadata"
-                  />
-                  {message.uploading ? (
-                    <span className="hana-chat-image-status">送信中…</span>
+                  {showsCaption ? (
+                    <p className="hana-chat-bubble-caption">{renderMessageWithLinks(captionText)}</p>
                   ) : null}
                 </div>
-              ) : showsFile ? (
-                isChatAudioAttachment(attachment.fileMime, attachment.fileName) ? (
-                  <div className="hana-chat-audio-card" data-no-bubble-press="true">
-                    <div className="hana-chat-audio-meta">
-                      <span className="hana-chat-file-icon" aria-hidden="true">🎵</span>
-                      <span className="hana-chat-file-meta">
-                        <strong className="hana-chat-file-name">{attachment.fileName || '音声'}</strong>
-                        <span className="hana-chat-file-sub">
-                          {attachment.fileSize ? formatChatFileSize(attachment.fileSize) : '音声ファイル'}
-                        </span>
-                      </span>
-                    </div>
-                    <audio
-                      className="hana-chat-audio"
-                      src={attachment.url}
-                      controls
-                      preload="metadata"
-                      playsInline
-                    />
-                    {message.uploading ? (
-                      <span className="hana-chat-image-status">送信中…</span>
-                    ) : null}
-                  </div>
-                ) : (
-                  <a
-                    className="hana-chat-file-card"
-                    href={attachment.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    download={attachment.fileName || true}
-                    data-no-bubble-press="true"
-                  >
-                    <span className="hana-chat-file-icon" aria-hidden="true">📄</span>
-                    <span className="hana-chat-file-meta">
-                      <strong className="hana-chat-file-name">{attachment.fileName}</strong>
-                      <span className="hana-chat-file-sub">
-                        {attachment.fileSize ? formatChatFileSize(attachment.fileSize) : 'ファイル'}
-                      </span>
-                    </span>
-                  </a>
-                )
               ) : showsEffect ? (
                 <div className="hana-chat-effect-msg">
                   <span className="hana-chat-effect-msg-emoji" aria-hidden="true">{effectEmoji}</span>
