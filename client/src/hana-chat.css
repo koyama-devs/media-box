@@ -445,16 +445,28 @@ button.hana-chat-avatar {
   white-space: nowrap;
 }
 
+.hana-chat-header-lead {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
 .hana-chat-close {
-  width: 30px;
-  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 32px;
+  padding: 0;
   border: 0;
-  border-radius: 50%;
-  background: rgba(255, 248, 240, 0.08);
+  border-radius: 6px;
+  background: transparent;
   color: var(--hana-cream);
-  font-size: 1.1rem;
-  line-height: 1;
+  opacity: 0.85;
   cursor: pointer;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .hana-chat-header-actions {
@@ -469,8 +481,11 @@ button.hana-chat-avatar {
   flex-shrink: 0;
 }
 
-.hana-chat-close:hover {
-  background: rgba(255, 248, 240, 0.14);
+.hana-chat-close:hover,
+.hana-chat-close:focus-visible {
+  background: rgba(255, 248, 240, 0.12);
+  opacity: 1;
+  outline: none;
 }
 
 .hana-chat-hint-toggle {

@@ -4471,6 +4471,25 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             ) : null}
           </div>
           <header className="hana-chat-header" ref={headerRef}>
+            <div className="hana-chat-header-lead">
+              <button
+                type="button"
+                className="hana-chat-close"
+                onClick={closeChat}
+                aria-label="閉じる"
+                title="閉じる"
+              >
+                <svg viewBox="0 0 12 12" width="16" height="16" aria-hidden="true" focusable="false">
+                  <path
+                    d="M8.2 1.4 3.4 6l4.8 4.6"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
             {!actingAsOwner && channel === 'human' ? (
               <button
                 type="button"
@@ -4499,6 +4518,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 />
               </div>
             )}
+            </div>
             <div className="hana-chat-titles">
               {actingAsOwner ? (
                 <div className="hana-chat-guest-select" ref={guestMenuRef}>
@@ -4810,14 +4830,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   </div>
                 ) : null}
               </div>
-              <button
-                type="button"
-                className="hana-chat-close"
-                onClick={closeChat}
-                aria-label="閉じる"
-              >
-                ×
-              </button>
             </div>
           </header>
 
