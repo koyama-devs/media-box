@@ -147,44 +147,97 @@ function TileFace({ kind, open }) {
 }
 
 function TcgCard({ card, foil = false, photoUrl = '' }) {
+  const type = card?.types?.[0] || 'normal'
+  const art = card ? (photoUrl || card.sprite) : ''
+  const [flipped, setFlipped] = useState(false)
+  const [tilt, setTilt] = useState({ x: 0, y: 0, gx: 50, gy: 38 })
+  const stageRef = useRef(null)
+
   if (!card) return null
-  const type = card.types[0] || 'normal'
-  const art = photoUrl || card.sprite
+
+  const onPointerMove = (event) => {
+    const box = stageRef.current?.getBoundingClientRect()
+    if (!box) return
+    const px = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width))
+    const py = Math.min(1, Math.max(0, (event.clientY - box.top) / box.height))
+    setTilt({
+      x: (0.5 - py) * 18,
+      y: (px - 0.5) * 22,
+      gx: px * 100,
+      gy: py * 100,
+    })
+  }
+
+  const spin = {
+    transform: `rotateX(${tilt.x}deg) rotateY(${(flipped ? 180 : 0) + tilt.y * (flipped ? -1 : 1)}deg)`,
+    '--gx': `${tilt.gx}%`,
+    '--gy': `${tilt.gy}%`,
+  }
+
   return (
     <div className={`hana-chat-tcg-slab${foil ? ' is-foil' : ''}`}>
       <i className="hana-chat-tcg-bolt is-tl" />
       <i className="hana-chat-tcg-bolt is-tr" />
       <i className="hana-chat-tcg-bolt is-bl" />
       <i className="hana-chat-tcg-bolt is-br" />
-      <article className={`hana-chat-tcg is-${type}`}>
-        <div className="hana-chat-tcg-burst" aria-hidden="true" />
-        <div className="hana-chat-tcg-art">
-          {art ? <img src={art} alt="" /> : null}
-        </div>
-        <header className="hana-chat-tcg-top">
-          <strong className="hana-chat-tcg-name">{card.nameJa}</strong>
-          <span className="hana-chat-tcg-hp">
-            <small>HP</small>
-            {card.hp}
-          </span>
-          <span className={`hana-chat-tcg-pip is-${type}`} title={typeLabel(type)} />
-        </header>
-        <ul className="hana-chat-tcg-moves">
-          {(card.moves || []).map((move) => (
-            <li key={move.id}>
-              <span className={`hana-chat-tcg-pip is-${move.type}`} />
-              <em>{move.nameJa}</em>
-              <strong>{move.power || '—'}</strong>
-            </li>
-          ))}
-        </ul>
-        <footer className="hana-chat-tcg-weak">
-          <span>弱点</span>
-          {(card.weaknesses || []).map((t) => (
-            <i key={t} className={`hana-chat-tcg-pip is-${t}`} title={typeLabel(t)} />
-          ))}
-        </footer>
-      </article>
+      <div
+        ref={stageRef}
+        className="hana-chat-tcg-stage"
+        onPointerMove={onPointerMove}
+        onPointerLeave={() => setTilt({ x: 0, y: 0, gx: 50, gy: 38 })}
+      >
+        <button
+          type="button"
+          className={`hana-chat-tcg-spin${flipped ? ' is-flipped' : ''}`}
+          style={spin}
+          aria-label={flipped ? '表を見る' : 'うらを見る'}
+          onClick={() => setFlipped((v) => !v)}
+        >
+          <article className={`hana-chat-tcg hana-chat-tcg-face is-front is-${type}${foil ? ' is-foil' : ''}`}>
+            <header className="hana-chat-tcg-top">
+              <strong className="hana-chat-tcg-name">
+                {card.nameJa}
+                {foil ? <b>★</b> : null}
+              </strong>
+              <span className="hana-chat-tcg-hp">
+                <small>HP</small>
+                {card.hp}
+              </span>
+              {(card.types || [type]).slice(0, 2).map((t) => (
+                <span key={t} className={`hana-chat-tcg-pip is-${t}`} title={typeLabel(t)} />
+              ))}
+            </header>
+            <div className="hana-chat-tcg-art">
+              <div className="hana-chat-tcg-burst" aria-hidden="true" />
+              <div className="hana-chat-tcg-spark" aria-hidden="true" />
+              {art ? <img src={art} alt="" /> : null}
+              <div className="hana-chat-tcg-glare" aria-hidden="true" />
+            </div>
+            <ul className="hana-chat-tcg-moves">
+              {(card.moves || []).map((move) => (
+                <li key={move.id}>
+                  <span className={`hana-chat-tcg-pip is-${move.type}`} />
+                  <em>{move.nameJa}</em>
+                  <strong>{move.power || '—'}</strong>
+                </li>
+              ))}
+            </ul>
+            <footer className="hana-chat-tcg-bar">
+              <span>
+                弱点
+                {(card.weaknesses || []).slice(0, 2).map((t) => (
+                  <i key={t} className={`hana-chat-tcg-pip is-${t}`} title={typeLabel(t)} />
+                ))}
+              </span>
+              <span className="hana-chat-tcg-no">#{String(card.id).padStart(3, '0')}</span>
+            </footer>
+          </article>
+          <div className="hana-chat-tcg-face is-back" aria-hidden="true">
+            <span className="hana-chat-tcg-back-swirl" />
+          </div>
+        </button>
+      </div>
+      <p className="hana-chat-tcg-help">傾ける・タップでうら</p>
     </div>
   )
 }
@@ -497,7 +550,6 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
           {huntDone && card ? (
             <>
               <TcgCard card={card} foil={Boolean(entry?.foil || myRare)} photoUrl={entry?.photoUrl} />
-              <p className="hana-chat-poke-credit">データ: PokéAPI</p>
               <button type="button" className="hana-chat-poke-gift" disabled={busy} onClick={() => { void giftCard() }}>
                 {expedition?.giftedBy === me ? '送った' : 'あいてに送る'}
               </button>
