@@ -4,100 +4,100 @@ import { setAppUnreadBadge } from './appBadge'
 import hanachanArt from './assets/hanachan.svg'
 import { CHAT_CARD_SHARE_EVENT, CHAT_CLOSE_EVENT } from './chatCardShare'
 import {
-    addChatReminder,
-    dueChatReminders,
-    loadAllLocalChatPins,
-    loadChatPins,
-    markChatReminderDone,
-    remindAtFromChoice,
-    toggleChatPin,
-    unpinChatMessageEverywhere
+  addChatReminder,
+  dueChatReminders,
+  loadAllLocalChatPins,
+  loadChatPins,
+  markChatReminderDone,
+  remindAtFromChoice,
+  toggleChatPin,
+  unpinChatMessageEverywhere
 } from './chatExtras'
 import ChatImageLightbox from './ChatImageLightbox'
 import ChatNatsuFireworks from './ChatNatsuFireworks'
 import { playChatNotifySound, unlockChatNotifySound } from './chatNotifySound'
 import ChatPokeZukan, { PokeZukanChip } from './ChatPokeZukan'
 import {
-    readDefaultReaction,
-    readEnterToSend,
-    readMessageSound,
-    readStickerSet,
-    writeDefaultReaction,
-    writeEnterToSend,
-    writeMessageSound,
-    writeStickerSet,
+  readDefaultReaction,
+  readEnterToSend,
+  readMessageSound,
+  readStickerSet,
+  writeDefaultReaction,
+  writeEnterToSend,
+  writeMessageSound,
+  writeStickerSet,
 } from './chatSettings'
 import { canMutateOwnMessage, useIsCoarsePointer } from './ChatSwipeBubble'
 import ChatWeightGarden, { WeightGardenChip } from './ChatWeightGarden'
 import EmotionMomentLayer, { EMOTION_MOMENTS, triggerEmotionMoment } from './EmotionMoment'
 import {
-    analyzeGuestMessageForOwner,
-    applyReactionLocally,
-    broadcastChatEffect,
-    CHAT_PRESENCE_MODES,
-    CHAT_REACTION_EMOJIS,
-    chatWithHanachan,
-    classifyChatAttachment,
-    confirmJpTripArrived,
-    DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
-    deleteChatMessage,
-    ensureChatThread,
-    ensureDefaultChatAccounts,
-    ensureGuestChatId,
-    ensureWeightGardenDefaults,
-    getFirebaseErrorMessage,
-    getGuestProfile,
-    getMessageDeliveryStatus,
-    isAdminUser,
-    listGuestProfiles,
-    markThreadRead,
-    messageEditWindowMsFromMinutes,
-    migrateLegacyGuestThread,
-    migrateLocalPinsToThread,
-    normalizeChatPresenceMode,
-    OWNER_PROFILE,
-    pulseChatPresence,
-    resolveAvatarSrc,
-    resolveChatPresence,
-    resolveGuestDisplayName,
-    resolveGuestThreadWithHistory,
-    resolveSessionProfile,
-    sendChatMessage,
-    setChatPresenceStatus,
-    setChatProfileStatus,
-    setChatTyping,
-    sortChatMessages,
-    subscribeChatAccounts,
-    subscribeChatMessages,
-    subscribeChatProfiles,
-    subscribeChatThreads,
-    subscribeOwnChatThread,
-    subscribeToAuthUser,
-    suggestHanaChat,
-    threadUnreadCount,
-    toggleChatReaction,
-    toggleThreadChatPin,
-    translateChatMessage,
-    unpinThreadChatMessage,
-    updateChatMessage,
-    uploadChatAttachment,
+  analyzeGuestMessageForOwner,
+  applyReactionLocally,
+  broadcastChatEffect,
+  CHAT_PRESENCE_MODES,
+  CHAT_REACTION_EMOJIS,
+  chatWithHanachan,
+  classifyChatAttachment,
+  confirmJpTripArrived,
+  DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
+  deleteChatMessage,
+  ensureChatThread,
+  ensureDefaultChatAccounts,
+  ensureGuestChatId,
+  ensureWeightGardenDefaults,
+  getFirebaseErrorMessage,
+  getGuestProfile,
+  getMessageDeliveryStatus,
+  isAdminUser,
+  listGuestProfiles,
+  markThreadRead,
+  messageEditWindowMsFromMinutes,
+  migrateLegacyGuestThread,
+  migrateLocalPinsToThread,
+  normalizeChatPresenceMode,
+  OWNER_PROFILE,
+  pulseChatPresence,
+  resolveAvatarSrc,
+  resolveChatPresence,
+  resolveGuestDisplayName,
+  resolveGuestThreadWithHistory,
+  resolveSessionProfile,
+  sendChatMessage,
+  setChatPresenceStatus,
+  setChatProfileStatus,
+  setChatTyping,
+  sortChatMessages,
+  subscribeChatAccounts,
+  subscribeChatMessages,
+  subscribeChatProfiles,
+  subscribeChatThreads,
+  subscribeOwnChatThread,
+  subscribeToAuthUser,
+  suggestHanaChat,
+  threadUnreadCount,
+  toggleChatReaction,
+  toggleThreadChatPin,
+  translateChatMessage,
+  unpinThreadChatMessage,
+  updateChatMessage,
+  uploadChatAttachment,
 } from './firebase'
 import FlowerRainLayer, {
-    CHAT_PARTY_REACTION,
-    triggerFlowerRain,
-    triggerPartyBurst,
+  CHAT_PARTY_REACTION,
+  triggerFlowerRain,
+  triggerPartyBurst,
 } from './FlowerRain'
 import './hana-chat.css'
 import HanaCall from './HanaCall'
 import HanaChatMessageList, { EMPTY_CHAT_REACTIONS } from './HanaChatMessageList'
 import HanaSticker, {
-    stickerSetsForViewer,
-    suggestHanaStickers,
+  stickerSetsForViewer,
+  suggestHanaStickers,
 } from './HanaStickers'
 import NatsuKingyo from './NatsuKingyo'
 import {
-    collectUnansweredOwnerAssistMessages,
-    ownerAssistShouldCollapse,
+  collectUnansweredOwnerAssistMessages,
+  ownerAssistShouldCollapse,
 } from './OwnerMessageAssist'
 import { POKE_ZUKAN_GUEST, tokyoZukanYmd } from './pokeZukan'
 import { bindForegroundPush, ensureWebPush } from './webPush'
@@ -471,15 +471,8 @@ function mergeServerMessagesWithPending(server, previous) {
 
 function scrollChatListToLatest(listNode) {
   if (!listNode) return
-  const lastRow = listNode.querySelector('.hana-chat-msg-row:last-of-type')
-  if (lastRow) {
-    try {
-      lastRow.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' })
-      return
-    } catch {
-      /* fall through */
-    }
-  }
+  // Never scrollIntoView: a tall last bubble (video + images + file) makes iOS
+  // scroll the visual viewport / page, burying the composer under the keyboard.
   listNode.scrollTop = listNode.scrollHeight
 }
 
@@ -3176,8 +3169,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       setError('返信する相手を選んでください。')
       return
     }
-    stickerDockOpenRef.current = false
-    setStickerOpen(false)
     setError('')
     setComposerAttach((prev) => {
       const next = [...prev]
@@ -3194,6 +3185,28 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       return next
     })
     if (imageInputRef.current) imageInputRef.current.value = ''
+    // File picker steals focus and collapses the IME; without a dock spacer
+    // the composer sits under the returning keyboard.
+    const relayout = () => {
+      if (typeof window !== 'undefined' && window.scrollY) window.scrollTo(0, 0)
+      if (stickerDockMode) {
+        revealComposerKeyboard()
+        return
+      }
+      const input = inputRef.current
+      if (input) {
+        try {
+          input.focus({ preventScroll: true })
+        } catch {
+          input.focus()
+        }
+      }
+      syncPanelViewportRef.current({ immediate: true, force: true, forceKeyboard: true })
+    }
+    relayout()
+    window.requestAnimationFrame(relayout)
+    window.setTimeout(relayout, 80)
+    window.setTimeout(relayout, 280)
   }
 
   const removeComposerAttach = (id) => {
@@ -5304,6 +5317,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             </div>
           ) : null}
 
+          <form className="hana-chat-composer" ref={composerRef} onSubmit={handleSend}>
           {composerAttach.length && !editingId ? (
             <div className="hana-chat-composer-attach" aria-label="送信するファイル">
               {composerAttach.map((item) => (
@@ -5329,8 +5343,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               ))}
             </div>
           ) : null}
-
-          <form className="hana-chat-composer" ref={composerRef} onSubmit={handleSend}>
             <label className="sr-only" htmlFor="hana-chat-input">
               メッセージ
             </label>
@@ -5410,7 +5422,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   // Later taps: keep dock and ensure keyboard overlay is focused.
                   revealComposerKeyboard()
                 }}
-                onFocus={() => {
+                onFocus={(event) => {
+                  try {
+                    event.target.focus({ preventScroll: true })
+                  } catch { /* ignore */ }
+                  if (typeof window !== 'undefined' && window.scrollY) window.scrollTo(0, 0)
                   setComposerFocused(true)
                   if (stickerDockMode) {
                     // Focus without pointerdown (e.g. programmatic): still raise dock.

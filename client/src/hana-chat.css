@@ -1098,6 +1098,7 @@ body.hana-chat-scroll-lock #root {
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  overflow-anchor: none;
   padding: 12px;
   /* Extra top room so desktop hover action icons above the first bubble stay visible. */
   padding-top: 44px;
@@ -5627,7 +5628,7 @@ body.hana-chat-scroll-lock #root {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
-  align-items: center;
+  align-items: end;
   padding: 6px 12px 2px;
   border-top: 1px solid rgba(255, 248, 240, 0.08);
   box-sizing: border-box;
@@ -5685,10 +5686,11 @@ body.hana-chat-scroll-lock #root {
 }
 
 .hana-chat-composer-attach {
+  grid-column: 1 / -1;
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  padding: 0 2px 8px;
+  padding: 0 2px 2px;
   scrollbar-width: thin;
 }
 
@@ -5743,6 +5745,14 @@ body.hana-chat-scroll-lock #root {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.hana-chat-attach-stack.is-many {
+  max-height: min(42vh, 340px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 .hana-chat-bubble-caption {
@@ -6096,7 +6106,8 @@ body.hana-chat-scroll-lock #root {
   .hana-chat-panel.is-sticker-dock .hana-chat-composer-context,
   .hana-chat-panel.is-bottom-chrome .hana-chat-composer,
   .hana-chat-panel.is-bottom-chrome .hana-chat-composer-context {
-    position: relative;
+    position: sticky;
+    bottom: 0;
     z-index: 2;
     flex-shrink: 0;
     background:
@@ -6163,6 +6174,12 @@ body.hana-chat-scroll-lock #root {
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     min-height: 0;
+  }
+
+  .hana-chat-panel.is-keyboard .hana-chat-attach-stack.is-many,
+  .hana-chat-panel.is-bottom-chrome .hana-chat-attach-stack.is-many,
+  .hana-chat-panel.is-sticker-dock .hana-chat-attach-stack.is-many {
+    max-height: min(28vh, 220px);
   }
 
   .chat-swipe-track,
