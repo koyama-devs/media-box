@@ -249,7 +249,7 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
           <ChatSwipeBubble
             className={`${sideClass} is-${message.role}`}
             canReply={!message.deleted}
-            canEdit={mutable && !showsSticker && !showsEffect && !showsMedia}
+            canEdit={mutable && !showsSticker && !showsEffect && Boolean(captionText)}
             canDelete={mutable}
             canReact={!message.deleted}
             showFlowerReact={!message.deleted && !isOwn}

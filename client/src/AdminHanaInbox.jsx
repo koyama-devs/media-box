@@ -1759,7 +1759,7 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
                             <ChatSwipeBubble
                               className={`${isOwn ? 'is-own' : 'is-other'} is-${message.sender}`}
                               canReply={!message.deleted}
-                              canEdit={mutable && !showsSticker && !showsEffect && !showsMedia}
+                              canEdit={mutable && !showsSticker && !showsEffect && Boolean(String(message.text || '').trim())}
                               canDelete={mutable}
                               canReact={!message.deleted}
                               showFlowerReact={!message.deleted && !isOwn}
