@@ -1062,16 +1062,22 @@ export function classifyChatAttachment(fileOrMime) {
     const name = String(fileOrMime?.name || '').toLowerCase()
     if (/\.(jpe?g|png|gif|webp|heic|heif|bmp)$/i.test(name)) return 'image'
     if (/\.(mp4|mov|webm|m4v|3gp|mkv)$/i.test(name)) return 'video'
-    if (/\.(mp3|m4a|aac|wav|ogg|flac|opus|oga|caf)$/i.test(name)) return 'file'
+    if (/\.(mp3|m4a|aac|wav|ogg|flac|opus|oga|caf|webm)$/i.test(name)) return 'file'
   }
   return 'file'
 }
 
 /** True when a chat attachment should render an inline audio player. */
+export function normalizeVoiceSkin(value) {
+  const id = String(value || '').trim().toLowerCase()
+  if (id === 'sakura' || id === 'yozora' || id === 'tegami' || id === 'umi') return id
+  return ''
+}
+
 export function isChatAudioAttachment(fileMime = '', fileName = '') {
   const mime = String(fileMime || '').toLowerCase()
   if (mime.startsWith('audio/')) return true
-  return /\.(mp3|m4a|aac|wav|ogg|flac|opus|oga|caf)$/i.test(String(fileName || ''))
+  return /\.(mp3|m4a|aac|wav|ogg|flac|opus|oga|caf|webm)$/i.test(String(fileName || ''))
 }
 
 export function formatChatFileSize(bytes) {
@@ -1474,6 +1480,7 @@ function normalizeChatAttachmentRecord(raw) {
     fileName: normalizeChatFileName(raw.fileName) || (kind === 'image' ? '写真' : kind === 'video' ? '動画' : 'ファイル'),
     fileMime,
     fileSize: Math.max(0, Number(raw.fileSize) || 0),
+    voiceSkin: normalizeVoiceSkin(raw.voiceSkin),
   }
 }
 
@@ -1511,6 +1518,7 @@ export function getChatMessageAttachments(message) {
     fileName: normalizeChatFileName(message.fileName) || (kind === 'image' ? '写真' : kind === 'video' ? '動画' : 'ファイル'),
     fileMime,
     fileSize: Math.max(0, Number(message.fileSize) || 0),
+    voiceSkin: normalizeVoiceSkin(message.voiceSkin),
   }]
 }
 
@@ -1534,6 +1542,7 @@ function serializeChatMessage(id, data) {
     fileKind: deleted ? '' : fileKind,
     fileSize: deleted ? 0 : Math.max(0, Number(data?.fileSize) || 0),
     attachments: deleted ? [] : normalizeChatAttachments(data?.attachments),
+    voiceSkin: deleted ? '' : normalizeVoiceSkin(data?.voiceSkin),
     sender: data?.sender === 'hana' ? 'hana' : 'guest',
     createdAt: data?.createdAt?.toDate?.()?.toISOString?.() || data?.createdAtIso || null,
     createdAtIso: data?.createdAtIso ? String(data.createdAtIso) : null,
@@ -3194,10 +3203,13 @@ export async function sendChatMessage({
       fileName: normalizeChatFileName(item?.fileName) || name || 'ファイル',
       fileMime: itemMime,
       fileSize: Math.max(0, Math.floor(Number(item?.fileSize) || 0)),
+      ...(normalizeVoiceSkin(item?.voiceSkin) ? { voiceSkin: normalizeVoiceSkin(item.voiceSkin) } : {}),
     })
   }
   if (storedAttachments.length) {
     payload.attachments = storedAttachments
+    const voiceSkin = storedAttachments.map((item) => item.voiceSkin).find(Boolean)
+    if (voiceSkin) payload.voiceSkin = voiceSkin
   }
   if (replyTo?.id) {
     payload.replyToId = String(replyTo.id)

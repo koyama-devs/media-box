@@ -22,10 +22,12 @@ import {
   readEnterToSend,
   readMessageSound,
   readStickerSet,
+  readVoiceSkin,
   writeDefaultReaction,
   writeEnterToSend,
   writeMessageSound,
   writeStickerSet,
+  writeVoiceSkin,
 } from './chatSettings'
 import { canMutateOwnMessage, useIsCoarsePointer } from './ChatSwipeBubble'
 import ChatWeightGarden, { WeightGardenChip } from './ChatWeightGarden'
@@ -45,10 +47,14 @@ import {
   ensureDefaultChatAccounts,
   ensureGuestChatId,
   ensureWeightGardenDefaults,
+  formatChatFileSize,
+  formatChatTimestamp,
+  getChatMessageAttachments,
   getFirebaseErrorMessage,
   getGuestProfile,
   getMessageDeliveryStatus,
   isAdminUser,
+  isChatAudioAttachment,
   listGuestProfiles,
   markThreadRead,
   messageEditWindowMsFromMinutes,
@@ -91,15 +97,18 @@ import './hana-chat.css'
 import HanaCall from './HanaCall'
 import HanaChatMessageList, { EMPTY_CHAT_REACTIONS } from './HanaChatMessageList'
 import HanaSticker, {
+  stickerBurst,
   stickerSetsForViewer,
   suggestHanaStickers,
 } from './HanaStickers'
+import HanaVoicePlayer, { VoiceSkinPicker } from './HanaVoicePlayer'
 import NatsuKingyo from './NatsuKingyo'
 import {
   collectUnansweredOwnerAssistMessages,
   ownerAssistShouldCollapse,
 } from './OwnerMessageAssist'
 import { POKE_ZUKAN_GUEST, tokyoZukanYmd } from './pokeZukan'
+import useComposerVoiceNote, { formatVoiceClock } from './useComposerVoiceNote'
 import { bindForegroundPush, ensureWebPush } from './webPush'
 
 const AI_HISTORY_PREFIX = 'hana-chat-ai-history-'
@@ -150,6 +159,10 @@ const OWNER_ASSIST_CACHE_LIMIT = 40
 
 function defaultComposerCaption(items = []) {
   if (!items.length) return ''
+  const allAudio = items.every((item) => (
+    isChatAudioAttachment(item.file?.type || item.fileMime, item.file?.name || item.fileName)
+  ))
+  if (allAudio) return 'ボイス'
   const kinds = new Set(items.map((item) => item.kind))
   if (kinds.size === 1 && kinds.has('image')) return '写真'
   if (kinds.size === 1 && kinds.has('video')) return '動画'
@@ -165,6 +178,7 @@ function localMediaFieldsFromQueue(queued) {
       || (item.kind === 'image' ? '写真' : item.kind === 'video' ? '動画' : 'ファイル'),
     fileMime: String(item.file?.type || ''),
     fileSize: Math.max(0, Number(item.file?.size) || 0),
+    voiceSkin: item.voiceSkin || '',
   }))
   const first = attachments[0]
   return {
@@ -174,6 +188,7 @@ function localMediaFieldsFromQueue(queued) {
     fileName: first.fileName,
     fileMime: first.fileMime,
     fileSize: first.fileSize,
+    voiceSkin: first.voiceSkin || '',
     attachments,
     uploading: true,
   }
@@ -188,6 +203,7 @@ function uploadedMediaFields(uploadedList) {
     fileName: first.fileName,
     fileMime: first.fileMime,
     fileSize: first.fileSize,
+    voiceSkin: first.voiceSkin || '',
     attachments: uploadedList,
   }
 }
@@ -586,6 +602,119 @@ function wantsHumanHana(text) {
  * - Guest (other passwords): single stream — Hanachan AI, auto/opt-in switch to human Hana
  * - Owner (password `hana` or Google admin): reply inbox UI
  */
+function ChatVoiceNoteDock({
+  voiceNote,
+  busy,
+  dockRef,
+  voiceSkin,
+  onVoiceSkinChange,
+  onToggleRecord,
+  onFinish,
+  onSend,
+  onDiscard,
+}) {
+  const recording = voiceNote.phase === 'recording'
+  const paused = voiceNote.phase === 'paused'
+  const preview = voiceNote.phase === 'preview'
+  const canFinish = recording || paused
+  return (
+    <div
+      className={`hana-chat-voice-dock is-${voiceNote.phase}`}
+      ref={dockRef}
+      role="dialog"
+      aria-label="ボイスメッセージ"
+    >
+      <div className="hana-chat-voice-status">
+        <span className={`hana-chat-voice-led${recording ? ' is-on' : ''}${paused ? ' is-paused' : ''}`} aria-hidden="true" />
+        <span className="hana-chat-voice-clock">
+          {formatVoiceClock(voiceNote.elapsedMs)}
+          <span> / {formatVoiceClock(voiceNote.maxMs)}</span>
+        </span>
+      </div>
+      {voiceNote.error ? <p className="hana-chat-voice-error">{voiceNote.error}</p> : null}
+      <div className="hana-chat-voice-stage">
+        {preview && voiceNote.previewUrl ? (
+          <>
+            <HanaVoicePlayer
+              src={voiceNote.previewUrl}
+              skin={voiceSkin}
+              durationMs={voiceNote.elapsedMs}
+            />
+            <VoiceSkinPicker value={voiceSkin} onChange={onVoiceSkinChange} />
+          </>
+        ) : (
+          <button
+            type="button"
+            className={`hana-chat-voice-orb${recording ? ' is-recording' : ''}${paused ? ' is-paused' : ''}`}
+            disabled={busy}
+            aria-label={recording ? '一時停止' : paused ? '録音を再開' : '録音を開始'}
+            onMouseDown={(event) => event.preventDefault()}
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={() => { void onToggleRecord() }}
+          >
+            <span className="hana-chat-voice-orb-ring" aria-hidden="true" />
+            {recording ? (
+              <span className="hana-chat-voice-orb-pause" aria-hidden="true">
+                <i /><i />
+              </span>
+            ) : (
+              <span className="hana-chat-voice-orb-core" aria-hidden="true" />
+            )}
+          </button>
+        )}
+      </div>
+      <div className="hana-chat-voice-actions">
+        <button
+          type="button"
+          className="hana-chat-voice-icon-btn is-delete"
+          title="削除"
+          aria-label="削除"
+          onMouseDown={(event) => event.preventDefault()}
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={onDiscard}
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
+            <path fill="none" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round" d="M5 7h14M9.2 7V5.6A1.6 1.6 0 0 1 10.8 4h2.4A1.6 1.6 0 0 1 14.8 5.6V7" />
+            <path fill="none" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round" d="M8.3 7.5 9.1 18.4A1.7 1.7 0 0 0 10.8 20h2.4a1.7 1.7 0 0 0 1.7-1.6l.8-10.9" />
+            <path fill="none" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" d="M10.5 10.8v6M13.5 10.8v6" />
+          </svg>
+        </button>
+        {preview ? (
+          <button
+            type="button"
+            className="hana-chat-voice-icon-btn is-send"
+            title="送る"
+            aria-label="送る"
+            disabled={busy || !voiceNote.previewFile}
+            onMouseDown={(event) => event.preventDefault()}
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={onSend}
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
+              <path fill="none" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round" d="M4.4 12h15.2M13.2 6.6 19.6 12l-6.4 5.4" />
+            </svg>
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="hana-chat-voice-icon-btn is-finish"
+            title="録音を終える"
+            aria-label="録音を終える"
+            disabled={busy || !canFinish}
+            onMouseDown={(event) => event.preventDefault()}
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={() => { void onFinish() }}
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
+              <path fill="none" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round" d="M6.4 12.4 10.2 16.2 17.6 8.2" />
+            </svg>
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function HanaChat({ hidden = false, appRole = 'guest', guestKey = '' }) {
   const [open, setOpen] = useState(false)
   const [authUser, setAuthUser] = useState(null)
@@ -617,8 +746,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [composerFocused, setComposerFocused] = useState(false)
   const [stickerSetId, setStickerSetId] = useState(() => readStickerSet({ asOwner: appRole === 'owner' }))
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [menuPage, setMenuPage] = useState('home')
+  const [mediaFilter, setMediaFilter] = useState('all')
   const [defaultReaction, setDefaultReaction] = useState(() => readDefaultReaction())
   const [enterToSend, setEnterToSend] = useState(() => readEnterToSend())
+  const [voiceSkin, setVoiceSkin] = useState(() => readVoiceSkin())
   const desktopKeyboard = useDesktopKeyboard()
   const narrowScreen = useNarrowScreen()
   const coarsePointer = useIsCoarsePointer()
@@ -647,6 +779,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const guestMenuRef = useRef(null)
   const stickerRef = useRef(null)
   const stickerTriggerRef = useRef(null)
+  const voiceNoteRef = useRef(null)
   const imageInputRef = useRef(null)
   const [composerAttach, setComposerAttach] = useState([])
   const composerAttachRef = useRef([])
@@ -2533,6 +2666,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     setBottomChromePx(0)
     setStickerOpen(false)
     setComposerFocused(false)
+    voiceNote.close()
+    setSettingsOpen(false)
+    setMenuPage('home')
   }
 
   const toggleChatOpen = () => {
@@ -2592,6 +2728,35 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       callLog: m.callLog || null,
     }))
   }, [actingAsOwner, guestOnHuman, hanaMessages, aiMessages])
+
+  const threadMediaItems = useMemo(() => {
+    const items = []
+    for (const message of visibleMessages) {
+      if (message.deleted) continue
+      const attachments = getChatMessageAttachments(message)
+      attachments.forEach((att, index) => {
+        if (!att?.url) return
+        const kind = isChatAudioAttachment(att.fileMime, att.fileName) ? 'file' : att.kind
+        items.push({
+          id: `${message.id}-${index}-${att.url}`,
+          messageId: message.id,
+          createdAt: message.createdAt,
+          kind,
+          url: att.url,
+          fileName: att.fileName,
+          fileMime: att.fileMime,
+          fileSize: att.fileSize,
+        })
+      })
+    }
+    items.sort((a, b) => (Date.parse(b.createdAt || 0) || 0) - (Date.parse(a.createdAt || 0) || 0))
+    return items
+  }, [visibleMessages])
+
+  const visibleMediaItems = useMemo(() => {
+    if (mediaFilter === 'all') return threadMediaItems
+    return threadMediaItems.filter((item) => item.kind === mediaFilter)
+  }, [mediaFilter, threadMediaItems])
 
   const visibleMessagesByIdRef = useRef(new Map())
   const visibleMessagesById = useMemo(() => {
@@ -2784,6 +2949,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     resizeComposer()
   }, [draft, resizeComposer])
 
+  const voiceNote = useComposerVoiceNote({
+    enabled: open && !hidden && !editingId,
+  })
+  stickerDockOpenRef.current = Boolean((stickerOpen || voiceNote.open) && stickerDockMode)
+
   useEffect(() => {
     if (!open) return undefined
     const onResize = () => {
@@ -2804,23 +2974,25 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     setComposerFocused(false)
     setBottomChromePx(0)
     setSettingsOpen(false)
-  }, [activeThreadId, open])
+    voiceNote.close()
+  }, [activeThreadId, open, voiceNote.close])
 
   useEffect(() => {
-    if (!guestMenuOpen && !settingsOpen && !stickerOpen) return undefined
+    if (!guestMenuOpen && !settingsOpen && !stickerOpen && !voiceNote.open) return undefined
     const onPointerDown = (event) => {
       if (guestMenuOpen && !guestMenuRef.current?.contains(event.target)) {
         setGuestMenuOpen(false)
       }
-      if (stickerOpen) {
+      if (stickerOpen || voiceNote.open) {
         const inPanel = stickerRef.current?.contains(event.target)
+        const inVoice = voiceNoteRef.current?.contains(event.target)
         const inTrigger = stickerTriggerRef.current?.contains(event.target)
         const inComposer = composerRef.current?.contains(event.target)
-        if (!inPanel && !inTrigger && !inComposer) {
-          // Dismiss IME first so viewport sync restores idle (not keyboard-pin).
+        if (!inPanel && !inVoice && !inTrigger && !inComposer) {
           skipDockCloseOnNextBlurRef.current = false
           lockedDockChromeRef.current = 0
           stickerDockOpenRef.current = false
+          voiceNote.close()
           try { inputRef.current?.blur() } catch { /* ignore */ }
           flushSync(() => {
             setStickerOpen(false)
@@ -2832,11 +3004,12 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       }
       if (settingsOpen && !settingsRef.current?.contains(event.target)) {
         setSettingsOpen(false)
+        setMenuPage('home')
       }
     }
     document.addEventListener('pointerdown', onPointerDown)
     return () => document.removeEventListener('pointerdown', onPointerDown)
-  }, [guestMenuOpen, settingsOpen, stickerOpen])
+  }, [guestMenuOpen, settingsOpen, stickerOpen, voiceNote.close, voiceNote.open])
 
   const halfScreenDockPx = useCallback(() => {
     if (typeof window === 'undefined') return stableChromeHRef.current || 320
@@ -2904,13 +3077,14 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     lockedDockChromeRef.current = 0
     skipDockCloseOnNextBlurRef.current = false
     stickerDockOpenRef.current = false
+    voiceNote.close()
     flushSync(() => {
       setStickerOpen(false)
       setBottomChromePx(0)
       setComposerFocused(false)
     })
     syncPanelViewportRef.current({ immediate: true, force: true })
-  }, [stickerDockMode, revealComposerKeyboard])
+  }, [revealComposerKeyboard, stickerDockMode, voiceNote.close])
 
   /**
    * Same idea as tapping Send while 未確定: commit composition, then run「完了」
@@ -2940,6 +3114,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   }, [closeStickerTray, stickerDockMode])
 
   const openStickerTray = useCallback(() => {
+    voiceNote.close()
     if (stickerDockMode) {
       stickerDockOpenRef.current = true
       keyboardPinnedRef.current = false
@@ -2968,7 +3143,82 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       return
     }
     setStickerOpen(true)
-  }, [halfScreenDockPx, stickerDockMode])
+  }, [halfScreenDockPx, stickerDockMode, voiceNote.close])
+
+  const openVoiceDock = useCallback(() => {
+    if (!voiceNote.supported) {
+      setError('この端末は音声メッセージに対応していません。')
+      return
+    }
+    setError('')
+    if (stickerDockMode) {
+      stickerDockOpenRef.current = true
+      keyboardPinnedRef.current = false
+      const layoutH = Math.max(
+        baselineLayoutRef.current || 0,
+        typeof window !== 'undefined' ? (window.innerHeight || 0) : 0,
+      )
+      if (layoutH > (baselineLayoutRef.current || 0)) baselineLayoutRef.current = layoutH
+      const h = halfScreenDockPx()
+      lockedDockChromeRef.current = h
+      voiceNote.openDock()
+      flushSync(() => {
+        setBottomChromePx(h)
+        setStickerOpen(false)
+        setComposerFocused(false)
+      })
+      const panel = panelRef.current
+      if (panel) {
+        panel.classList.remove('is-keyboard')
+        panel.style.top = '0px'
+        panel.style.height = `${layoutH}px`
+        panel.style.maxHeight = `${layoutH}px`
+        panel.style.setProperty('--hana-sticker-dock-h', `${h}px`)
+        panel.style.setProperty('--hana-bottom-chrome-h', `${h}px`)
+      }
+      try { inputRef.current?.blur() } catch { /* ignore */ }
+      syncPanelViewportRef.current({ immediate: true, force: true })
+      return
+    }
+    setStickerOpen(false)
+    voiceNote.openDock()
+  }, [halfScreenDockPx, stickerDockMode, voiceNote])
+
+  const closeVoiceDock = useCallback(() => {
+    voiceNote.close()
+    if (stickerDockMode && !stickerOpen) {
+      lockedDockChromeRef.current = 0
+      skipDockCloseOnNextBlurRef.current = false
+      stickerDockOpenRef.current = false
+      flushSync(() => {
+        setBottomChromePx(0)
+        setComposerFocused(false)
+      })
+      syncPanelViewportRef.current({ immediate: true, force: true })
+    }
+  }, [stickerDockMode, stickerOpen, voiceNote])
+
+  const sendVoiceNote = useCallback(() => {
+    const file = voiceNote.previewFile
+    if (!file || busy || editingId) return
+    if (actingAsOwner && !activeThreadId) {
+      setError('返信する相手を選んでください。')
+      return
+    }
+    const item = {
+      id: nextChatPendingId('att'),
+      file,
+      previewUrl: URL.createObjectURL(file),
+      kind: classifyChatAttachment(file),
+      voiceSkin,
+    }
+    composerAttachRef.current = [item]
+    setComposerAttach([item])
+    closeVoiceDock()
+    window.requestAnimationFrame(() => {
+      composerRef.current?.requestSubmit?.()
+    })
+  }, [actingAsOwner, activeThreadId, busy, closeVoiceDock, editingId, voiceNote.previewFile, voiceSkin])
 
   const toggleStickerTray = useCallback(() => {
     // Fixed dock: icon only toggles soft-keyboard overlay up/down.
@@ -3337,6 +3587,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   const startEdit = (message) => {
     if (!canMutateMessage(message) || message.deleted) return
+    voiceNote.close()
     setReplyTo(null)
     setEditingId(message.id)
     setDraft(message.rawText || message.text)
@@ -3452,6 +3703,12 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         },
       ])
       scrollToLatestRef.current()
+
+      const burst = stickerBurst(id)
+      if (burst?.kind === 'moment') {
+        triggerEmotionMoment(burst.momentId)
+        handleLocalEffect(burst)
+      }
 
       const serverId = await sendChatMessage({
         threadId,
@@ -4014,6 +4271,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   const handleSend = async (event) => {
     event.preventDefault()
+    voiceNote.close()
     const queued = editingId ? [] : composerAttachRef.current.slice()
     const text = draft.trim()
     if (editingId) {
@@ -4131,6 +4389,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               fileName: uploaded.fileName,
               fileMime: uploaded.fileMime,
               fileSize: uploaded.fileSize,
+              voiceSkin: item.voiceSkin || '',
             })
           }
           return out
@@ -4231,6 +4490,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               fileName: uploaded.fileName,
               fileMime: uploaded.fileMime,
               fileSize: uploaded.fileSize,
+              voiceSkin: item.voiceSkin || '',
             })
           }
           return out
@@ -4505,7 +4765,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         <section
           ref={panelRef}
           id="hana-chat-panel"
-          className={`hana-chat-panel is-fullscreen${stickerOpen && stickerDockMode ? ' is-sticker-dock' : ''}${bottomChromePx > 0 ? ' is-bottom-chrome' : ''}${composerFocused ? ' is-composer-focused' : ''}`}
+          className={`hana-chat-panel is-fullscreen${(stickerOpen || voiceNote.open) && stickerDockMode ? ' is-sticker-dock' : ''}${bottomChromePx > 0 ? ' is-bottom-chrome' : ''}${composerFocused ? ' is-composer-focused' : ''}`}
           aria-label="はなちゃんチャット"
         >
           <div className="hana-chat-natsu-decor" aria-hidden="true">
@@ -4713,23 +4973,171 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   className={`hana-chat-settings-btn${settingsOpen ? ' is-open' : ''}`}
                   aria-expanded={settingsOpen}
                   aria-haspopup="dialog"
-                  aria-label="チャット設定"
-                  title={`設定（自分: ${myStatusLabel}）`}
+                  aria-label="チャットの設定"
+                  title={`自分: ${myStatusLabel}`}
                   onClick={() => {
                     setGuestMenuOpen(false)
-                    setSettingsOpen((value) => !value)
+                    setSettingsOpen((value) => {
+                      if (!value) setMenuPage('home')
+                      return !value
+                    })
                   }}
                 >
-                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
+                  <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">
                     <path
-                      fill="currentColor"
-                      d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.2 7.2 0 0 0-1.63-.94l-.36-2.54A.49.49 0 0 0 14 2h-4a.49.49 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.55-1.63.94l-2.39-.96a.49.49 0 0 0-.59.22L2.63 8.87a.49.49 0 0 0 .12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.75 14.52a.49.49 0 0 0-.12.61l1.92 3.32c.13.23.4.32.64.22l2.39-.96c.5.39 1.04.71 1.63.94l.36 2.54c.05.24.25.41.48.41h4c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.55 1.63-.94l2.39.96c.24.1.51 0 .64-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      d="M5 7h14M5 12h14M5 17h14"
                     />
                   </svg>
                   <span className={`hana-chat-settings-status-dot ${myPresence.className}`} aria-hidden="true" />
                 </button>
                 {settingsOpen ? (
-                  <div className="hana-chat-settings-panel" role="dialog" aria-label="チャット設定">
+                  <div
+                    className={`hana-chat-settings-panel${menuPage !== 'home' ? ' is-wide' : ''}`}
+                    role="dialog"
+                    aria-label={menuPage === 'settings' ? 'チャット設定' : menuPage === 'media' ? 'メディア' : 'チャットの設定'}
+                  >
+                    {menuPage === 'home' ? (
+                      <div className="hana-chat-menu-list">
+                        <button
+                          type="button"
+                          className="hana-chat-menu-item"
+                          onClick={() => setMenuPage('settings')}
+                        >
+                          <span className="hana-chat-menu-item-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" width="20" height="20" focusable="false">
+                              <path
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.7"
+                                strokeLinejoin="round"
+                                d="M10.2 3.4h3.6l.5 2.2c.5.2 1 .4 1.4.8l2.1-.8 1.8 1.8-.8 2.1c.4.4.6.9.8 1.4l2.2.5v3.6l-2.2.5c-.2.5-.4 1-.8 1.4l.8 2.1-1.8 1.8-2.1-.8c-.4.4-.9.6-1.4.8l-.5 2.2h-3.6l-.5-2.2c-.5-.2-1-.4-1.4-.8l-2.1.8-1.8-1.8.8-2.1c-.4-.4-.6-.9-.8-1.4L3.4 13.8V10.2l2.2-.5c.2-.5.4-1 .8-1.4l-.8-2.1 1.8-1.8 2.1.8c.4-.4.9-.6 1.4-.8Z"
+                              />
+                              <circle cx="12" cy="12" r="2.7" fill="none" stroke="currentColor" strokeWidth="1.7" />
+                            </svg>
+                          </span>
+                          <span className="hana-chat-menu-item-copy">
+                            <strong>設定</strong>
+                            <span>ステータス・通知・リアクション</span>
+                          </span>
+                          <span className="hana-chat-menu-item-chevron" aria-hidden="true">›</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="hana-chat-menu-item"
+                          onClick={() => setMenuPage('media')}
+                        >
+                          <span className="hana-chat-menu-item-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" width="20" height="20" focusable="false">
+                              <rect x="3.6" y="5.4" width="16.8" height="13.2" rx="2.2" fill="none" stroke="currentColor" strokeWidth="1.7" />
+                              <circle cx="8.4" cy="10" r="1.5" fill="currentColor" />
+                              <path
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.7"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M7.4 16.4 11 12.6l2.4 2.4 2.2-2.6 3.4 4"
+                              />
+                            </svg>
+                          </span>
+                          <span className="hana-chat-menu-item-copy">
+                            <strong>メディア</strong>
+                            <span>
+                              写真・動画・ファイル
+                              {threadMediaItems.length ? ` · ${threadMediaItems.length}` : ''}
+                            </span>
+                          </span>
+                          <span className="hana-chat-menu-item-chevron" aria-hidden="true">›</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="hana-chat-menu-back"
+                        onClick={() => setMenuPage('home')}
+                      >
+                        ‹ 戻る
+                      </button>
+                    )}
+                    {menuPage === 'media' ? (
+                      <>
+                        <p className="hana-chat-settings-title">メディア</p>
+                        <p className="hana-chat-settings-hint">このチャットで読み込んだ写真・動画・ファイル</p>
+                        <div className="hana-chat-media-filters" role="tablist" aria-label="メディアの種類">
+                          {[
+                            ['all', 'すべて'],
+                            ['image', '写真'],
+                            ['video', '動画'],
+                            ['file', 'ファイル'],
+                          ].map(([id, label]) => (
+                            <button
+                              key={id}
+                              type="button"
+                              role="tab"
+                              aria-selected={mediaFilter === id}
+                              className={`hana-chat-media-filter${mediaFilter === id ? ' is-active' : ''}`}
+                              onClick={() => setMediaFilter(id)}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                        {visibleMediaItems.length ? (
+                          <div className="hana-chat-media-grid">
+                            {visibleMediaItems.map((item) => (
+                              item.kind === 'image' ? (
+                                <button
+                                  key={item.id}
+                                  type="button"
+                                  className="hana-chat-media-tile is-image"
+                                  onClick={() => {
+                                    setPreviewImage({ src: item.url, alt: item.fileName || '写真' })
+                                    setSettingsOpen(false)
+                                    setMenuPage('home')
+                                  }}
+                                >
+                                  <img src={item.url} alt="" />
+                                </button>
+                              ) : item.kind === 'video' ? (
+                                <a
+                                  key={item.id}
+                                  className="hana-chat-media-tile is-video"
+                                  href={item.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  <video src={item.url} muted playsInline preload="metadata" />
+                                  <span className="hana-chat-media-tile-badge">動画</span>
+                                </a>
+                              ) : (
+                                <a
+                                  key={item.id}
+                                  className="hana-chat-media-tile is-file"
+                                  href={item.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  download={item.fileName || true}
+                                >
+                                  <span className="hana-chat-media-file-icon" aria-hidden="true">📄</span>
+                                  <span className="hana-chat-media-file-name">{item.fileName || 'ファイル'}</span>
+                                  <span className="hana-chat-media-file-meta">
+                                    {[formatChatFileSize(item.fileSize), formatChatTimestamp(item.createdAt)].filter(Boolean).join(' · ')}
+                                  </span>
+                                </a>
+                              )
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="hana-chat-settings-hint">まだメディアはありません。</p>
+                        )}
+                      </>
+                    ) : null}
+                    {menuPage === 'settings' ? (
+                      <>
                     <p className="hana-chat-settings-title">設定</p>
                     <div className="hana-chat-settings-section">
                       <p className="hana-chat-settings-label">自分のステータス</p>
@@ -4874,6 +5282,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                           </button>
                         </div>
                       </div>
+                    ) : null}
+                      </>
                     ) : null}
                   </div>
                 ) : null}
@@ -5417,6 +5827,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   }
                 }}
                 onPointerDown={() => {
+                  if (voiceNote.open) voiceNote.close()
                   if (!stickerDockMode) return
                   // First tap on input: raise fixed sticker dock under the IME.
                   // Later taps: keep dock and ensure keyboard overlay is focused.
@@ -5690,33 +6101,50 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 </div>
               ) : null}
             </div>
-            {canUseReactions && effectThreadId && !editingId && !draft.trim() && !composerAttach.length ? (
+            {canUseReactions && effectThreadId && !editingId && !composerAttach.length && (!draft.trim() || voiceNote.open) ? (
               <button
                 type="button"
-                className="hana-chat-composer-action is-mic"
-                title="音声入力（準備中）"
-                aria-label="音声入力（準備中）"
-                disabled
+                className={`hana-chat-composer-action is-mic${voiceNote.open ? ' is-close' : ''}${voiceNote.phase === 'recording' ? ' is-recording' : ''}`}
+                title={voiceNote.open ? 'ボイスメッセージを閉じる' : 'ボイスメッセージ'}
+                aria-label={voiceNote.open ? 'ボイスメッセージを閉じる' : 'ボイスメッセージ'}
+                aria-pressed={voiceNote.open}
+                disabled={busy || (actingAsOwner && !activeThreadId)}
                 onMouseDown={(event) => event.preventDefault()}
                 onPointerDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  if (voiceNote.open) closeVoiceDock()
+                  else openVoiceDock()
+                }}
               >
-                <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false">
-                  <rect x="9" y="3.6" width="6" height="10.4" rx="3" fill="none" stroke="currentColor" strokeWidth="1.7" />
-                  <path
-                    d="M6.6 12a5.4 5.4 0 0 0 10.8 0"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    strokeLinecap="round"
-                  />
-                  <path
-                    d="M12 17.4V20.4M9.2 20.4h5.6"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    strokeLinecap="round"
-                  />
-                </svg>
+                {voiceNote.open ? (
+                  <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">
+                    <path
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.9"
+                      strokeLinecap="round"
+                      d="M7 7l10 10M17 7 7 17"
+                    />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false">
+                    <rect x="9" y="3.6" width="6" height="10.4" rx="3" fill="none" stroke="currentColor" strokeWidth="1.7" />
+                    <path
+                      d="M6.6 12a5.4 5.4 0 0 0 10.8 0"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M12 17.4V20.4M9.2 20.4h5.6"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                )}
               </button>
             ) : (
               <button
@@ -5741,16 +6169,41 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               </button>
             )}
           </form>
+          {voiceNote.open && !stickerDockMode ? (
+            <ChatVoiceNoteDock
+              voiceNote={voiceNote}
+              busy={busy}
+              dockRef={voiceNoteRef}
+              voiceSkin={voiceSkin}
+              onVoiceSkinChange={(next) => setVoiceSkin(writeVoiceSkin(next))}
+              onToggleRecord={voiceNote.toggleRecord}
+              onFinish={voiceNote.finishRecording}
+              onSend={sendVoiceNote}
+              onDiscard={voiceNote.discardTake}
+            />
+          ) : null}
           {bottomChromePx > 0 && stickerDockMode ? (
             <div
-              className={`hana-chat-bottom-chrome${stickerOpen ? ' has-dock' : ''}`}
+              className={`hana-chat-bottom-chrome${stickerOpen || voiceNote.open ? ' has-dock' : ''}`}
               style={{
                 height: bottomChromePx,
                 flex: `0 0 ${bottomChromePx}px`,
               }}
-              aria-hidden={!stickerOpen}
+              aria-hidden={!stickerOpen && !voiceNote.open}
             >
-              {stickerOpen && canUseReactions && effectThreadId ? (
+              {voiceNote.open ? (
+                <ChatVoiceNoteDock
+                  voiceNote={voiceNote}
+                  busy={busy}
+                  dockRef={voiceNoteRef}
+                  voiceSkin={voiceSkin}
+                  onVoiceSkinChange={(next) => setVoiceSkin(writeVoiceSkin(next))}
+                  onToggleRecord={voiceNote.toggleRecord}
+                  onFinish={voiceNote.finishRecording}
+                  onSend={sendVoiceNote}
+                  onDiscard={voiceNote.discardTake}
+                />
+              ) : stickerOpen && canUseReactions && effectThreadId ? (
             <div
               className="hana-chat-sticker-dock"
               ref={stickerRef}

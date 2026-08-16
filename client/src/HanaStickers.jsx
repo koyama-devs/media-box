@@ -74,6 +74,27 @@ const KAITO_SET = [
   { id: 'k-angry', label: 'むっ' },
 ]
 
+/** Full-body animated stamps (not just a swapped face). */
+const HANA_LIVE_SET = [
+  { id: 'h-kiss', label: 'ちゅっ♡', motion: 'kiss', burst: 'kiss' },
+  { id: 'h-hearts', label: 'ハート飛ばし', motion: 'hearts', burst: 'hearts' },
+  { id: 'h-hug', label: 'ぎゅっ', motion: 'hug', burst: 'hearts' },
+  { id: 'h-peek', label: 'ちらっ', motion: 'peek' },
+  { id: 'h-jump', label: 'きゃー', motion: 'jump', burst: 'sparkle' },
+  { id: 'h-peace', label: 'ぴーす', motion: 'peace' },
+  { id: 'h-winklove', label: 'ウィンク♡', motion: 'wink', burst: 'hearts' },
+]
+
+const KAITO_LIVE_SET = [
+  { id: 'k-kiss', label: 'ちゅっ', motion: 'kiss', burst: 'kiss' },
+  { id: 'k-hearts', label: 'ハート砲', motion: 'hearts', burst: 'hearts' },
+  { id: 'k-hug', label: 'だきしめ', motion: 'hug', burst: 'hearts' },
+  { id: 'k-peek', label: 'ちらっ', motion: 'peek' },
+  { id: 'k-jump', label: 'よっしゃ', motion: 'jump', burst: 'sparkle' },
+  { id: 'k-peace', label: 'ピース', motion: 'peace' },
+  { id: 'k-winklove', label: 'ウィンク', motion: 'wink', burst: 'hearts' },
+]
+
 const DAILY_SET = [
   {
     id: 'daily-ohayou',
@@ -388,7 +409,9 @@ const MAINICHI_VARIANTS = Object.fromEntries(MAINICHI_BASE.map((item) => [
 /** Picker groups. Face sets first, then daily/mainichi character packs. */
 export const HANA_STICKER_SETS = [
   { id: 'hana', label: 'はな', items: HANA_SET.map((item) => ({ ...item, set: 'hana' })) },
+  { id: 'hana-live', label: 'はな♡', items: HANA_LIVE_SET.map((item) => ({ ...item, set: 'hana-live' })) },
   { id: 'kaito', label: 'かいと', items: KAITO_SET.map((item) => ({ ...item, set: 'kaito' })) },
+  { id: 'kaito-live', label: 'かいと♡', items: KAITO_LIVE_SET.map((item) => ({ ...item, set: 'kaito-live' })) },
   ...MAINICHI_SETS.map((set) => ({ id: set.tabId, label: set.tabLabel, items: set.items })),
 ]
 
@@ -399,8 +422,8 @@ export const HANA_STICKER_SETS = [
  */
 export function stickerSetsForViewer({ feminine = false } = {}) {
   return HANA_STICKER_SETS.filter((set) => {
-    if (feminine) return set.id !== 'kaito' && set.id !== 'daily-kaito'
-    return set.id !== 'hana' && set.id !== 'daily'
+    if (feminine) return set.id !== 'kaito' && set.id !== 'daily-kaito' && set.id !== 'kaito-live'
+    return set.id !== 'hana' && set.id !== 'daily' && set.id !== 'hana-live'
   })
 }
 
@@ -409,9 +432,9 @@ function stickerAllowedForViewer(sticker, { feminine = false } = {}) {
   const setId = String(sticker.set || '')
   const character = String(sticker.character || '')
   if (feminine) {
-    return !(setId === 'kaito' || setId === 'daily-kaito' || character === 'kaito')
+    return !(setId === 'kaito' || setId === 'daily-kaito' || setId === 'kaito-live' || character === 'kaito')
   }
-  return !(setId === 'hana' || setId === 'daily' || setId === 'daily-hana' || character === 'hana')
+  return !(setId === 'hana' || setId === 'daily' || setId === 'daily-hana' || setId === 'hana-live' || character === 'hana')
 }
 
 /** Every sticker across both sets. `label` doubles as the message text fallback. */
@@ -421,6 +444,22 @@ const STICKER_BY_ID = Object.fromEntries(HANA_STICKERS.map((item) => [item.id, i
 
 export function isHanaSticker(id) {
   return Boolean(STICKER_BY_ID[String(id || '')])
+}
+
+const FACE_BURST = {
+  love: 'hearts',
+  sparkle: 'sparkle',
+  'k-shy': 'hearts',
+}
+
+/** Overlay to play when this stamp is sent (both sides). */
+export function stickerBurst(id) {
+  const sticker = STICKER_BY_ID[String(id || '')]
+  const burst = sticker?.burst || FACE_BURST[String(id || '')]
+  if (burst === 'kiss') return { kind: 'moment', momentId: 'kiss' }
+  if (burst === 'hearts') return { kind: 'moment', momentId: 'hearts' }
+  if (burst === 'sparkle') return { kind: 'moment', momentId: 'sparkle' }
+  return null
 }
 
 export function hanaStickerLabel(id) {
@@ -563,9 +602,10 @@ function OpenMouth() {
   return <path d="M52 67c2 8 14 8 16 0-4 2-12 2-16 0z" fill={MOUTH} />
 }
 
-function Sparkle({ x, y, s = 1, fill = GOLD, opacity = 1 }) {
+function Sparkle({ x, y, s = 1, fill = GOLD, opacity = 1, className }) {
   return (
     <path
+      className={className}
       d="M0-6c1 3.4 1.6 4 5 5-3.4 1-4 1.6-5 5-1-3.4-1.6-4-5-5 3.4-1 4-1.6 5-5z"
       transform={`translate(${x} ${y}) scale(${s})`}
       fill={fill}
@@ -1698,6 +1738,84 @@ function DailyStickerArt({ sticker }) {
   )
 }
 
+function LiveStickerArt({ sticker, kaito }) {
+  const motion = String(sticker?.motion || 'kiss')
+  const Head = kaito ? KaitoHead : HanaHead
+  const Face = kaito
+    ? (motion === 'wink' ? KAITO_FACES['k-wink'] : motion === 'jump' ? KAITO_FACES['k-grin'] || KAITO_FACES['k-smile'] : KAITO_FACES['k-shy'] || KAITO_FACES['k-smile'])
+    : (motion === 'wink' ? FACES.wink : motion === 'jump' ? FACES.laugh : FACES.love)
+  const heart = kaito ? STEEL : HEART
+  const ink = kaito ? GEAR_DARK : INK
+  const skin = kaito ? SKIN_M : SKIN
+  return (
+    <g className={`hana-live-stage is-${motion}`}>
+      {motion === 'peek' ? (
+        <g className="hana-live-peek">
+          <rect x="14" y="18" width="38" height="78" rx="4" fill="rgba(255,248,240,0.16)" />
+          <g transform="translate(-22 6)">
+            <Head />
+            {Face ? <Face /> : null}
+          </g>
+        </g>
+      ) : (
+        <>
+          {motion === 'jump' ? <ellipse className="hana-live-shadow" cx="60" cy="96" rx="20" ry="5" fill={ink} opacity="0.16" /> : null}
+          <g className="hana-live-body">
+            <Head />
+            {Face ? <Face /> : null}
+          </g>
+        </>
+      )}
+      {motion === 'kiss' ? (
+        <g className="hana-live-fx">
+          <g className="hana-live-heart is-a"><HeartShape x={86} y={58} s={0.72} fill={heart} /></g>
+          <g className="hana-live-heart is-b"><HeartShape x={98} y={46} s={0.48} fill={PETAL} /></g>
+          <Sparkle x={78} y={40} s={0.42} fill={GOLD} />
+        </g>
+      ) : null}
+      {motion === 'wink' ? (
+        <g className="hana-live-fx">
+          <g className="hana-live-heart is-a"><HeartShape x={90} y={44} s={0.58} fill={heart} /></g>
+          <Sparkle x={38} y={36} s={0.45} fill={GOLD} />
+        </g>
+      ) : null}
+      {motion === 'hearts' ? (
+        <g className="hana-live-fx">
+          <g className="hana-live-heart is-a"><HeartShape x={90} y={50} s={0.82} fill={heart} /></g>
+          <g className="hana-live-heart is-b"><HeartShape x={104} y={62} s={0.55} fill={PETAL} /></g>
+          <g className="hana-live-heart is-c"><HeartShape x={96} y={34} s={0.42} fill={heart} /></g>
+        </g>
+      ) : null}
+      {motion === 'hug' ? (
+        <g className="hana-live-hug">
+          <path d="M30 68c-6 16 8 30 30 28" fill="none" stroke={skin} strokeWidth="15" strokeLinecap="round" />
+          <path d="M90 68c6 16-8 30-30 28" fill="none" stroke={skin} strokeWidth="15" strokeLinecap="round" />
+          <circle cx="56" cy="94" r="8" fill={skin} />
+          <circle cx="64" cy="94" r="8" fill={skin} />
+          <HeartShape x={60} y={86} s={0.62} fill={heart} />
+        </g>
+      ) : null}
+      {motion === 'peace' ? (
+        <g className="hana-live-peace">
+          <g transform="translate(88 58)">
+            <ellipse cx="0" cy="16" rx="12.5" ry="13.5" fill={skin} />
+            <rect x="-6.4" y="-10" width="6.6" height="22" rx="3.3" fill={skin} />
+            <rect x="1.4" y="-14" width="6.6" height="24" rx="3.3" fill={skin} />
+            <ellipse cx="-12" cy="12" rx="4.4" ry="6.2" fill={skin} />
+          </g>
+        </g>
+      ) : null}
+      {motion === 'jump' ? (
+        <g className="hana-live-spark">
+          <Sparkle className="hana-live-twinkle is-a" x={26} y={34} s={0.62} />
+          <Sparkle className="hana-live-twinkle is-b" x={94} y={28} s={0.5} />
+          <Sparkle className="hana-live-twinkle is-c" x={88} y={52} s={0.38} fill={PETAL} />
+        </g>
+      ) : null}
+    </g>
+  )
+}
+
 /**
  * One sticker as inline SVG. Works for both sets — the id decides the character.
  * @param {{ id: string, size?: number, title?: string, className?: string, characterOnly?: boolean }} props
@@ -1712,11 +1830,13 @@ export default function HanaSticker({
   const key = String(id || '')
   const sticker = STICKER_BY_ID[key]
   const isDaily = String(sticker?.set || '').startsWith('daily-')
-  const isKaito = sticker?.set === 'kaito'
+  const isLive = String(sticker?.set || '').endsWith('-live')
+  const isKaito = sticker?.set === 'kaito' || sticker?.set === 'kaito-live'
   const Face = isKaito ? KAITO_FACES[key] : FACES[key]
-  if (!isDaily && !Face) return null
+  if (!isDaily && !isLive && !Face) return null
   const Head = isKaito ? KaitoHead : HanaHead
   const label = title || hanaStickerLabel(id)
+  const motion = String(sticker?.motion || '')
 
   // Pack tabs for mainichi: full chibi body (no phrase) so they differ from
   // the close-up face tabs for はな / かいと expression packs.
@@ -1725,7 +1845,7 @@ export default function HanaSticker({
     const portrait = {
       ...sticker,
       character,
-      pose: 'wave',
+      pose: 'idle',
       mood: 'smile',
       face: 'smile',
     }
@@ -1747,10 +1867,10 @@ export default function HanaSticker({
 
   return (
     <svg
-      viewBox={isDaily ? '0 0 150 125' : VIEW_BOX}
-      width={isDaily ? Math.round(size * 1.2) : size}
+      viewBox={isLive ? '12 8 108 100' : (isDaily ? '0 0 150 125' : VIEW_BOX)}
+      width={isDaily || isLive ? Math.round(size * 1.2) : size}
       height={size}
-      className={`hana-sticker${isDaily ? ' is-daily' : ''} ${className}`.trim()}
+      className={`hana-sticker${isDaily ? ' is-daily' : ''}${isLive ? ` is-live is-${motion}` : ''} ${className}`.trim()}
       role={label ? 'img' : 'presentation'}
       aria-label={label || undefined}
       aria-hidden={label ? undefined : 'true'}
@@ -1758,6 +1878,8 @@ export default function HanaSticker({
     >
       {isDaily ? (
         <DailyStickerArt sticker={sticker} />
+      ) : isLive ? (
+        <LiveStickerArt sticker={sticker} kaito={isKaito} />
       ) : (
         <>
           <Head />

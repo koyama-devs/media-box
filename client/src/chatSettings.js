@@ -5,6 +5,8 @@ const ENTER_TO_SEND_KEY = 'hana-chat-enter-to-send'
 const MESSAGE_SOUND_KEY = 'hana-chat-message-sound'
 const STICKER_SET_OWNER_KEY = 'hana-chat-sticker-set-owner'
 const STICKER_SET_GUEST_KEY = 'hana-chat-sticker-set-guest'
+const VOICE_SKIN_KEY = 'hana-chat-voice-skin'
+const ALLOWED_VOICE_SKINS = new Set(['sakura', 'yozora', 'tegami', 'umi'])
 
 const ALLOWED_STICKER_SETS = new Set(['hana', 'kaito'])
 
@@ -103,6 +105,28 @@ export function writeStickerSet(setId, { asOwner = false } = {}) {
   const key = asOwner ? STICKER_SET_OWNER_KEY : STICKER_SET_GUEST_KEY
   try {
     window.localStorage.setItem(key, next)
+  } catch {
+    /* ignore */
+  }
+  return next
+}
+
+export function readVoiceSkin() {
+  try {
+    const raw = String(window.localStorage.getItem(VOICE_SKIN_KEY) || '').trim().toLowerCase()
+    if (ALLOWED_VOICE_SKINS.has(raw)) return raw
+  } catch {
+    /* ignore */
+  }
+  return 'sakura'
+}
+
+export function writeVoiceSkin(skinId) {
+  const next = ALLOWED_VOICE_SKINS.has(String(skinId || '').trim().toLowerCase())
+    ? String(skinId).trim().toLowerCase()
+    : 'sakura'
+  try {
+    window.localStorage.setItem(VOICE_SKIN_KEY, next)
   } catch {
     /* ignore */
   }

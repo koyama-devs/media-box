@@ -553,8 +553,8 @@ button.hana-chat-avatar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   border: 0;
   border-radius: 50%;
   background: rgba(255, 248, 240, 0.08);
@@ -574,6 +574,9 @@ button.hana-chat-avatar {
   right: 0;
   z-index: 50;
   width: min(272px, calc(100vw - 28px));
+  max-height: min(72vh, 560px);
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 12px;
   border-radius: 14px;
   border: 1px solid rgba(255, 248, 240, 0.12);
@@ -582,6 +585,180 @@ button.hana-chat-avatar {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.hana-chat-settings-panel.is-wide {
+  width: min(340px, calc(100vw - 24px));
+}
+
+.hana-chat-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hana-chat-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  padding: 10px 10px 10px 10px;
+  border: 1px solid rgba(255, 248, 240, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 248, 240, 0.05);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.hana-chat-menu-item-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: rgba(240, 168, 160, 0.14);
+  color: rgba(240, 201, 188, 0.95);
+}
+
+.hana-chat-menu-item-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.hana-chat-menu-item:hover,
+.hana-chat-menu-item:focus-visible {
+  background: rgba(255, 248, 240, 0.1);
+}
+
+.hana-chat-menu-item-copy strong {
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.hana-chat-menu-item-copy span {
+  font-size: 0.62rem;
+  color: rgba(255, 248, 240, 0.5);
+}
+
+.hana-chat-menu-item-chevron {
+  flex-shrink: 0;
+  font-size: 1.15rem;
+  color: rgba(255, 248, 240, 0.45);
+}
+
+.hana-chat-menu-back {
+  align-self: flex-start;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: rgba(240, 201, 188, 0.88);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.hana-chat-media-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hana-chat-media-filter {
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid rgba(255, 248, 240, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 248, 240, 0.05);
+  color: rgba(255, 248, 240, 0.78);
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.hana-chat-media-filter.is-active {
+  border-color: rgba(232, 154, 170, 0.5);
+  background: rgba(232, 154, 170, 0.18);
+  color: var(--hana-cream);
+}
+
+.hana-chat-media-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.hana-chat-media-tile {
+  position: relative;
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255, 248, 240, 0.08);
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.hana-chat-media-tile.is-image,
+.hana-chat-media-tile.is-video {
+  aspect-ratio: 1;
+}
+
+.hana-chat-media-tile img,
+.hana-chat-media-tile video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hana-chat-media-tile-badge {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(12, 8, 10, 0.72);
+  font-size: 0.58rem;
+  color: #fff;
+}
+
+.hana-chat-media-tile.is-file {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  gap: 2px 8px;
+  align-items: center;
+  padding: 8px 10px;
+  aspect-ratio: auto;
+}
+
+.hana-chat-media-file-icon {
+  grid-row: 1 / span 2;
+  font-size: 1.15rem;
+}
+
+.hana-chat-media-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.hana-chat-media-file-meta {
+  font-size: 0.58rem;
+  color: rgba(255, 248, 240, 0.48);
 }
 
 .hana-chat-settings-title {
@@ -1406,6 +1583,114 @@ body.hana-chat-scroll-lock #root {
 .hana-chat-bubble.is-sticker .hana-sticker {
   display: block;
   filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.32));
+}
+
+.hana-sticker.is-live {
+  overflow: visible;
+}
+
+.hana-sticker.is-live .hana-live-body {
+  transform-origin: 60px 78px;
+  animation: hana-live-bob 1.35s ease-in-out infinite;
+}
+
+.hana-sticker.is-kiss .hana-live-body {
+  animation: hana-live-lean 1.45s ease-in-out infinite;
+}
+
+.hana-sticker.is-jump .hana-live-body {
+  animation: hana-live-jump 0.78s cubic-bezier(0.22, 1.2, 0.36, 1) infinite;
+}
+
+.hana-sticker.is-peek .hana-live-peek {
+  animation: hana-live-peek 1.8s ease-in-out infinite;
+}
+
+.hana-sticker.is-live .hana-live-heart {
+  animation: hana-live-pop 1.55s ease-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.hana-sticker.is-live .hana-live-heart.is-b {
+  animation-delay: 0.22s;
+}
+
+.hana-sticker.is-live .hana-live-heart.is-c {
+  animation-delay: 0.44s;
+}
+
+.hana-sticker.is-hug .hana-live-hug {
+  transform-origin: 60px 86px;
+  animation: hana-live-squeeze 1.15s ease-in-out infinite;
+}
+
+.hana-sticker.is-peace .hana-live-peace {
+  transform-origin: 88px 74px;
+  animation: hana-live-peace-wiggle 1.35s ease-in-out infinite;
+}
+
+.hana-sticker.is-jump .hana-live-twinkle {
+  animation: hana-live-twinkle 1.1s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.hana-sticker.is-jump .hana-live-twinkle.is-b { animation-delay: 0.18s; }
+.hana-sticker.is-jump .hana-live-twinkle.is-c { animation-delay: 0.34s; }
+
+@keyframes hana-live-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+
+@keyframes hana-live-lean {
+  0%, 100% { transform: rotate(0deg); }
+  45% { transform: rotate(5deg) translate(1px, -1px); }
+}
+
+@keyframes hana-live-jump {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  18% { transform: translateY(3px) scale(1.06, 0.9); }
+  48% { transform: translateY(-11px) scale(0.96, 1.06); }
+}
+
+@keyframes hana-live-peek {
+  0%, 100% { transform: translateX(0); }
+  45% { transform: translateX(7px); }
+}
+
+@keyframes hana-live-pop {
+  0% { opacity: 0; transform: translate(0, 6px) scale(0.35); }
+  16% { opacity: 1; transform: translate(3px, -4px) scale(1.08); }
+  100% { opacity: 0; transform: translate(12px, -22px) scale(0.85); }
+}
+
+@keyframes hana-live-squeeze {
+  0%, 100% { transform: scale(1, 1); }
+  50% { transform: scale(1.05, 0.93) translateY(1px); }
+}
+
+@keyframes hana-live-peace-wiggle {
+  0%, 100% { transform: rotate(-8deg); }
+  50% { transform: rotate(10deg); }
+}
+
+@keyframes hana-live-twinkle {
+  0%, 100% { opacity: 0.25; transform: scale(0.7); }
+  50% { opacity: 1; transform: scale(1.12); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hana-sticker.is-live .hana-live-body,
+  .hana-sticker.is-jump .hana-live-body,
+  .hana-sticker.is-peek .hana-live-peek,
+  .hana-sticker.is-live .hana-live-heart,
+  .hana-sticker.is-hug .hana-live-hug,
+  .hana-sticker.is-peace .hana-live-peace,
+  .hana-sticker.is-jump .hana-live-twinkle {
+    animation: none;
+  }
 }
 
 .hana-chat-bubble.is-sticker .hana-chat-quote {
@@ -5764,8 +6049,361 @@ body.hana-chat-scroll-lock #root {
   background: transparent;
   border: 0;
   box-shadow: none;
-  color: rgba(240, 201, 188, 0.55);
+  color: rgba(240, 201, 188, 0.88);
+  cursor: pointer;
+}
+
+.hana-chat-composer-action.is-mic.is-listening {
+  color: #f0a8a0;
+  animation: hana-chat-mic-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes hana-chat-mic-pulse {
+  0%, 100% { opacity: 1; transform: translateY(-3px) scale(1); }
+  50% { opacity: 0.72; transform: translateY(-3px) scale(1.08); }
+}
+
+.hana-chat-composer-action.is-mic.is-recording {
+  color: #ff6b6b;
+}
+
+.hana-chat-voice-dock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 12px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+  color: rgba(255, 248, 240, 0.92);
+}
+
+.hana-chat-voice-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hana-chat-voice-led {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(255, 90, 90, 0.35);
+  box-shadow: 0 0 0 0 rgba(255, 70, 70, 0.4);
+}
+
+.hana-chat-voice-led.is-on {
+  background: #ff3b3b;
+  animation: hana-chat-voice-led 1s ease-in-out infinite;
+}
+
+.hana-chat-voice-led.is-paused {
+  background: #f0c9bc;
+}
+
+@keyframes hana-chat-voice-led {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 59, 59, 0.55); }
+  50% { box-shadow: 0 0 0 8px rgba(255, 59, 59, 0); }
+}
+
+.hana-chat-voice-clock {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+}
+
+.hana-chat-voice-clock span {
+  opacity: 0.55;
+}
+
+.hana-chat-voice-error {
+  margin: 0;
+  text-align: center;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.hana-chat-voice-error {
+  color: #ffb4b0;
+}
+
+.hana-chat-voice-orb {
+  position: relative;
+  width: 68px;
+  height: 68px;
+  border: 0;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.hana-chat-voice-orb-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 248, 240, 0.28);
+}
+
+.hana-chat-voice-orb-core {
+  position: absolute;
+  inset: 14px;
+  border-radius: 50%;
+  background: #e24a4a;
+  box-shadow: 0 6px 16px rgba(180, 24, 24, 0.32);
+}
+
+.hana-chat-voice-orb.is-recording {
+  background: rgba(226, 74, 74, 0.92);
+}
+
+.hana-chat-voice-orb.is-recording .hana-chat-voice-orb-ring {
+  border-color: rgba(255, 90, 90, 0.85);
+  animation: hana-chat-voice-ring 1.15s ease-in-out infinite;
+}
+
+.hana-chat-voice-orb-pause {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.hana-chat-voice-orb-pause i {
+  display: block;
+  width: 6px;
+  height: 18px;
+  border-radius: 2px;
+  background: #fff8f0;
+}
+
+.hana-chat-voice-stage {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 4px 8px 0;
+}
+
+.hana-chat-voice-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 56px;
+  width: 100%;
+  padding: 18px 12px 8px;
+}
+
+.hana-voice-player {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: 100%;
+  color: #3a1c1a;
+}
+
+.hana-voice-player audio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.hana-voice-emblem {
+  position: relative;
+  width: 88px;
+  height: 88px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  color: #3a1c1a;
+}
+
+.hana-voice-player.is-compact .hana-voice-emblem {
+  width: 72px;
+  height: 72px;
+}
+
+.hana-voice-emblem-art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 8px 16px rgba(18, 10, 12, 0.28));
+}
+
+.hana-voice-player.is-playing .hana-voice-emblem-art {
+  animation: hana-voice-bloom 1.8s ease-in-out infinite;
+}
+
+.hana-voice-ring {
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: conic-gradient(#f0c9bc var(--hana-voice-progress, 0%), rgba(255, 248, 240, 0.18) 0);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3px));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3px));
+}
+
+.hana-voice-player.is-yozora .hana-voice-ring {
+  background: conic-gradient(#f4d7a0 var(--hana-voice-progress, 0%), rgba(255, 248, 240, 0.14) 0);
+}
+
+.hana-voice-player.is-tegami .hana-voice-ring {
+  background: conic-gradient(#c45c4a var(--hana-voice-progress, 0%), rgba(196, 92, 74, 0.18) 0);
+}
+
+.hana-voice-player.is-umi .hana-voice-ring {
+  background: conic-gradient(#fff8f0 var(--hana-voice-progress, 0%), rgba(255, 248, 240, 0.2) 0);
+}
+
+.hana-voice-play-badge {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  top: 50%;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 248, 240, 0.96);
+  color: #3a1c1a;
+  box-shadow: 0 4px 10px rgba(42, 24, 20, 0.22);
+}
+
+.hana-voice-player.is-compact .hana-voice-play-badge {
+  width: 28px;
+  height: 28px;
+}
+
+.hana-voice-player.is-yozora .hana-voice-play-badge {
+  background: rgba(255, 244, 220, 0.96);
+  color: #1a1634;
+}
+
+.hana-voice-time {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: rgba(255, 248, 240, 0.72);
+}
+
+.hana-voice-player.is-compact .hana-voice-time {
+  color: rgba(90, 46, 56, 0.7);
+}
+
+.hana-chat-bubble .hana-voice-time {
+  color: inherit;
+  opacity: 0.72;
+}
+
+.hana-voice-time i {
+  font-style: normal;
+  opacity: 0.45;
+}
+
+.hana-voice-skins {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.hana-voice-skin {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  width: 42px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 248, 240, 0.62);
+  font-size: 0.58rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.hana-voice-skin .hana-voice-emblem-art {
+  width: 28px;
+  height: 28px;
+  filter: none;
+  opacity: 0.72;
+}
+
+.hana-voice-skin.is-active {
+  color: #f0c9bc;
+}
+
+.hana-voice-skin.is-active .hana-voice-emblem-art {
+  opacity: 1;
+  outline: 1px solid rgba(240, 201, 188, 0.9);
+  outline-offset: 2px;
+  border-radius: 50%;
+}
+
+@keyframes hana-voice-bloom {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03); }
+}
+
+@keyframes hana-chat-voice-ring {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.08); opacity: 0.65; }
+}
+
+.hana-chat-voice-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1.5px solid rgba(255, 248, 240, 0.28);
+  border-radius: 50%;
+  background: rgba(255, 248, 240, 0.08);
+  color: rgba(255, 248, 240, 0.88);
+  cursor: pointer;
+}
+
+.hana-chat-voice-icon-btn svg {
+  display: block;
+}
+
+.hana-chat-voice-icon-btn.is-delete {
+  color: rgba(255, 214, 208, 0.95);
+}
+
+.hana-chat-voice-icon-btn.is-send,
+.hana-chat-voice-icon-btn.is-finish {
+  border-color: rgba(240, 168, 160, 0.95);
+  background: rgba(240, 168, 160, 0.92);
+  color: #3a1c1a;
+}
+
+.hana-chat-voice-icon-btn:disabled {
+  opacity: 0.28;
   cursor: default;
+}
+
+.hana-chat-panel.is-composer-focused .hana-chat-voice-dock {
+  pointer-events: auto !important;
+}
+
+.hana-chat-panel:not(.is-sticker-dock) .hana-chat-voice-dock {
+  min-height: 240px;
+  border-top: 1px solid rgba(255, 248, 240, 0.12);
+  background: linear-gradient(180deg, rgba(46, 28, 26, 0.98), rgba(18, 12, 14, 0.99));
 }
 
 .hana-chat-composer-field .hana-chat-sticker {
@@ -6385,9 +7023,9 @@ body.hana-chat-scroll-lock #root {
 .hana-emotion-moment-veil {
   position: absolute;
   inset: 0;
-  background: rgba(6, 3, 8, 0.55);
-  backdrop-filter: blur(8px) saturate(1.15);
-  -webkit-backdrop-filter: blur(8px) saturate(1.15);
+  background: rgba(6, 3, 8, 0.28);
+  backdrop-filter: blur(3px) saturate(1.08);
+  -webkit-backdrop-filter: blur(3px) saturate(1.08);
 }
 
 .hana-emotion-moment-pattern {
@@ -6400,8 +7038,8 @@ body.hana-chat-scroll-lock #root {
 
 .hana-emotion-moment.is-gold .hana-emotion-moment-veil {
   background:
-    radial-gradient(ellipse at 50% 42%, rgba(255, 200, 90, 0.28), transparent 48%),
-    rgba(12, 8, 4, 0.62);
+    radial-gradient(ellipse at 50% 42%, rgba(255, 200, 90, 0.22), transparent 52%),
+    rgba(12, 8, 4, 0.28);
 }
 
 .hana-emotion-moment.is-gold .hana-emotion-moment-pattern {
@@ -6412,8 +7050,8 @@ body.hana-chat-scroll-lock #root {
 
 .hana-emotion-moment.is-sky .hana-emotion-moment-veil {
   background:
-    radial-gradient(ellipse at 50% 40%, rgba(110, 190, 255, 0.28), transparent 50%),
-    rgba(4, 10, 18, 0.6);
+    radial-gradient(ellipse at 50% 40%, rgba(110, 190, 255, 0.2), transparent 52%),
+    rgba(4, 10, 18, 0.26);
 }
 
 .hana-emotion-moment.is-sky .hana-emotion-moment-pattern {
@@ -6425,10 +7063,11 @@ body.hana-chat-scroll-lock #root {
     );
 }
 
-.hana-emotion-moment.is-rose .hana-emotion-moment-veil {
+.hana-emotion-moment.is-rose .hana-emotion-moment-veil,
+.hana-emotion-moment.is-kiss .hana-emotion-moment-veil {
   background:
-    radial-gradient(ellipse at 50% 42%, rgba(255, 120, 160, 0.32), transparent 48%),
-    rgba(14, 4, 10, 0.62);
+    radial-gradient(ellipse at 50% 42%, rgba(255, 120, 160, 0.24), transparent 52%),
+    rgba(14, 4, 10, 0.26);
 }
 
 .hana-emotion-moment.is-rose .hana-emotion-moment-pattern {
@@ -6439,8 +7078,8 @@ body.hana-chat-scroll-lock #root {
 
 .hana-emotion-moment.is-ember .hana-emotion-moment-veil {
   background:
-    radial-gradient(ellipse at 50% 55%, rgba(255, 110, 50, 0.3), transparent 50%),
-    rgba(12, 4, 2, 0.64);
+    radial-gradient(ellipse at 50% 55%, rgba(255, 110, 50, 0.22), transparent 52%),
+    rgba(12, 4, 2, 0.28);
 }
 
 .hana-emotion-moment.is-ember .hana-emotion-moment-pattern {
@@ -6451,8 +7090,8 @@ body.hana-chat-scroll-lock #root {
 
 .hana-emotion-moment.is-spark .hana-emotion-moment-veil {
   background:
-    radial-gradient(ellipse at 50% 42%, rgba(200, 160, 255, 0.28), transparent 48%),
-    rgba(8, 4, 16, 0.62);
+    radial-gradient(ellipse at 50% 42%, rgba(200, 160, 255, 0.2), transparent 52%),
+    rgba(8, 4, 16, 0.26);
 }
 
 .hana-emotion-moment.is-spark .hana-emotion-moment-pattern {
@@ -6474,26 +7113,46 @@ body.hana-chat-scroll-lock #root {
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.25));
 }
 
-.hana-emotion-motif.is-hearts .hana-emotion-motif-bit {
-  top: -8%;
-  animation-name: hana-emotion-heart-fall;
-  animation-timing-function: linear;
-  animation-fill-mode: forwards;
-}
-
-.hana-emotion-motif.is-wave .hana-emotion-motif-bit {
-  animation: hana-emotion-wave-sway 1.4s ease-in-out both;
-  font-size: 1.4rem;
-}
-
-.hana-emotion-motif.is-sparkles .hana-emotion-motif-bit {
-  animation: hana-emotion-twinkle 1.2s ease-out both;
-  font-size: 1rem;
-}
-
-.hana-emotion-motif.is-ember .hana-emotion-motif-bit {
-  animation: hana-emotion-ember-rise 1.5s ease-out both;
+.hana-emotion-burst-bit {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  margin: 0;
+  line-height: 1;
   font-size: 1.15rem;
+  color: #ff7a96;
+  pointer-events: none;
+  animation: hana-emotion-burst 1.05s cubic-bezier(0.16, 0.84, 0.32, 1) both;
+}
+
+.hana-emotion-moment.is-gold .hana-emotion-burst-bit,
+.hana-emotion-moment.is-spark .hana-emotion-burst-bit {
+  color: #ffe08a;
+  font-size: 0.95rem;
+}
+
+.hana-emotion-moment.is-sky .hana-emotion-burst-bit {
+  color: #7ec8ff;
+  font-size: 0.7rem;
+}
+
+.hana-emotion-moment.is-ember .hana-emotion-burst-bit {
+  color: #ff7a3a;
+  font-size: 0.7rem;
+}
+
+@keyframes hana-emotion-burst {
+  0% {
+    opacity: 0;
+    transform: rotate(var(--deg)) translateY(0) scale(0.35);
+  }
+  18% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(var(--deg)) translateY(-38vh) scale(1.05);
+  }
 }
 
 .hana-emotion-moment-stage {
@@ -6519,10 +7178,10 @@ body.hana-chat-scroll-lock #root {
 
 .hana-emotion-moment-icon {
   position: relative;
-  font-size: clamp(4.2rem, 18vw, 6.4rem);
+  font-size: clamp(2.4rem, 10vw, 3.4rem);
   line-height: 1;
-  filter: drop-shadow(0 10px 24px rgba(0, 0, 0, 0.35));
-  animation: hana-emotion-icon-grow 0.85s cubic-bezier(0.18, 1.25, 0.32, 1) both;
+  filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.28));
+  animation: hana-emotion-icon-grow 0.55s cubic-bezier(0.18, 1.25, 0.32, 1) both;
   font-style: normal;
   font-synthesis: none;
 }

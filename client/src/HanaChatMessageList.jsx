@@ -11,6 +11,7 @@ import {
 } from './firebase'
 import { CHAT_PARTY_REACTION } from './FlowerRain'
 import HanaSticker, { isHanaSticker } from './HanaStickers'
+import HanaVoicePlayer from './HanaVoicePlayer'
 import OwnerMessageAssist from './OwnerMessageAssist'
 
 /** Stable empty reactions object so `|| {}` does not defeat memo. */
@@ -73,27 +74,12 @@ function ChatAttachmentBlock({ attachment, uploading, onOpenImage }) {
   }
   if (isChatAudioAttachment(attachment.fileMime, attachment.fileName)) {
     return (
-      <div className="hana-chat-audio-card" data-no-bubble-press="true">
-        <div className="hana-chat-audio-meta">
-          <span className="hana-chat-file-icon" aria-hidden="true">🎵</span>
-          <span className="hana-chat-file-meta">
-            <strong className="hana-chat-file-name">{attachment.fileName || '音声'}</strong>
-            <span className="hana-chat-file-sub">
-              {attachment.fileSize ? formatChatFileSize(attachment.fileSize) : '音声ファイル'}
-            </span>
-          </span>
-        </div>
-        <audio
-          className="hana-chat-audio"
-          src={attachment.url}
-          controls
-          preload="metadata"
-          playsInline
-        />
-        {uploading ? (
-          <span className="hana-chat-image-status">送信中…</span>
-        ) : null}
-      </div>
+      <HanaVoicePlayer
+        src={attachment.url}
+        skin={attachment.voiceSkin}
+        uploading={uploading}
+        compact
+      />
     )
   }
   return (

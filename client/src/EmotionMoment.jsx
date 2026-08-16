@@ -23,12 +23,12 @@ export const EMOTION_MOMENTS = [
     reaction: '👋',
   },
   {
-    id: 'hearts',
-    emoji: '💖',
-    label: 'ハート雨',
-    caption: '大好き',
-    theme: 'rose',
-    reaction: '❤️',
+    id: 'kiss',
+    emoji: '💋',
+    label: 'ちゅっ',
+    caption: 'ちゅっ♡',
+    theme: 'kiss',
+    reaction: '💋',
   },
   {
     id: 'cheer',
@@ -88,101 +88,30 @@ function subscribeEmotionMoment(fn) {
   return () => listeners.delete(fn)
 }
 
-function MotifField({ theme }) {
-  if (theme === 'rose') {
-    return (
-      <div className="hana-emotion-motif is-hearts" aria-hidden="true">
-        {Array.from({ length: 18 }, (_, i) => (
-          <span
-            key={i}
-            className="hana-emotion-motif-bit"
-            style={{
-              left: `${(i * 17 + 7) % 100}%`,
-              animationDelay: `${(i % 7) * 0.12}s`,
-              animationDuration: `${2.2 + (i % 5) * 0.25}s`,
-              fontSize: `${0.7 + (i % 4) * 0.25}rem`,
-            }}
-          >
-            {i % 3 === 0 ? '💖' : i % 3 === 1 ? '❤️' : '💕'}
-          </span>
-        ))}
-      </div>
-    )
-  }
-  if (theme === 'sky') {
-    return (
-      <div className="hana-emotion-motif is-wave" aria-hidden="true">
-        {Array.from({ length: 10 }, (_, i) => (
-          <span
-            key={i}
-            className="hana-emotion-motif-bit"
-            style={{
-              left: `${8 + i * 9}%`,
-              top: `${18 + (i % 4) * 16}%`,
-              animationDelay: `${i * 0.08}s`,
-            }}
-          >
-            👋
-          </span>
-        ))}
-      </div>
-    )
-  }
-  if (theme === 'gold') {
-    return (
-      <div className="hana-emotion-motif is-sparkles" aria-hidden="true">
-        {Array.from({ length: 14 }, (_, i) => (
-          <span
-            key={i}
-            className="hana-emotion-motif-bit"
-            style={{
-              left: `${(i * 13 + 5) % 96}%`,
-              top: `${12 + (i % 6) * 12}%`,
-              animationDelay: `${i * 0.06}s`,
-            }}
-          >
-            {i % 2 ? '✨' : '⭐'}
-          </span>
-        ))}
-      </div>
-    )
-  }
-  if (theme === 'ember') {
-    return (
-      <div className="hana-emotion-motif is-ember" aria-hidden="true">
-        {Array.from({ length: 12 }, (_, i) => (
-          <span
-            key={i}
-            className="hana-emotion-motif-bit"
-            style={{
-              left: `${10 + (i * 7) % 80}%`,
-              bottom: `${8 + (i % 5) * 10}%`,
-              animationDelay: `${i * 0.07}s`,
-            }}
-          >
-            {i % 2 ? '🔥' : '💥'}
-          </span>
-        ))}
-      </div>
-    )
-  }
+function BurstBits({ count = 8, glyph = '♥' }) {
   return (
-    <div className="hana-emotion-motif is-sparkles" aria-hidden="true">
-      {Array.from({ length: 16 }, (_, i) => (
+    <div className="hana-emotion-motif is-burst" aria-hidden="true">
+      {Array.from({ length: count }, (_, i) => (
         <span
           key={i}
-          className="hana-emotion-motif-bit"
+          className="hana-emotion-burst-bit"
           style={{
-            left: `${(i * 11 + 3) % 97}%`,
-            top: `${10 + (i % 7) * 11}%`,
-            animationDelay: `${i * 0.05}s`,
+            '--deg': `${Math.round((360 / count) * i)}deg`,
+            animationDelay: `${(i % 6) * 0.05}s`,
           }}
         >
-          ✨
+          {glyph}
         </span>
       ))}
     </div>
   )
+}
+
+function MotifField({ theme }) {
+  if (theme === 'kiss' || theme === 'rose') return <BurstBits count={10} glyph="♥" />
+  if (theme === 'sky') return <BurstBits count={8} glyph="●" />
+  if (theme === 'ember') return <BurstBits count={9} glyph="●" />
+  return <BurstBits count={12} glyph="✦" />
 }
 
 /**
@@ -195,7 +124,7 @@ export default function EmotionMomentLayer() {
     let clearTimer = null
     const unsub = subscribeEmotionMoment((moment) => {
       if (clearTimer) window.clearTimeout(clearTimer)
-      const ttl = prefersReducedMotion() ? 1400 : 2400
+      const ttl = prefersReducedMotion() ? 900 : 1500
       setActive(moment)
       clearTimer = window.setTimeout(() => {
         setActive((cur) => (cur?.uid === moment.uid ? null : cur))
