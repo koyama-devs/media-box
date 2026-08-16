@@ -1,4 +1,5 @@
 import { memo } from 'react'
+import { messageMatchesSearch, splitHighlightedText } from './chatMessageSearch'
 import ChatSongMiniPlayer from './ChatSongMiniPlayer'
 import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
 import { EMOTION_MOMENTS } from './EmotionMoment'
@@ -102,7 +103,15 @@ function ChatAttachmentBlock({ attachment, uploading, onOpenImage }) {
   )
 }
 
-function renderMessageWithLinks(text) {
+function renderHighlightedPlain(text, query, keyPrefix) {
+  return splitHighlightedText(text, query).map((part, index) => (
+    part.type === 'hit'
+      ? <mark key={`${keyPrefix}-h-${index}`} className="hana-chat-search-mark">{part.value}</mark>
+      : <span key={`${keyPrefix}-t-${index}`}>{part.value}</span>
+  ))
+}
+
+function renderMessageWithLinks(text, highlightQuery = '') {
   const raw = String(text || '')
   if (!raw) return null
   const parts = []
@@ -112,7 +121,7 @@ function renderMessageWithLinks(text) {
     const url = match[0]
     const start = match.index
     if (start > lastIndex) {
-      parts.push(raw.slice(lastIndex, start))
+      parts.push(renderHighlightedPlain(raw.slice(lastIndex, start), highlightQuery, `p-${start}`))
     }
     parts.push(
       <a
@@ -123,14 +132,14 @@ function renderMessageWithLinks(text) {
         rel="noreferrer noopener"
         data-no-bubble-press="true"
       >
-        {url}
+        {renderHighlightedPlain(url, highlightQuery, `u-${start}`)}
       </a>,
     )
     lastIndex = start + url.length
     match = URL_RE.exec(raw)
   }
   if (lastIndex < raw.length) {
-    parts.push(raw.slice(lastIndex))
+    parts.push(renderHighlightedPlain(raw.slice(lastIndex), highlightQuery, `t-${lastIndex}`))
   }
   URL_RE.lastIndex = 0
   return parts
@@ -166,8 +175,11 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
   onBubbleAction,
   onOpenImage,
   onOwnerAssistRetry,
+  highlightQuery = '',
+  searchActiveId = '',
 }) {
   const timeLabel = formatChatTimestamp(message.createdAt)
+  const isSearchHit = Boolean(highlightQuery) && messageMatchesSearch(message, highlightQuery, translation)
   const showsSticker = !message.deleted && isHanaSticker(message.sticker)
   const attachments = !message.deleted ? getChatMessageAttachments(message) : []
   const showsImage = attachments.some((item) => item.kind === 'image')
@@ -213,7 +225,10 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
   }
 
   return (
-    <div className={`hana-chat-msg-row ${sideClass}`}>
+    <div
+      className={`hana-chat-msg-row ${sideClass}${isSearchHit ? ' is-search-hit' : ''}${searchActiveId === messageId ? ' is-search-current' : ''}`}
+      data-chat-msg={messageId}
+    >
       {!isOwn ? (
         <img className="hana-chat-msg-avatar" src={avatarSrc} alt="" />
       ) : null}
@@ -258,7 +273,7 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
               {message.replyTo ? (
                 <div className="hana-chat-quote">
                   <strong>{quoteLabelFor(message.replyTo.sender || message.replyTo.role)}</strong>
-                  <span>{message.replyTo.text}</span>
+                  <span>{renderMessageWithLinks(message.replyTo.text, highlightQuery)}</span>
                 </div>
               ) : null}
               {showsSticker ? (
@@ -280,19 +295,19 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
                     />
                   ) : null}
                   {showsCaption ? (
-                    <p className="hana-chat-bubble-caption">{renderMessageWithLinks(captionText)}</p>
+                    <p className="hana-chat-bubble-caption">{renderMessageWithLinks(captionText, highlightQuery)}</p>
                   ) : null}
                 </div>
               ) : showsEffect ? (
                 <div className="hana-chat-effect-msg">
                   <span className="hana-chat-effect-msg-emoji" aria-hidden="true">{effectEmoji}</span>
-                  <p className="hana-chat-effect-msg-caption">{message.text}</p>
+                  <p className="hana-chat-effect-msg-caption">{renderMessageWithLinks(message.text, highlightQuery)}</p>
                 </div>
               ) : (
-                <p>{renderMessageWithLinks(message.text)}</p>
+                <p>{renderMessageWithLinks(message.text, highlightQuery)}</p>
               )}
               {translation ? (
-                <p className="hana-chat-translation">{translation}</p>
+                <p className="hana-chat-translation">{renderMessageWithLinks(translation, highlightQuery)}</p>
               ) : null}
             </div>
           </ChatSwipeBubble>
@@ -337,6 +352,8 @@ const HanaChatMessageList = memo(function HanaChatMessageList({
   onOwnerAssistRetry,
   emptyOwnerHint,
   emptyGuestHint,
+  highlightQuery = '',
+  searchActiveId = '',
 }) {
   return (
     <>
@@ -367,6 +384,8 @@ const HanaChatMessageList = memo(function HanaChatMessageList({
             onBubbleAction={onBubbleAction}
             onOpenImage={onOpenImage}
             onOwnerAssistRetry={onOwnerAssistRetry}
+            highlightQuery={highlightQuery}
+            searchActiveId={searchActiveId}
           />
         )
       })}

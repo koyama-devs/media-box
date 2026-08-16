@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import { setAppUnreadBadge } from './appBadge'
 import hanachanArt from './assets/hanachan.svg'
@@ -14,6 +14,7 @@ import {
   unpinChatMessageEverywhere
 } from './chatExtras'
 import ChatImageLightbox from './ChatImageLightbox'
+import { collectMessageSearchHits, normalizeMessageSearchQuery } from './chatMessageSearch'
 import ChatNatsuFireworks from './ChatNatsuFireworks'
 import { playChatNotifySound, unlockChatNotifySound } from './chatNotifySound'
 import ChatPokeZukan, { PokeZukanChip } from './ChatPokeZukan'
@@ -771,6 +772,13 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [remindMessage, setRemindMessage] = useState(null)
   const [dueReminders, setDueReminders] = useState([])
   const [previewImage, setPreviewImage] = useState(null)
+  const [messageSearchOpen, setMessageSearchOpen] = useState(false)
+  const [messageSearchQuery, setMessageSearchQuery] = useState('')
+  const [messageSearchIndex, setMessageSearchIndex] = useState(0)
+  const [searchOverlayBox, setSearchOverlayBox] = useState(null)
+  const messageSearchInputRef = useRef(null)
+  const messageSearchOpenRef = useRef(false)
+  messageSearchOpenRef.current = messageSearchOpen
   const listRef = useRef(null)
   const panelRef = useRef(null)
   const headerRef = useRef(null)
@@ -2540,6 +2548,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       }
 
       lockPageScroll(true)
+      if (messageSearchOpenRef.current) return
       lockShellHeight()
 
       const inner = window.innerHeight || document.documentElement.clientHeight || 0
@@ -2548,6 +2557,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         ? Math.max(0, Math.max(inner, baselineLayoutRef.current || 0) - vv.height - (vv.offsetTop || 0))
         : Math.max(0, (baselineLayoutRef.current || 0) - inner)
       const inputFocused = document.activeElement === inputRef.current
+      if (document.activeElement === messageSearchInputRef.current || messageSearchOpenRef.current) {
+        return
+      }
 
       if (!keyboardLatched && vvInset > 100) keyboardLatched = true
       if (keyboardLatched && (vvInset < 40 || (!inputFocused && vvInset < 120))) {
@@ -2728,6 +2740,96 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       callLog: m.callLog || null,
     }))
   }, [actingAsOwner, guestOnHuman, hanaMessages, aiMessages])
+
+  const messageSearchHits = useMemo(
+    () => collectMessageSearchHits(visibleMessages, messageSearchQuery, translations),
+    [visibleMessages, messageSearchQuery, translations],
+  )
+  const messageSearchActiveId = messageSearchHits[messageSearchIndex] || ''
+
+  useEffect(() => {
+    if (!messageSearchOpen) return
+    setMessageSearchIndex((index) => (
+      messageSearchHits.length ? Math.min(index, messageSearchHits.length - 1) : 0
+    ))
+  }, [messageSearchHits, messageSearchOpen])
+
+  useEffect(() => {
+    if (!open) {
+      setMessageSearchOpen(false)
+      setMessageSearchQuery('')
+      setMessageSearchIndex(0)
+    }
+  }, [open])
+
+  useEffect(() => {
+    setMessageSearchOpen(false)
+    setMessageSearchQuery('')
+    setMessageSearchIndex(0)
+  }, [activeThreadId, channel])
+
+  const closeMessageSearch = useCallback(() => {
+    setMessageSearchOpen(false)
+    setMessageSearchQuery('')
+    setMessageSearchIndex(0)
+  }, [])
+
+  const openMessageSearch = useCallback(() => {
+    setSettingsOpen(false)
+    setGuestMenuOpen(false)
+    setMessageSearchOpen(true)
+  }, [])
+
+  const jumpToSearchHit = useCallback((id) => {
+    if (!id) return
+    const node = listRef.current?.querySelector(`[data-chat-msg="${String(id).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`)
+    node?.scrollIntoView({ block: 'center', inline: 'nearest' })
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!messageSearchOpen || !open) {
+      setSearchOverlayBox(null)
+      return undefined
+    }
+    const sync = () => {
+      const panel = panelRef.current
+      if (!panel) return
+      const panelBox = panel.getBoundingClientRect()
+      const headerBox = headerRef.current?.getBoundingClientRect()
+      const top = Math.round((headerBox?.bottom || (panelBox.top + 48)) + 6)
+      setSearchOverlayBox({
+        top,
+        left: Math.round(panelBox.left + 10),
+        width: Math.max(160, Math.round(panelBox.width - 20)),
+      })
+    }
+    sync()
+    const vv = window.visualViewport
+    vv?.addEventListener('resize', sync)
+    vv?.addEventListener('scroll', sync)
+    window.addEventListener('resize', sync)
+    window.addEventListener('scroll', sync, true)
+    return () => {
+      vv?.removeEventListener('resize', sync)
+      vv?.removeEventListener('scroll', sync)
+      window.removeEventListener('resize', sync)
+      window.removeEventListener('scroll', sync, true)
+    }
+  }, [messageSearchOpen, open])
+
+  useEffect(() => {
+    if (!messageSearchOpen || !messageSearchActiveId) return undefined
+    const timer = window.setTimeout(() => jumpToSearchHit(messageSearchActiveId), 30)
+    return () => window.clearTimeout(timer)
+  }, [jumpToSearchHit, messageSearchActiveId, messageSearchOpen])
+
+  const stepMessageSearch = useCallback((dir) => {
+    if (!messageSearchHits.length) return
+    setMessageSearchIndex((index) => {
+      const next = (index + dir + messageSearchHits.length) % messageSearchHits.length
+      return next
+    })
+  }, [messageSearchHits.length])
 
   const threadMediaItems = useMemo(() => {
     const items = []
@@ -4672,6 +4774,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   // Portal to body so Capacitor / parent stacking never clips the FAB.
   return createPortal(
+    <>
     <div className={`hana-chat${open ? ' is-open is-fullscreen' : ''}`}>
       <FlowerRainLayer />
       {incomingBanner ? (
@@ -5002,6 +5105,22 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   >
                     {menuPage === 'home' ? (
                       <div className="hana-chat-menu-list">
+                        <button
+                          type="button"
+                          className="hana-chat-menu-item"
+                          onClick={openMessageSearch}
+                        >
+                          <span className="hana-chat-menu-item-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" width="20" height="20" focusable="false">
+                              <circle cx="10.5" cy="10.5" r="5.4" fill="none" stroke="currentColor" strokeWidth="1.7" />
+                              <path fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" d="M15 15.2 19.2 19.4" />
+                            </svg>
+                          </span>
+                          <span className="hana-chat-menu-item-copy">
+                            <strong>メッセージ検索</strong>
+                            <span>このチャットの本文を探す</span>
+                          </span>
+                        </button>
                         <button
                           type="button"
                           className="hana-chat-menu-item"
@@ -5493,6 +5612,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               onOwnerAssistRetry={onOwnerAssistRetry}
               emptyOwnerHint={actingAsOwner && !activeThreadId ? '上のメニューから返信する相手を選んでね。' : ''}
               emptyGuestHint="はなにメッセージを送ると、ここに返信が届きます。"
+              highlightQuery={messageSearchOpen ? messageSearchQuery : ''}
+              searchActiveId={messageSearchOpen ? messageSearchActiveId : ''}
             />
           </div>
 
@@ -6303,7 +6424,82 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           onClose={() => setPreviewImage(null)}
         />
       ) : null}
-    </div>,
+    </div>
+    {open && messageSearchOpen && searchOverlayBox ? (
+      <div
+        className="hana-chat-search-overlay"
+        role="search"
+        style={{
+          top: `${searchOverlayBox.top}px`,
+          left: `${searchOverlayBox.left}px`,
+          width: `${searchOverlayBox.width}px`,
+        }}
+      >
+        <div className="hana-chat-search-card">
+          <label className="hana-chat-search-field">
+            <input
+              ref={messageSearchInputRef}
+              type="search"
+              value={messageSearchQuery}
+              placeholder="キーワード"
+              aria-label="メッセージ検索"
+              enterKeyHint="search"
+              autoComplete="off"
+              onChange={(event) => {
+                setMessageSearchQuery(event.target.value)
+                setMessageSearchIndex(0)
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  closeMessageSearch()
+                } else if (event.key === 'Enter') {
+                  event.preventDefault()
+                  stepMessageSearch(event.shiftKey ? -1 : 1)
+                }
+              }}
+            />
+          </label>
+          <span className="hana-chat-search-count">
+            {normalizeMessageSearchQuery(messageSearchQuery)
+              ? (messageSearchHits.length
+                ? `${messageSearchIndex + 1}/${messageSearchHits.length}`
+                : '0')
+              : ''}
+          </span>
+          <button
+            type="button"
+            className="hana-chat-search-nav"
+            disabled={!messageSearchHits.length}
+            aria-label="前の結果"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => stepMessageSearch(-1)}
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            className="hana-chat-search-nav"
+            disabled={!messageSearchHits.length}
+            aria-label="次の結果"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => stepMessageSearch(1)}
+          >
+            ›
+          </button>
+          <button
+            type="button"
+            className="hana-chat-search-close"
+            aria-label="検索を閉じる"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={closeMessageSearch}
+          >
+            ×
+          </button>
+        </div>
+      </div>
+    ) : null}
+    </>,
     document.body,
   )
 }

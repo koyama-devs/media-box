@@ -225,6 +225,89 @@
   overflow: visible;
 }
 
+.hana-chat-search-overlay {
+  position: fixed;
+  z-index: 11050;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.hana-chat-search-card {
+  pointer-events: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid rgba(255, 248, 240, 0.16);
+  border-radius: 16px;
+  background: rgba(22, 14, 16, 0.94);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.38);
+}
+
+.hana-chat-search-field {
+  display: block;
+  min-width: 0;
+}
+
+.hana-chat-search-field input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  padding: 8px 0;
+  background: transparent;
+  color: var(--hana-cream);
+  font: inherit;
+  font-size: 16px;
+  outline: none;
+}
+
+.hana-chat-search-field input::placeholder {
+  color: rgba(255, 248, 240, 0.38);
+}
+
+.hana-chat-search-count {
+  min-width: 2.4em;
+  color: rgba(240, 201, 188, 0.78);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.hana-chat-search-nav,
+.hana-chat-search-close {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: rgba(255, 248, 240, 0.86);
+  font: inherit;
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.hana-chat-search-nav:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
+.hana-chat-search-mark {
+  background: rgba(255, 214, 120, 0.92);
+  color: #3a1c1a;
+  border-radius: 3px;
+  padding: 0 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.hana-chat-msg-row.is-search-current .hana-chat-bubble {
+  box-shadow: 0 0 0 2px rgba(255, 214, 120, 0.88);
+}
+
 /* Open chat: keep header pinned at the top of the frame (desktop floating panel). */
 .hana-chat.is-open .hana-chat-header {
   position: sticky;
