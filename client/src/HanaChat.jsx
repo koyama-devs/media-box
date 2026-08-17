@@ -486,11 +486,9 @@ function mergeServerMessagesWithPending(server, previous) {
   return sortChatMessages(kept.length ? [...server, ...kept] : server)
 }
 
-function scrollChatListToLatest(listNode) {
-  if (!listNode) return
-  // Never scrollIntoView: a tall last bubble (video + images + file) makes iOS
-  // scroll the visual viewport / page, burying the composer under the keyboard.
-  listNode.scrollTop = listNode.scrollHeight
+function chatListIsNearLatest(listNode) {
+  if (!listNode) return true
+  return listNode.scrollHeight - listNode.scrollTop - listNode.clientHeight < 96
 }
 
 function readOwnerSuggestEnabled() {
@@ -780,6 +778,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const messageSearchOpenRef = useRef(false)
   messageSearchOpenRef.current = messageSearchOpen
   const listRef = useRef(null)
+  const listInnerRef = useRef(null)
+  /** Keep the open chat stuck on the newest bubble unless the user scrolls away. */
+  const stickToLatestRef = useRef(true)
+  /** True while we are writing scrollTop ourselves — do not treat that as user scroll. */
+  const pinningScrollRef = useRef(false)
   const panelRef = useRef(null)
   const headerRef = useRef(null)
   const inputRef = useRef(null)
@@ -871,11 +874,23 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     setHanaMessages(Array.isArray(cached) ? cached : [])
   }, [])
 
+  const pinChatListToLatest = useCallback(() => {
+    const list = listRef.current
+    if (!list) return
+    stickToLatestRef.current = true
+    pinningScrollRef.current = true
+    // Never scrollIntoView: a tall last bubble makes iOS shift the visual viewport.
+    list.scrollTop = list.scrollHeight
+    window.requestAnimationFrame(() => {
+      const node = listRef.current
+      if (node && stickToLatestRef.current) node.scrollTop = node.scrollHeight
+      pinningScrollRef.current = false
+    })
+  }, [])
+
   scrollToLatestRef.current = () => {
-    const run = () => scrollChatListToLatest(listRef.current)
-    window.requestAnimationFrame(run)
-    // Second pass after images/stickers may expand layout.
-    window.setTimeout(run, 120)
+    pinChatListToLatest()
+    window.requestAnimationFrame(pinChatListToLatest)
   }
 
   // chatAccounts is a dep so the name re-resolves once the live list loads.
@@ -1908,9 +1923,57 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   useEffect(() => {
     if (!open) return undefined
-    scrollToLatestRef.current()
+    stickToLatestRef.current = true
+    const list = listRef.current
+    const inner = listInnerRef.current
+    const pinIfStuck = () => {
+      if (stickToLatestRef.current) pinChatListToLatest()
+    }
+    const markUserScroll = () => {
+      if (pinningScrollRef.current) return
+      stickToLatestRef.current = chatListIsNearLatest(listRef.current)
+    }
+    list?.addEventListener('wheel', markUserScroll, { passive: true })
+    list?.addEventListener('touchstart', markUserScroll, { passive: true })
+    list?.addEventListener('pointerdown', markUserScroll)
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(pinIfStuck) : null
+    if (ro) {
+      if (list) ro.observe(list)
+      if (inner) ro.observe(inner)
+    }
+    const onMedia = (event) => {
+      const tag = event.target?.tagName
+      if (tag === 'IMG' || tag === 'VIDEO' || tag === 'AUDIO') pinIfStuck()
+    }
+    list?.addEventListener('load', onMedia, true)
+    pinIfStuck()
+    const t1 = window.setTimeout(pinIfStuck, 0)
+    const t2 = window.setTimeout(pinIfStuck, 250)
+    const t3 = window.setTimeout(pinIfStuck, 700)
+    return () => {
+      list?.removeEventListener('wheel', markUserScroll)
+      list?.removeEventListener('touchstart', markUserScroll)
+      list?.removeEventListener('pointerdown', markUserScroll)
+      list?.removeEventListener('load', onMedia, true)
+      ro?.disconnect()
+      window.clearTimeout(t1)
+      window.clearTimeout(t2)
+      window.clearTimeout(t3)
+    }
+  }, [open, pinChatListToLatest])
+
+  useEffect(() => {
+    if (!open) return undefined
+    if (!stickToLatestRef.current) return undefined
+    pinChatListToLatest()
     return undefined
-  }, [messagesScrollKey, open])
+  }, [messagesScrollKey, open, pinChatListToLatest])
+
+  useEffect(() => {
+    if (!open || !showSummerFx || !stickToLatestRef.current) return undefined
+    pinChatListToLatest()
+    return undefined
+  }, [open, showSummerFx, pinChatListToLatest])
 
   const activeThreadMeta = useMemo(() => {
     if (actingAsOwner) {
@@ -2403,9 +2466,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     }
 
     const pinMessagesToLatest = () => {
-      const list = listRef.current
-      if (!list) return
-      list.scrollTop = list.scrollHeight
+      pinChatListToLatest()
     }
 
     /** Idle / after 完了: full-screen panel, composer visible at the bottom. */
@@ -5592,6 +5653,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           ) : null}
 
           <div className="hana-chat-messages" ref={listRef} role="log" aria-live="polite">
+            <div className="hana-chat-messages-stack" ref={listInnerRef}>
             <HanaChatMessageList
               messages={visibleMessages}
               ownSender={ownSender}
@@ -5615,6 +5677,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               highlightQuery={messageSearchOpen ? messageSearchQuery : ''}
               searchActiveId={messageSearchOpen ? messageSearchActiveId : ''}
             />
+            </div>
           </div>
 
           <div

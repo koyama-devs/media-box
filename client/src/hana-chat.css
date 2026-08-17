@@ -1364,14 +1364,20 @@ body.hana-chat-scroll-lock #root {
   padding-top: 44px;
   /* Room for the newest bubble's corner flower to clear the scroller edge. */
   padding-bottom: 20px;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 10px;
   overscroll-behavior: contain;
   touch-action: pan-y;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 248, 240, 0.18) transparent;
+}
+
+.hana-chat-messages-stack {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+  gap: 10px;
+  min-height: 100%;
+  box-sizing: border-box;
 }
 
 .hana-chat-messages::-webkit-scrollbar {
