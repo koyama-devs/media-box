@@ -1674,6 +1674,10 @@ body.hana-chat-scroll-lock #root {
   filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.32));
 }
 
+.hana-sticker.is-tomo {
+  overflow: visible;
+}
+
 .hana-sticker.is-live {
   overflow: visible;
 }

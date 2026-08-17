@@ -1,11 +1,10 @@
 /**
- * Chat sticker sets: はな (feminine) and かいと (masculine).
- *
- * Geometry is intentionally borrowed from `assets/hanachan.svg` (same 120x140
- * coordinate space, cropped to the head via viewBox) so every sticker reads as
- * the same character. Flat fills only — no gradients or <defs> — because these
+ * Chat sticker sets: はな (feminine), かいと (masculine), and shared packs
+ * (毎日 / ともだち). Flat fills only — no gradients or <defs> — because these
  * render many times per screen and duplicated element ids would collide.
  */
+
+import { TOMO_SET, TomoStickerArt } from './TomoStickers'
 
 const VIEW_BOX = '20 14 80 80'
 
@@ -412,12 +411,13 @@ export const HANA_STICKER_SETS = [
   { id: 'hana-live', label: 'はな♡', items: HANA_LIVE_SET.map((item) => ({ ...item, set: 'hana-live' })) },
   { id: 'kaito', label: 'かいと', items: KAITO_SET.map((item) => ({ ...item, set: 'kaito' })) },
   { id: 'kaito-live', label: 'かいと♡', items: KAITO_LIVE_SET.map((item) => ({ ...item, set: 'kaito-live' })) },
+  { id: 'tomo', label: 'ともだち', items: TOMO_SET.map((item) => ({ ...item, set: 'tomo' })) },
   ...MAINICHI_SETS.map((set) => ({ id: set.tabId, label: set.tabLabel, items: set.items })),
 ]
 
 /**
  * Hana (owner / feminine) does not need Kaito packs; male guests do not need Hana packs.
- * Animal daily packs stay for everyone.
+ * Animal daily packs and ともだち stay for everyone.
  * @param {{ feminine?: boolean }} [opts]
  */
 export function stickerSetsForViewer({ feminine = false } = {}) {
@@ -514,11 +514,28 @@ export function suggestHanaStickers(value, limit = 8, { feminine = false } = {})
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score)
 
-  if (!matched.length) return []
+  const tomoHits = TOMO_SET
+    .map((item) => {
+      const aliases = (item.aliases || [item.label]).map(normalizeStickerQuery)
+      const score = aliases.reduce((best, alias) => {
+        if (!alias || alias.length < 2) return best
+        if (query === alias) return Math.max(best, 4)
+        if (alias.startsWith(query) && query.length >= 2) return Math.max(best, 2)
+        if (query.startsWith(alias) && alias.length >= 3) return Math.max(best, 3)
+        return best
+      }, 0)
+      return { id: item.id, score }
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((entry) => entry.id)
+
+  if (!matched.length && !tomoHits.length) return []
   const ids = []
   matched.forEach(({ item }) => {
     ids.push(...(MAINICHI_VARIANTS[item.baseId] || []))
   })
+  ids.push(...tomoHits)
   matched.forEach(({ item }) => {
     const related = item.related || []
     if (feminine) {
@@ -1831,12 +1848,30 @@ export default function HanaSticker({
   const sticker = STICKER_BY_ID[key]
   const isDaily = String(sticker?.set || '').startsWith('daily-')
   const isLive = String(sticker?.set || '').endsWith('-live')
+  const isTomo = sticker?.set === 'tomo'
   const isKaito = sticker?.set === 'kaito' || sticker?.set === 'kaito-live'
   const Face = isKaito ? KAITO_FACES[key] : FACES[key]
-  if (!isDaily && !isLive && !Face) return null
+  if (!isDaily && !isLive && !isTomo && !Face) return null
   const Head = isKaito ? KaitoHead : HanaHead
   const label = title || hanaStickerLabel(id)
   const motion = String(sticker?.motion || '')
+
+  if (characterOnly && isTomo) {
+    return (
+      <svg
+        viewBox="12 8 96 104"
+        width={size}
+        height={size}
+        className={`hana-sticker is-portrait is-tomo ${className}`.trim()}
+        role={label ? 'img' : 'presentation'}
+        aria-label={label || undefined}
+        aria-hidden={label ? undefined : 'true'}
+        focusable="false"
+      >
+        <TomoStickerArt sticker={sticker} portrait />
+      </svg>
+    )
+  }
 
   // Pack tabs for mainichi: full chibi body (no phrase) so they differ from
   // the close-up face tabs for はな / かいと expression packs.
@@ -1867,10 +1902,10 @@ export default function HanaSticker({
 
   return (
     <svg
-      viewBox={isLive ? '12 8 108 100' : (isDaily ? '0 0 150 125' : VIEW_BOX)}
-      width={isDaily || isLive ? Math.round(size * 1.2) : size}
+      viewBox={isTomo ? '0 0 120 120' : (isLive ? '12 8 108 100' : (isDaily ? '0 0 150 125' : VIEW_BOX))}
+      width={isTomo ? size : (isDaily || isLive ? Math.round(size * 1.2) : size)}
       height={size}
-      className={`hana-sticker${isDaily ? ' is-daily' : ''}${isLive ? ` is-live is-${motion}` : ''} ${className}`.trim()}
+      className={`hana-sticker${isDaily ? ' is-daily' : ''}${isTomo ? ' is-tomo' : ''}${isLive ? ` is-live is-${motion}` : ''} ${className}`.trim()}
       role={label ? 'img' : 'presentation'}
       aria-label={label || undefined}
       aria-hidden={label ? undefined : 'true'}
@@ -1880,6 +1915,8 @@ export default function HanaSticker({
         <DailyStickerArt sticker={sticker} />
       ) : isLive ? (
         <LiveStickerArt sticker={sticker} kaito={isKaito} />
+      ) : isTomo ? (
+        <TomoStickerArt sticker={sticker} />
       ) : (
         <>
           <Head />

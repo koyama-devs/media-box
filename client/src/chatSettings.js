@@ -8,7 +8,7 @@ const STICKER_SET_GUEST_KEY = 'hana-chat-sticker-set-guest'
 const VOICE_SKIN_KEY = 'hana-chat-voice-skin'
 const ALLOWED_VOICE_SKINS = new Set(['sakura', 'yozora', 'tegami', 'umi'])
 
-const ALLOWED_STICKER_SETS = new Set(['hana', 'kaito'])
+const ALLOWED_STICKER_SETS = new Set(['hana', 'kaito', 'tomo'])
 
 const ALLOWED = new Set(CHAT_REACTION_EMOJIS)
 
