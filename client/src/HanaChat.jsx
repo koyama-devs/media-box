@@ -3376,6 +3376,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         panel.style.setProperty('--hana-sticker-dock-h', `${h}px`)
         panel.style.setProperty('--hana-bottom-chrome-h', `${h}px`)
       }
+      skipDockCloseOnNextBlurRef.current = true
       try { inputRef.current?.blur() } catch { /* ignore */ }
       syncPanelViewportRef.current({ immediate: true, force: true })
       return
