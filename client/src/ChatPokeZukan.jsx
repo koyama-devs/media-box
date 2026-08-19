@@ -1,245 +1,109 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
-    flipPokeHuntTile,
-    giftPokeDailyCard,
+    actPokeWorld,
+    adoptPokeWorldPartner,
+    claimPokeCafeGift,
+    duoActPokeWorld,
+    nicknamePokeWorldPartner,
+    orderPokeCafe,
+    selectPokeWorldMon,
     serializePokeZukan,
-    setPokeExpeditionPick,
-    setPokeZukanCardPhoto,
-    setPokeZukanCheer,
-    stampPokeFoil,
-    uploadChatAttachment,
+    syncPokeWorld,
+    visitPokeWorldPlace,
+    wakePokeWorld,
 } from './firebase'
+import { PokeSprite, SleepCover, SleepNest, WorldScene } from './PokeWorldScenes'
 import {
-    CHEERS,
-    HUNT_LIMIT,
-    binderProgress,
-    coverageScore,
-    dailyBoss,
-    dailyMatchupMode,
-    energyPips,
-    huntTiles,
-    loadDailyCard,
-    loadSpeciesCard,
-    matchupTitle,
-    resolveComboMatchup,
-    resolveWeaknessMatchup,
+    CAFE_MENU,
+    SHORT_SLEEP_MS,
+    WORLD_DUO_ACTIONS,
+    WORLD_PARTY_MAX,
+    WORLD_PLACES,
+    WORLD_STARTERS,
+    applyPokeWorldDecay,
+    cafeKindLabel,
+    cafeMenuItem,
+    coolLeftMs,
+    formatSleepSpan,
+    formatTokyoHm,
+    formatTokyoStamp,
+    pokeNameJa,
+    sleepDurationMs,
     tokyoZukanYmd,
-    typeAdvantage,
-    typeLabel,
-    wantedEvoIds,
+    trainerOwnsFamily,
+    worldActiveMon,
+    worldEvoHint,
+    worldGestureAction,
+    worldGuide,
+    worldLogLine, WORLD_LOG_ICON,
+    worldMonIsSleeping,
+    worldMonStyle,
+    worldPartyList,
+    worldPlace,
+    worldSleepNest,
+    worldTrainer,
 } from './pokeZukan'
-
-const TABS = [
-  { id: 'hunt', label: 'めくる', icon: 'map' },
-  { id: 'card', label: 'カード', icon: 'card' },
-  { id: 'match', label: '勝負', icon: 'swords' },
-  { id: 'album', label: 'アルバム', icon: 'book' },
-]
 
 function zukanState(raw) {
   return serializePokeZukan(raw)
 }
 
-function TabIcon({ kind }) {
-  if (kind === 'map') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path fill="currentColor" d="M5 5.5 10 4l4 2.5L19 5v14.5L14 21l-4-2.5L5 20z" opacity=".35" />
-        <path fill="none" stroke="currentColor" strokeWidth="1.8" d="M9 14.5c2.2-3.4 6-6.2 6-8.2A3 3 0 0 0 9 6a3 3 0 0 0-3 3c0 2 3.8 4.8 6 8.2z" />
-        <circle cx="9" cy="9" r="1.2" fill="currentColor" />
-      </svg>
-    )
-  }
-  if (kind === 'card') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <rect x="5" y="3.5" width="11" height="15" rx="2" fill="currentColor" opacity=".28" />
-        <rect x="8" y="5.5" width="11" height="15" rx="2" fill="none" stroke="currentColor" strokeWidth="1.8" />
-      </svg>
-    )
-  }
-  if (kind === 'swords') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" d="M7 17 17 7M9 7h8v8" />
-        <path fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" d="m17 17-4-4" />
-      </svg>
-    )
-  }
+function StatBar({ label, value, tone }) {
+  const n = Math.max(0, Math.min(100, Number(value) || 0))
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path fill="none" stroke="currentColor" strokeWidth="1.8" d="M6 7h12v13H6z" />
-      <path fill="none" stroke="currentColor" strokeWidth="1.8" d="M9 7V5.5A3 3 0 0 1 15 5.5V7" />
-    </svg>
-  )
-}
-
-function TrainerSeat({ src, name, mine, done, flips, limit }) {
-  const used = Math.min(limit, flips)
-  return (
-    <div className={`hana-chat-poke-seat${mine ? ' is-mine' : ''}${done ? ' is-done' : ''}`}>
-      <div className="hana-chat-poke-seat-face">
-        {src ? <img src={src} alt="" /> : <span className="hana-chat-poke-seat-fallback">{name.slice(0, 1)}</span>}
-        {done ? <i className="hana-chat-poke-stamp" aria-hidden="true">★</i> : null}
-      </div>
-      <strong>{name}</strong>
-      <div className="hana-chat-poke-lives" aria-label={`${name} ${used}/${limit}`}>
-        {Array.from({ length: limit }).map((_, i) => (
-          <span key={i} className={i < used ? 'is-used' : ''} />
-        ))}
-      </div>
+    <div className={`hana-chat-poke-bar is-${tone}`}>
+      <span>{label}</span>
+      <i><b style={{ width: `${n}%` }} /></i>
     </div>
   )
 }
 
-function WaitDuel({ mySrc, theirSrc, myName, theirName, myReady, theirReady }) {
-  return (
-    <div className="hana-chat-poke-duel" aria-live="polite">
-      <div className={`hana-chat-poke-duel-side${myReady ? ' is-ready' : ''}`}>
-        {mySrc ? <img src={mySrc} alt="" /> : null}
-        <span className="hana-chat-poke-mini-card">{myReady ? '✓' : '?'}</span>
-        <em>{myName}</em>
-      </div>
-      <span className="hana-chat-poke-vs">VS</span>
-      <div className={`hana-chat-poke-duel-side${theirReady ? ' is-ready' : ''}`}>
-        {theirSrc ? <img src={theirSrc} alt="" /> : null}
-        <span className="hana-chat-poke-mini-card">{theirReady ? '✓' : '?'}</span>
-        <em>{theirName}</em>
-      </div>
-    </div>
-  )
+function monMood(mon) {
+  if (!mon) return '…'
+  if (worldMonIsSleeping(mon)) return 'すやすや…'
+  if (mon.hunger < 28) return 'おなかすいた…'
+  if (mon.health < 28) return 'つかれちゃった…'
+  if (mon.energy < 24) return 'ねむいよ…'
+  if (mon.mood < 32) return 'さみしいな'
+  if (mon.bond >= 70) return 'だいすき！'
+  if (mon.mood >= 78) return 'ごきげんだよ'
+  return 'いっしょにいよう'
 }
 
-function TileFace({ kind, open }) {
-  if (!open) {
-    return <span className="hana-chat-poke-tile-back" aria-hidden="true" />
-  }
-  if (kind === 'rare') {
-    return (
-      <span className="hana-chat-poke-tile-face is-rare">
-        <b>★</b>
-        <em>レア</em>
-      </span>
-    )
-  }
-  if (kind === 'energy') {
-    return (
-      <span className="hana-chat-poke-tile-face is-energy">
-        <b />
-        <em>パワー</em>
-      </span>
-    )
-  }
-  if (kind === 'clue') {
-    return (
-      <span className="hana-chat-poke-tile-face is-clue">
-        <b>◇</b>
-        <em>ヒント</em>
-      </span>
-    )
-  }
-  return (
-    <span className="hana-chat-poke-tile-face is-empty">
-      <b>—</b>
-      <em>なし</em>
-    </span>
-  )
+const ACT_BUBBLE = {
+  pet: 'なでなで〜',
+  feed: 'もぐもぐ',
+  nap: 'すやすや…',
+  walk: 'てくてく',
+  find: 'なにかいる？',
+  cafe: 'おいしい！',
+  train: 'えい！',
+  evolve: 'しんかした！',
+  treat: 'ごちそうするね！',
+  petFriend: 'いっしょにおせわ',
+  cheer: 'ファイト！',
+  gift: 'どうぞ〜',
+  duo: 'いっしょにたのしい！',
+  free: 'えへへ♪',
+  freecombo: 'もっとあそぼ！',
 }
 
-function TcgCard({ card, foil = false, photoUrl = '' }) {
-  const type = card?.types?.[0] || 'normal'
-  const art = card ? (photoUrl || card.sprite) : ''
-  const [flipped, setFlipped] = useState(false)
-  const [tilt, setTilt] = useState({ x: 0, y: 0, gx: 50, gy: 38 })
-  const stageRef = useRef(null)
-
-  if (!card) return null
-
-  const onPointerMove = (event) => {
-    const box = stageRef.current?.getBoundingClientRect()
-    if (!box) return
-    const px = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width))
-    const py = Math.min(1, Math.max(0, (event.clientY - box.top) / box.height))
-    setTilt({
-      x: (0.5 - py) * 18,
-      y: (px - 0.5) * 22,
-      gx: px * 100,
-      gy: py * 100,
-    })
-  }
-
-  const spin = {
-    transform: `rotateX(${tilt.x}deg) rotateY(${(flipped ? 180 : 0) + tilt.y * (flipped ? -1 : 1)}deg)`,
-    '--gx': `${tilt.gx}%`,
-    '--gy': `${tilt.gy}%`,
-  }
-
-  return (
-    <div className={`hana-chat-tcg-slab${foil ? ' is-foil' : ''}`}>
-      <i className="hana-chat-tcg-bolt is-tl" />
-      <i className="hana-chat-tcg-bolt is-tr" />
-      <i className="hana-chat-tcg-bolt is-bl" />
-      <i className="hana-chat-tcg-bolt is-br" />
-      <div
-        ref={stageRef}
-        className="hana-chat-tcg-stage"
-        onPointerMove={onPointerMove}
-        onPointerLeave={() => setTilt({ x: 0, y: 0, gx: 50, gy: 38 })}
-      >
-        <button
-          type="button"
-          className={`hana-chat-tcg-spin${flipped ? ' is-flipped' : ''}`}
-          style={spin}
-          aria-label={flipped ? '表を見る' : 'うらを見る'}
-          onClick={() => setFlipped((v) => !v)}
-        >
-          <article className={`hana-chat-tcg hana-chat-tcg-face is-front is-${type}${foil ? ' is-foil' : ''}`}>
-            <header className="hana-chat-tcg-top">
-              <strong className="hana-chat-tcg-name">
-                {card.nameJa}
-                {foil ? <b>★</b> : null}
-              </strong>
-              <span className="hana-chat-tcg-hp">
-                <small>HP</small>
-                {card.hp}
-              </span>
-              {(card.types || [type]).slice(0, 2).map((t) => (
-                <span key={t} className={`hana-chat-tcg-pip is-${t}`} title={typeLabel(t)} />
-              ))}
-            </header>
-            <div className="hana-chat-tcg-art">
-              <div className="hana-chat-tcg-burst" aria-hidden="true" />
-              <div className="hana-chat-tcg-spark" aria-hidden="true" />
-              {art ? <img src={art} alt="" /> : null}
-              <div className="hana-chat-tcg-glare" aria-hidden="true" />
-            </div>
-            <ul className="hana-chat-tcg-moves">
-              {(card.moves || []).map((move) => (
-                <li key={move.id}>
-                  <span className={`hana-chat-tcg-pip is-${move.type}`} />
-                  <em>{move.nameJa}</em>
-                  <strong>{move.power || '—'}</strong>
-                </li>
-              ))}
-            </ul>
-            <footer className="hana-chat-tcg-bar">
-              <span>
-                弱点
-                {(card.weaknesses || []).slice(0, 2).map((t) => (
-                  <i key={t} className={`hana-chat-tcg-pip is-${t}`} title={typeLabel(t)} />
-                ))}
-              </span>
-              <span className="hana-chat-tcg-no">#{String(card.id).padStart(3, '0')}</span>
-            </footer>
-          </article>
-          <div className="hana-chat-tcg-face is-back" aria-hidden="true">
-            <span className="hana-chat-tcg-back-swirl" />
-          </div>
-        </button>
-      </div>
-      <p className="hana-chat-tcg-help">傾ける・タップでうら</p>
-    </div>
-  )
+const ACT_FX = {
+  pet: ['♡', '✦', '♡'],
+  feed: ['🍓', '✦', '🍪'],
+  nap: ['z', 'Z', '☁'],
+  walk: ['✦', '…', '✦'],
+  find: ['?', '✦', '!'],
+  cafe: ['☕', '♪', '✦'],
+  train: ['⚡', '✦', '💥'],
+  evolve: ['✨', '✦', '✨'],
+  treat: ['☕', '♡', '✦'],
+  petFriend: ['♡', '🐾', '✦'],
+  cheer: ['⚑', '✨', '✦'],
+  gift: ['🎁', '♡', '✨'],
+  duo: ['♡', '✨', '♡'],
+  free: ['♡', '♪', '✦'],
+  freecombo: ['✨', '♡', '♪'],
 }
 
 const ChatPokeZukan = memo(function ChatPokeZukan({
@@ -256,194 +120,374 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
   const state = useMemo(() => zukanState(zukan), [zukan])
   const ymd = tokyoZukanYmd()
   const me = role === 'hana' ? 'hana' : 'guest'
-  const other = me === 'hana' ? 'guest' : 'hana'
-  const [tab, setTab] = useState('hunt')
-  const [card, setCard] = useState(null)
-  const [loadErr, setLoadErr] = useState('')
+  const them = me === 'hana' ? 'guest' : 'hana'
+  const world = useMemo(
+    () => applyPokeWorldDecay(state.world || {}, new Date()),
+    [state.world],
+  )
+  const serverPlace = me === 'hana' ? world.hanaPlace : world.guestPlace
+  const theirPlace = me === 'hana' ? world.guestPlace : world.hanaPlace
+  const [localPlace, setLocalPlace] = useState('')
+  const myPlace = localPlace || serverPlace
+  const place = worldPlace(myPlace)
   const [busy, setBusy] = useState(false)
-  const [albumCards, setAlbumCards] = useState({})
-  const photoRef = useRef(null)
-  const [photoTarget, setPhotoTarget] = useState('')
-  const foilStampedRef = useRef('')
+  const [adopting, setAdopting] = useState('')
+  const [view, setView] = useState('town')
+  const [nickDraft, setNickDraft] = useState('')
+  const [nickFocus, setNickFocus] = useState(false)
+  const panelRef = useRef(null)
+  const [anim, setAnim] = useState('')
+  const [toast, setToast] = useState(null)
+  const [localAsleep, setLocalAsleep] = useState(false)
+  const [cafeOpen, setCafeOpen] = useState(false)
+  const justWokeRef = useRef(false)
+  const touchRef = useRef(null)
+  const tapBurstRef = useRef({ count: 0, at: 0 })
+  const busyRef = useRef(false)
+  const skipClickRef = useRef(false)
 
-  const expedition = state.expedition?.ymd === ymd ? state.expedition : null
-  const myHunts = expedition?.hunts?.[me] || []
-  const theirHunts = expedition?.hunts?.[other] || []
-  const huntDone = myHunts.length >= HUNT_LIMIT
-  const theirHuntDone = theirHunts.length >= HUNT_LIMIT
-  const myRare = Boolean(expedition?.foundRare?.[me])
-  const duoStar = state.duoStarYmd === ymd || (huntDone && theirHuntDone)
-  const duo = state.duo?.ymd === ymd ? state.duo : null
-  const tiles = useMemo(() => huntTiles(ymd), [ymd])
-  const bosses = useMemo(() => dailyBoss(ymd), [ymd])
-  const mode = useMemo(() => dailyMatchupMode(ymd), [ymd])
-  const pips = useMemo(() => energyPips(ymd), [ymd])
-
-  useEffect(() => {
-    let alive = true
-    setLoadErr('')
-    loadDailyCard(ymd)
-      .then((next) => {
-        if (alive) setCard(next)
-      })
-      .catch((err) => {
-        if (alive) setLoadErr(err?.message || '今日のカードを読めませんでした。')
-      })
-    return () => {
-      alive = false
-    }
-  }, [ymd])
-
-  const albumIds = Object.keys(state.entries)
-  useEffect(() => {
-    let alive = true
-    if (!albumIds.length) return undefined
-    Promise.all(albumIds.slice(0, 24).map((id) => loadSpeciesCard(id).catch(() => null)))
-      .then((rows) => {
-        if (!alive) return
-        setAlbumCards((prev) => {
-          const next = { ...prev }
-          let changed = false
-          rows.forEach((row) => {
-            if (row?.id && !next[String(row.id)]) {
-              next[String(row.id)] = row
-              changed = true
-            }
-          })
-          return changed ? next : prev
-        })
-      })
-    return () => {
-      alive = false
-    }
-  }, [albumIds.join(',')])
-
-  const fail = (err) => onError?.(err?.message || 'うまくいきませんでした。')
-
-  const flipTile = async (tile) => {
-    if (busy || huntDone || myHunts.includes(tile.id)) return
-    setBusy(true)
-    try {
-      await flipPokeHuntTile(threadId, {
-        role: me,
-        tileId: tile.id,
-        kind: tile.kind,
-        speciesId: card?.id,
-        ymd,
-      })
-      if (myHunts.length + 1 >= HUNT_LIMIT) setTab('card')
-    } catch (err) {
-      fail(err)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const sendCheer = async (cheer) => {
-    if (busy) return
-    setBusy(true)
-    try {
-      await setPokeZukanCheer(threadId, { role: me, cheer, ymd })
-    } catch (err) {
-      fail(err)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const giftCard = async () => {
-    if (busy || !card) return
-    setBusy(true)
-    try {
-      await giftPokeDailyCard(threadId, { role: me, speciesId: card.id, ymd })
-    } catch (err) {
-      fail(err)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const pickField = async (field, value) => {
-    if (busy) return
-    setBusy(true)
-    try {
-      await setPokeExpeditionPick(threadId, { role: me, field, value, ymd })
-    } catch (err) {
-      fail(err)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const weakness = resolveWeaknessMatchup(
-    expedition?.energyPick?.hana,
-    expedition?.energyPick?.guest,
-    bosses,
-  )
-  const combo = resolveComboMatchup(
-    expedition?.comboMove?.hana,
-    expedition?.comboMove?.guest,
-    bosses,
-  )
-  const myTrade = expedition?.tradePick?.[me]
-  const theirTrade = expedition?.tradePick?.[other]
-  const tradeReady = Boolean(myTrade && theirTrade)
-  const myTradeTypes = albumCards[myTrade]?.types || (String(myTrade) === String(card?.id) ? card?.types : [])
-  const theirTradeTypes = albumCards[theirTrade]?.types || (String(theirTrade) === String(card?.id) ? card?.types : [])
-  const tradeResult = tradeReady ? typeAdvantage(myTradeTypes, theirTradeTypes) : ''
-
-  useEffect(() => {
-    if (mode !== 'trade' || !tradeReady || tradeResult === 'draw') return
-    const winId = tradeResult === 'a' ? myTrade : theirTrade
-    const key = `${ymd}:${winId}`
-    if (!winId || foilStampedRef.current === key) return
-    foilStampedRef.current = key
-    void stampPokeFoil(threadId, winId).catch(() => {})
-  }, [mode, tradeReady, tradeResult, myTrade, theirTrade, ymd, threadId])
-
-  const onPhoto = async (event) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (!file || !photoTarget) return
-    setBusy(true)
-    try {
-      const uploaded = await uploadChatAttachment(threadId, file)
-      await setPokeZukanCardPhoto(threadId, {
-        speciesId: photoTarget,
-        photoUrl: uploaded.url,
-      })
-    } catch (err) {
-      fail(err)
-    } finally {
-      setBusy(false)
-      setPhotoTarget('')
-    }
-  }
-
-  const regions = binderProgress(state.entries)
-  const wanted = wantedEvoIds(state.entries, albumCards)
-  const giftedToMe = expedition?.giftedSpeciesId && expedition.giftedBy && expedition.giftedBy !== me
-  const entry = card ? state.entries[String(card.id)] : null
+  const trainer = worldTrainer(world, me)
+  const mon = worldActiveMon(world, me)
+  const theirMon = worldActiveMon(world, them)
+  const party = worldPartyList(world, me)
+  const names = { hana: hanaName, guest: guestName }
   const myName = me === 'hana' ? hanaName : guestName
   const theirName = me === 'hana' ? guestName : hanaName
   const myAvatar = me === 'hana' ? hanaAvatar : guestAvatar
   const theirAvatar = me === 'hana' ? guestAvatar : hanaAvatar
-  const leftName = hanaName
-  const rightName = guestName
-  const leftAvatar = hanaAvatar
-  const rightAvatar = guestAvatar
-  const leftDone = me === 'hana' ? huntDone : theirHuntDone
-  const rightDone = me === 'hana' ? theirHuntDone : huntDone
-  const leftFlips = me === 'hana' ? myHunts.length : theirHunts.length
-  const rightFlips = me === 'hana' ? theirHunts.length : myHunts.length
+  const theyAreHere = theirPlace === place.id
+  const duoStar = state.duoStarYmd === ymd
+    || (world.trainers.hana.lastActYmd === ymd && world.trainers.guest.lastActYmd === ymd)
+  const hint = useMemo(() => worldGuide(mon, place.id), [mon, place.id])
+  const style = useMemo(() => worldMonStyle(mon), [mon?.id, mon?.speciesId])
+  const duoRows = useMemo(
+    () => Object.entries(WORLD_DUO_ACTIONS)
+      .filter(([, spec]) => spec.place === 'any' || spec.place === place.id)
+      .map(([id, spec]) => ({ id, ...spec })),
+    [place.id],
+  )
+
+  useEffect(() => {
+    if (localPlace && localPlace === serverPlace) setLocalPlace('')
+  }, [localPlace, serverPlace])
+
+  useEffect(() => {
+    if (nickFocus) return
+    setNickDraft(mon?.nickname || '')
+  }, [mon?.id, mon?.nickname, nickFocus])
+
+  useEffect(() => {
+    if (!anim) return undefined
+    const t = window.setTimeout(() => setAnim(''), 720)
+    return () => window.clearTimeout(t)
+  }, [anim])
+
+  useEffect(() => {
+    if (!toast) return undefined
+    const t = window.setTimeout(() => setToast(null), 2400)
+    return () => window.clearTimeout(t)
+  }, [toast])
+
+  useEffect(() => {
+    setLocalAsleep(worldMonIsSleeping(mon))
+  }, [mon?.id, mon?.sleepingUntilIso])
+
+  useEffect(() => {
+    if (!threadId) return undefined
+    void syncPokeWorld(threadId).catch(() => {})
+  }, [threadId])
+
+  const fail = (err) => onError?.(err?.message || 'うまくいきませんでした。')
+
+  const say = (kind, line, how = '') => {
+    setToast({ kind, line, how, key: Date.now() })
+  }
+
+  const go = (nextPlace) => {
+    if (nextPlace === myPlace) return
+    if (view === 'album') setView('town')
+    if (localAsleep) {
+      const sleptMs = sleepDurationMs(mon)
+      if (sleptMs > 0 && sleptMs < SHORT_SLEEP_MS) {
+        say('say', `きょう${formatSleepSpan(sleptMs)}しかねてない`, '早く寝よう。けんこうのためにもう少し長く')
+      }
+    }
+    setLocalPlace(nextPlace)
+    setCafeOpen(false)
+    setLocalAsleep(false)
+    justWokeRef.current = false
+    void visitPokeWorldPlace(threadId, { role: me, place: nextPlace }).catch(fail)
+  }
+
+  const playFree = () => {
+    const now = Date.now()
+    const last = tapBurstRef.current
+    const combo = now - last.at < 900 ? Math.min(3, last.count + 1) : 1
+    tapBurstRef.current = { count: combo, at: now }
+    const burst = combo >= 3
+    setAnim(burst ? 'freecombo' : 'free')
+    say('say', burst ? 'すごい！たのしい！' : ACT_BUBBLE.free)
+  }
+
+  const wakeUp = () => {
+    if (!localAsleep) return
+    const sleptMs = sleepDurationMs(mon)
+    setLocalAsleep(false)
+    justWokeRef.current = true
+    setAnim('free')
+    if (sleptMs > 0 && sleptMs < SHORT_SLEEP_MS) {
+      say('say', `きょう${formatSleepSpan(sleptMs)}しかねてない`, '早く寝よう。けんこうのためにもう少し長く')
+    } else if (sleptMs > 0) {
+      say('ok', '電気をつけたよ', `きょう${formatSleepSpan(sleptMs)}ねた`)
+    } else {
+      say('ok', '電気をつけたよ', 'おはよう')
+    }
+    void wakePokeWorld(threadId, { role: me }).catch(fail)
+  }
+
+  const act = async (action) => {
+    if (!mon || !action) return
+    const napNow = action === 'nap' && !localAsleep
+    if (!napNow && coolLeftMs(mon, action) > 0) {
+      playFree()
+      return
+    }
+    setAnim(action)
+    if (action === 'nap') {
+      setLocalAsleep(true)
+      justWokeRef.current = false
+    }
+    if (busyRef.current) return
+    busyRef.current = true
+    try {
+      const next = await actPokeWorld(threadId, { role: me, action, ymd })
+      const nextMon = worldActiveMon(next?.world || {}, me)
+      if (nextMon?.speciesId && nextMon.speciesId !== mon.speciesId) {
+        setAnim('evolve')
+        say('ok', 'しんかした！', `${pokeNameJa(mon.speciesId, 'なかま')}は${pokeNameJa(nextMon.speciesId)}に`)
+      } else if (action === 'find') {
+        const foundId = Object.keys(next?.entries || {}).find((id) => !state.entries[id])
+        if (foundId) say('ok', `${pokeNameJa(foundId, 'ポケモン')}をみつけた！`)
+        else say('say', 'きょうはにげられちゃった')
+      } else if (action === 'nap') {
+        const kind = nextMon?.sleepKind
+        const clock = formatTokyoHm(nextMon?.sleepAtIso)
+        if (kind === 'early') say('ok', `${clock}におやすみ`, '早寝できた。けんこうアップ')
+        else if (kind === 'late') say('say', `${clock}におやすみ`, '夜ふかし…けんこうダウン')
+        else say('say', ACT_BUBBLE.nap, clock ? `${clock}にひるね` : '')
+      } else {
+        say('say', ACT_BUBBLE[action] || 'いいね！')
+      }
+    } catch (err) {
+      if (action === 'nap') setLocalAsleep(false)
+      say('say', err?.message || 'うまくいきませんでした。')
+    } finally {
+      busyRef.current = false
+    }
+  }
+
+  const duoAct = async (action) => {
+    if (!mon || !theirMon || !action) return
+    if (coolLeftMs(mon, action) > 0) {
+      playFree()
+      return
+    }
+    setAnim(action)
+    if (busyRef.current) return
+    busyRef.current = true
+    try {
+      await duoActPokeWorld(threadId, { role: me, action })
+      setAnim('duo')
+      say('ok', ACT_BUBBLE[action] || 'いっしょにアクション！')
+    } catch (err) {
+      say('say', err?.message || '協力アクションに失敗しました。')
+    } finally {
+      busyRef.current = false
+    }
+  }
+
+  const runGesture = (kind) => {
+    if (localAsleep) {
+      wakeUp()
+      return
+    }
+    if (place.id === 'home' && justWokeRef.current && (kind === 'tap' || kind === 'hold')) {
+      void act('nap')
+      return
+    }
+    const suggested = hint && hint.wait <= 0 ? hint.action : ''
+    const action = worldGestureAction(place.id, kind, suggested)
+    if (action === 'cafe') {
+      setCafeOpen(true)
+      return
+    }
+    const napNow = action === 'nap'
+    if (!action || (!napNow && coolLeftMs(mon, action) > 0)) {
+      playFree()
+      return
+    }
+    void act(action)
+  }
+
+  const onMonPointerDown = (event) => {
+    if (event.button) return
+    if (localAsleep) {
+      skipClickRef.current = true
+      wakeUp()
+      return
+    }
+    skipClickRef.current = false
+    window.clearTimeout(touchRef.current?.holdT)
+    touchRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      stroked: false,
+      held: false,
+      holdT: window.setTimeout(() => {
+        if (!touchRef.current) return
+        touchRef.current.held = true
+        skipClickRef.current = true
+        runGesture('hold')
+      }, 220),
+    }
+  }
+
+  const onMonPointerMove = (event) => {
+    const t = touchRef.current
+    if (!t || t.held) return
+    const dx = event.clientX - t.x
+    const dy = event.clientY - t.y
+    if (!t.stroked && (dx * dx + dy * dy > 36 * 36)) {
+      t.stroked = true
+      window.clearTimeout(t.holdT)
+    }
+  }
+
+  const onMonPointerUp = () => {
+    const t = touchRef.current
+    window.clearTimeout(t?.holdT)
+    touchRef.current = null
+    if (!t || t.held) return
+    if (t.stroked) {
+      skipClickRef.current = true
+      runGesture('stroke')
+    }
+  }
+
+  const onMonClick = () => {
+    if (skipClickRef.current) {
+      skipClickRef.current = false
+      return
+    }
+    runGesture('tap')
+  }
+
+  const adopt = async (speciesId) => {
+    const sid = String(Number(speciesId) || '').trim()
+    if (!sid || adopting) return
+    setAdopting(sid)
+    try {
+      await adoptPokeWorldPartner(threadId, { role: me, speciesId: sid })
+      setView('town')
+    } catch (err) {
+      fail(err)
+    } finally {
+      setAdopting('')
+    }
+  }
+
+  const pickMon = (monId) => {
+    if (monId === trainer.activeId) return
+    void selectPokeWorldMon(threadId, { role: me, monId }).catch(fail)
+  }
+
+  const saveNick = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      await nicknamePokeWorldPartner(threadId, { role: me, nickname: nickDraft })
+    } catch (err) {
+      fail(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const orderCafe = async (itemId, target) => {
+    if (!mon || busyRef.current) return
+    busyRef.current = true
+    const item = cafeMenuItem(itemId)
+    try {
+      const next = await orderPokeCafe(threadId, { role: me, itemId, target })
+      const nextMon = worldActiveMon(next?.world || {}, me)
+      setCafeOpen(false)
+      if (nextMon?.speciesId && nextMon.speciesId !== mon.speciesId) {
+        setAnim('evolve')
+        say('ok', 'しんかした！', `${pokeNameJa(mon.speciesId, 'なかま')}は${pokeNameJa(nextMon.speciesId)}に`)
+      } else if (target === 'mate') {
+        setAnim('gift')
+        say('ok', `${item?.emoji || ''} ${item?.name}をおくる`, `${theirName}が受け取るとげんきアップ`)
+      } else {
+        setAnim('cafe')
+        say('ok', `${item?.emoji || ''} ${item?.name}`, 'おいしい！')
+      }
+    } catch (err) {
+      say('say', err?.message || 'うまくいきませんでした。')
+    } finally {
+      busyRef.current = false
+    }
+  }
+
+  const claimCafe = async (giftId) => {
+    if (!mon || busyRef.current) return
+    busyRef.current = true
+    const claimed = (trainer.gifts || []).find((row) => row.id === giftId)
+    const item = cafeMenuItem(claimed?.itemId)
+    try {
+      await claimPokeCafeGift(threadId, { role: me, giftId })
+      setAnim('cafe')
+      say('ok', `${item?.emoji || '🎁'} ${item?.name || '贈り物'}をもらった`, 'げんきがもどったよ')
+    } catch (err) {
+      say('say', err?.message || 'うまくいきませんでした。')
+    } finally {
+      busyRef.current = false
+    }
+  }
+
+  const displayName = mon?.nickname || pokeNameJa(mon?.speciesId, 'なかま')
+  const asleep = localAsleep
+  const theirAsleep = worldMonIsSleeping(theirMon)
+  const nestKind = worldSleepNest(mon?.speciesId)
+  const theirNestKind = worldSleepNest(theirMon?.speciesId)
+  const sleepKindLabel = mon?.sleepKind === 'early'
+    ? '早寝'
+    : mon?.sleepKind === 'late'
+      ? '夜ふかし'
+      : mon?.sleepKind === 'day'
+        ? 'ひるね'
+        : ''
+  const albumIds = Object.keys(state.entries)
+  const picking = view === 'pick' || !mon
+  const shown = toast || (asleep
+    ? { kind: 'hint', line: 'すやすや…電気を消したよ', how: 'タッチすると電気がついて起きる' }
+    : (hint && hint.wait <= 0 ? {
+        kind: 'hint',
+        line: hint.line,
+        how: hint.how,
+      } : null))
 
   return (
-    <div className="hana-chat-poke-panel" role="dialog" aria-label="今日の探検">
+    <div
+      ref={panelRef}
+      className={`hana-chat-poke-panel is-world${nickFocus ? ' is-nick-focus' : ''}`}
+      role="dialog"
+      aria-label="ポケの里"
+    >
       <div className="hana-chat-poke-head">
         <div className="hana-chat-poke-copy">
-          <span className="hana-chat-poke-kicker">今日のルート</span>
+          <span className="hana-chat-poke-kicker">{myName}のポケモン</span>
           <strong className="hana-chat-poke-title">
-            {duoStar ? '★ コンプ' : 'カードをさがす'}
+            {duoStar ? '★ 今日もいっしょ' : place.kicker}
           </strong>
         </div>
         <button type="button" className="hana-chat-poke-collapse" aria-label="閉じる" onClick={onClose}>
@@ -451,310 +495,392 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
         </button>
       </div>
 
-      <div className="hana-chat-poke-trainers">
-        <TrainerSeat
-          src={leftAvatar}
-          name={leftName}
-          mine={me === 'hana'}
-          done={leftDone}
-          flips={leftFlips}
-          limit={HUNT_LIMIT}
-        />
+      <div className="hana-chat-poke-trainers is-world">
+        <div className={`hana-chat-poke-seat${me === 'hana' ? ' is-mine' : ''}`}>
+          <div className="hana-chat-poke-seat-face">
+            {hanaAvatar ? <img src={hanaAvatar} alt="" /> : <span className="hana-chat-poke-seat-fallback">{hanaName.slice(0, 1)}</span>}
+          </div>
+          <strong>{hanaName}</strong>
+        </div>
         <span className="hana-chat-poke-link" aria-hidden="true" />
-        <TrainerSeat
-          src={rightAvatar}
-          name={rightName}
-          mine={me === 'guest'}
-          done={rightDone}
-          flips={rightFlips}
-          limit={HUNT_LIMIT}
-        />
+        <div className={`hana-chat-poke-seat${me === 'guest' ? ' is-mine' : ''}`}>
+          <div className="hana-chat-poke-seat-face">
+            {guestAvatar ? <img src={guestAvatar} alt="" /> : <span className="hana-chat-poke-seat-fallback">{guestName.slice(0, 1)}</span>}
+          </div>
+          <strong>{guestName}</strong>
+        </div>
         <div className={`hana-chat-poke-star-chip${duoStar ? ' is-on' : ''}`} title="ふたり星">
           <b>★</b>
           <span>{state.duoStars}</span>
         </div>
       </div>
 
-      {duo?.cheer && duo.cheerBy !== me ? (
-        <p className="hana-chat-poke-cheer-banner">♡ {duo.cheer}</p>
-      ) : null}
-      {giftedToMe ? (
-        <p className="hana-chat-poke-cheer-banner">✉ カードが届いた</p>
-      ) : null}
-
-      <ol className="hana-chat-poke-path">
-        {TABS.slice(0, 3).map((item, i) => (
-          <li
-            key={item.id}
-            className={`${tab === item.id ? 'is-now' : ''} ${(item.id === 'hunt' || item.id === 'card') && huntDone ? 'is-cleared' : ''}`.trim()}
-          >
-            <button type="button" onClick={() => setTab(item.id)}>
-              <i>{i + 1}</i>
-              {item.label}
-            </button>
-          </li>
-        ))}
-      </ol>
-
-      <div className="hana-chat-poke-tabs" role="tablist">
-        {TABS.map((item) => (
+      {(trainer.gifts || []).map((gift) => {
+        const item = cafeMenuItem(gift.itemId)
+        if (!item) return null
+        const fromName = gift.from === 'hana' ? hanaName : guestName
+        return (
           <button
-            key={item.id}
+            key={gift.id}
             type="button"
-            role="tab"
-            aria-selected={tab === item.id}
-            className={tab === item.id ? 'is-on' : ''}
-            onClick={() => setTab(item.id)}
+            className="hana-chat-poke-gift is-cafe"
+            onClick={() => { void claimCafe(gift.id) }}
           >
-            <TabIcon kind={item.icon} />
-            {item.label}
-            {item.id === 'hunt' && !huntDone ? <i className="hana-chat-poke-dot" /> : null}
+            <b aria-hidden="true">{item.emoji}</b>
+            <span>{fromName}から{item.name}</span>
+            <strong>もらう</strong>
           </button>
-        ))}
-      </div>
+        )
+      })}
 
-      {loadErr ? <p className="hana-chat-poke-err">{loadErr}</p> : null}
-
-      {tab === 'hunt' ? (
-        <div className="hana-chat-poke-hunt">
+      {picking ? (
+        <div className="hana-chat-poke-adopt">
           <p className="hana-chat-poke-hint">
-            うら向きのカードを3枚めくる
+            {mon
+              ? `もう1匹迎える（${party.length}/${WORLD_PARTY_MAX}）`
+              : `${myName}のポケモンを選ぶ。相手とは別々。`}
           </p>
-          <div className="hana-chat-poke-grid">
-            {tiles.map((tile) => {
-              const open = myHunts.includes(tile.id)
+          <ul className="hana-chat-poke-starters">
+            {WORLD_STARTERS.map((id) => {
+              const owned = trainerOwnsFamily(trainer, id)
               return (
+              <li key={id}>
                 <button
-                  key={tile.id}
                   type="button"
-                  className={`hana-chat-poke-tile${open ? ` is-open is-${tile.kind}` : ''}`}
-                  disabled={busy || huntDone || open}
-                  aria-label={open ? tile.kind : 'うら'}
-                  onClick={() => { void flipTile(tile) }}
+                  disabled={Boolean(adopting) || owned}
+                  aria-label={owned ? `${pokeNameJa(id)}はすでにいる` : pokeNameJa(id)}
+                  onClick={() => { void adopt(id) }}
                 >
-                  <TileFace kind={tile.kind} open={open} />
+                  <PokeSprite id={id} />
+                  <strong>{pokeNameJa(id)}</strong>
+                  {owned ? <span>いる</span> : null}
                 </button>
+              </li>
               )
             })}
-          </div>
-          {huntDone ? (
-            <p className="hana-chat-poke-ok">
-              {myRare ? '★ レアゲット！カードを見てみよう' : 'みつけた。カードを見てみよう'}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-
-      {tab === 'card' ? (
-        <div className="hana-chat-poke-card-tab">
-          {huntDone && card ? (
-            <>
-              <TcgCard card={card} foil={Boolean(entry?.foil || myRare)} photoUrl={entry?.photoUrl} />
-              <button type="button" className="hana-chat-poke-gift" disabled={busy} onClick={() => { void giftCard() }}>
-                {expedition?.giftedBy === me ? '送った' : 'あいてに送る'}
-              </button>
-              <p className="hana-chat-poke-hint">応援を送る</p>
-              <div className="hana-chat-poke-cheers">
-                {CHEERS.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    disabled={busy}
-                    className={duo?.cheerBy === me && duo?.cheer === c ? 'is-on' : ''}
-                    onClick={() => { void sendCheer(c) }}
-                  >
-                    {c}
-                  </button>
-                ))}
-              </div>
-            </>
-          ) : (
-            <p className="hana-chat-poke-hint">先に3枚めくろう</p>
-          )}
-        </div>
-      ) : null}
-
-      {tab === 'match' ? (
-        <div className="hana-chat-poke-match">
-          <div className="hana-chat-poke-gym" aria-label="今日のジム">
-            {bosses.map((t) => (
-              <span key={t} className={`hana-chat-poke-gym-orb is-${t}`}>
-                <i className={`hana-chat-tcg-pip is-${t}`} />
-                {typeLabel(t)}
-              </span>
-            ))}
-          </div>
-          {albumIds.length >= 3 ? (
-            <div className="hana-chat-poke-cover" title="手持ちカバー">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <i key={i} className={i < Math.min(3, coverageScore(
-                  albumIds.slice(0, 3).flatMap((id) => albumCards[id]?.types || []),
-                  bosses,
-                )) ? 'is-on' : ''} />
-              ))}
-            </div>
-          ) : null}
-          <p className="hana-chat-poke-q">{matchupTitle(mode)}</p>
-
-          {mode === 'weakness' ? (
-            <>
-              <p className="hana-chat-poke-hint">色を1つ置く。2人そろったら弱点が見える。</p>
-              <div className="hana-chat-poke-choices">
-                {pips.map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    disabled={busy || Boolean(expedition?.energyPick?.[me])}
-                    className={expedition?.energyPick?.[me] === t ? 'is-picked' : ''}
-                    onClick={() => { void pickField('energyPick', t) }}
-                  >
-                    <i className={`hana-chat-tcg-pip is-${t}`} />
-                    {typeLabel(t)}
-                  </button>
-                ))}
-              </div>
-              <WaitDuel
-                mySrc={myAvatar}
-                theirSrc={theirAvatar}
-                myName={myName}
-                theirName={theirName}
-                myReady={Boolean(expedition?.energyPick?.[me])}
-                theirReady={Boolean(expedition?.energyPick?.[other])}
-              />
-              {weakness.ready ? (
-                <p className="hana-chat-poke-ok">
-                  {weakness.duoOk
-                    ? `★ ${weakness.covered.map((t) => typeLabel(t)).join(' / ')}`
-                    : '割れなかった。明日また。'}
-                </p>
-              ) : null}
-            </>
-          ) : null}
-
-          {mode === 'combo' ? (
-            <>
-              <p className="hana-chat-poke-hint">技を1つ。違う色で弱点を突けたら星。</p>
-              <div className="hana-chat-poke-choices">
-                {(card?.moves || []).map((move) => (
-                  <button
-                    key={move.id}
-                    type="button"
-                    disabled={busy || Boolean(expedition?.comboMove?.[me])}
-                    className={expedition?.comboMove?.[me] === move.type ? 'is-picked' : ''}
-                    onClick={() => { void pickField('comboMove', move.type) }}
-                  >
-                    <i className={`hana-chat-tcg-pip is-${move.type}`} />
-                    {move.nameJa}
-                  </button>
-                ))}
-              </div>
-              <WaitDuel
-                mySrc={myAvatar}
-                theirSrc={theirAvatar}
-                myName={myName}
-                theirName={theirName}
-                myReady={Boolean(expedition?.comboMove?.[me])}
-                theirReady={Boolean(expedition?.comboMove?.[other])}
-              />
-              {combo.ready ? (
-                <p className="hana-chat-poke-ok">{combo.duoOk ? '★ コンボ！' : '色が同じか、弱点を外した。'}</p>
-              ) : null}
-            </>
-          ) : null}
-
-          {mode === 'trade' ? (
-            <>
-              <p className="hana-chat-poke-hint">1枚伏せる。同時にめくって勝負。</p>
-              <div className="hana-chat-poke-choices">
-                {(albumIds.length ? albumIds : card ? [String(card.id)] : []).slice(0, 9).map((id) => (
-                  <button
-                    key={id}
-                    type="button"
-                    disabled={busy || Boolean(myTrade)}
-                    className={myTrade === id ? 'is-picked' : ''}
-                    onClick={() => { void pickField('tradePick', id) }}
-                  >
-                    {albumCards[id]?.sprite ? <img src={albumCards[id].sprite} alt="" /> : null}
-                    {albumCards[id]?.nameJa || card?.nameJa || `#${id}`}
-                  </button>
-                ))}
-              </div>
-              <WaitDuel
-                mySrc={myAvatar}
-                theirSrc={theirAvatar}
-                myName={myName}
-                theirName={theirName}
-                myReady={Boolean(myTrade)}
-                theirReady={Boolean(theirTrade)}
-              />
-              {tradeReady ? (
-                <p className="hana-chat-poke-ok">
-                  {tradeResult === 'draw'
-                    ? '引き分け'
-                    : tradeResult === 'a'
-                      ? '勝ち。ホイル！'
-                      : '負け。あいてにホイル。'}
-                </p>
-              ) : null}
-            </>
-          ) : null}
-        </div>
-      ) : null}
-
-      {tab === 'album' ? (
-        <div className="hana-chat-poke-album">
-          <ul className="hana-chat-poke-regions">
-            {regions.map((region) => (
-              <li key={region.id}>
-                <span>{region.label}</span>
-                <strong>{region.have}/{region.total}</strong>
-              </li>
-            ))}
           </ul>
-          {wanted.length ? (
-            <p className="hana-chat-poke-hint">手配：進化の先がまだいない（{wanted.length}）</p>
+          {mon ? (
+            <button
+              type="button"
+              className="hana-chat-poke-swap-cancel"
+              disabled={busy}
+              onClick={() => setView('town')}
+            >
+              やめる
+            </button>
           ) : null}
-          {albumIds.length ? (
-            <ul>
-              {albumIds.map((id) => {
-                const row = albumCards[id]
-                const item = state.entries[id]
-                return (
-                  <li key={id} className={item?.foil ? 'is-foil' : ''}>
-                    {item?.photoUrl ? (
-                      <img src={item.photoUrl} alt="" />
-                    ) : row?.sprite ? (
-                      <img src={row.sprite} alt="" />
-                    ) : (
-                      <span className="hana-chat-poke-slot">?</span>
-                    )}
-                    <strong>{row?.nameJa || `#${id}`}</strong>
+        </div>
+      ) : (
+        <>
+          <nav className="hana-chat-poke-map" aria-label="里の場所">
+            {WORLD_PLACES.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={item.id === myPlace ? 'is-here' : ''}
+                onClick={() => go(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+            <button
+              type="button"
+              className={view === 'album' ? 'is-here' : ''}
+              onClick={() => setView((v) => (v === 'album' ? 'town' : 'album'))}
+            >
+              ずかん
+            </button>
+            {party.length < WORLD_PARTY_MAX ? (
+              <button
+                type="button"
+                className={view === 'pick' ? 'is-here' : ''}
+                onClick={() => setView('pick')}
+              >
+                迎える
+              </button>
+            ) : null}
+          </nav>
+
+          {view !== 'album' && place.id === 'home' ? (
+            <form
+              className="hana-chat-poke-nick is-sticky"
+              onSubmit={(event) => {
+                event.preventDefault()
+                void saveNick()
+                event.currentTarget.querySelector('input')?.blur()
+              }}
+            >
+              <input
+                value={nickDraft}
+                maxLength={16}
+                placeholder="ニックネーム"
+                aria-label="ニックネーム"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                enterKeyHint="done"
+                onFocus={() => {
+                  setNickFocus(true)
+                  const el = panelRef.current
+                  if (el) {
+                    el.classList.add('is-nick-focus')
+                    el.scrollTop = 0
+                  }
+                  if (window.scrollY) window.scrollTo(0, 0)
+                }}
+                onBlur={() => {
+                  setNickFocus(false)
+                  panelRef.current?.classList.remove('is-nick-focus')
+                }}
+                onChange={(event) => setNickDraft(event.target.value)}
+              />
+              <button type="submit" disabled={busy || nickDraft === (mon.nickname || '')}>つける</button>
+            </form>
+          ) : null}
+
+          {view === 'album' ? (
+            <div className="hana-chat-poke-album">
+              {albumIds.length ? (
+                <ul>
+                  {albumIds.map((id) => (
+                    <li key={id}>
+                      <button
+                        type="button"
+                        disabled={Boolean(adopting) || party.length >= WORLD_PARTY_MAX || trainerOwnsFamily(trainer, id)}
+                        onClick={() => { void adopt(id) }}
+                      >
+                        <PokeSprite id={id} />
+                        <strong>{pokeNameJa(id, `#${id}`)}</strong>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="hana-chat-poke-hint">こうえんでさがすと、ずかんが増える。</p>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className={`hana-chat-poke-scene is-${place.id}${asleep ? ' is-sleeping' : ''}`}>
+                <WorldScene place={place.id} night={asleep && place.id === 'home'} />
+                <div className="hana-chat-poke-scene-people">
+                  <span className="hana-chat-poke-scene-me">
+                    {myAvatar ? <img src={myAvatar} alt="" /> : <em>{myName.slice(0, 1)}</em>}
+                  </span>
+                  {theyAreHere ? (
+                    <span className="hana-chat-poke-scene-them">
+                      {theirAvatar ? <img src={theirAvatar} alt="" /> : <em>{theirName.slice(0, 1)}</em>}
+                    </span>
+                  ) : null}
+                </div>
+                <div
+                  className={`hana-chat-poke-scene-mon is-live is-${style.rig} is-${style.temperament}${asleep || anim === 'nap' ? ' is-asleep' : ''}${anim ? ` is-act-${anim}` : ''}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={asleep ? `${displayName}を起こす` : `${displayName}とあそぶ`}
+                  onPointerDown={onMonPointerDown}
+                  onPointerMove={onMonPointerMove}
+                  onPointerUp={onMonPointerUp}
+                  onPointerCancel={onMonPointerUp}
+                  onClick={onMonClick}
+                  onContextMenu={(event) => event.preventDefault()}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      onMonClick()
+                    }
+                  }}
+                >
+                  <div className="hana-chat-poke-figure">
+                    <b className={`hana-chat-poke-nametag${mon.nickname ? ' is-nick' : ''}`}>
+                      {displayName}
+                    </b>
+                    <span className="hana-chat-poke-sleep">
+                      {asleep || anim === 'nap' ? <SleepNest kind={nestKind} /> : null}
+                      <PokeSprite id={mon.speciesId} name={displayName} />
+                      {asleep || anim === 'nap' ? <SleepCover kind={nestKind} /> : null}
+                    </span>
+                  </div>
+                  {anim ? (
+                    <div className={`hana-chat-poke-fx is-${anim}`} aria-hidden="true">
+                      {(ACT_FX[anim] || ACT_FX.pet).map((glyph, i) => (
+                        <span key={`${anim}-${i}`}>{glyph}</span>
+                      ))}
+                    </div>
+                  ) : null}
+                  <p className="hana-chat-poke-bubble">{ACT_BUBBLE[anim] || monMood(mon)}</p>
+                </div>
+                {theyAreHere && theirMon ? (
+                  <div className={`hana-chat-poke-scene-foe${theirAsleep ? ' is-asleep' : ''}${anim === 'duo' || anim === 'treat' || anim === 'petFriend' || anim === 'cheer' || anim === 'gift' ? ' is-duo' : ''}`}>
+                    <b className={`hana-chat-poke-nametag is-mini${theirMon.nickname ? ' is-nick' : ''}`}>
+                      {theirMon.nickname || pokeNameJa(theirMon.speciesId)}
+                    </b>
+                    <span className="hana-chat-poke-sleep is-mini">
+                      {theirAsleep ? <SleepNest kind={theirNestKind} /> : null}
+                      <PokeSprite id={theirMon.speciesId} name={theirMon.nickname || pokeNameJa(theirMon.speciesId)} />
+                      {theirAsleep ? <SleepCover kind={theirNestKind} /> : null}
+                    </span>
+                    <span>{theirName}</span>
+                  </div>
+                ) : null}
+                {place.id === 'home' ? (
+                  <button
+                    type="button"
+                    className="hana-chat-poke-bed-btn"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      if (asleep) wakeUp()
+                      else void act('nap')
+                    }}
+                  >
+                    {asleep ? 'おはよう' : 'おやすみ'}
+                  </button>
+                ) : null}
+                {place.id === 'cafe' ? (
+                  <button
+                    type="button"
+                    className="hana-chat-poke-bed-btn"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      setCafeOpen(true)
+                    }}
+                  >
+                    メニュー
+                  </button>
+                ) : null}
+                {shown ? (
+                  <div className={`hana-chat-poke-guide is-${shown.kind}`} role="status">
+                    <i className="hana-chat-poke-guide-mark" aria-hidden="true" />
+                    <p>
+                      <strong>{shown.line}</strong>
+                      {shown.how ? <span>{shown.how}</span> : null}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="hana-chat-poke-scene-cap">
+                    {theyAreHere ? `${theirName}もここにいる` : place.hint}
+                  </p>
+                )}
+              </div>
+
+              {cafeOpen && place.id === 'cafe' ? (
+                <div className="hana-chat-poke-cafe-menu" role="dialog" aria-label="カフェメニュー">
+                  <div className="hana-chat-poke-cafe-menu-head">
+                    <strong>きょうのメニュー</strong>
+                    <span>◇ {trainer.coins}</span>
+                    <button type="button" onClick={() => setCafeOpen(false)}>とじる</button>
+                  </div>
+                  {['drink', 'tea', 'food'].map((kind) => (
+                    <section key={kind} className="hana-chat-poke-cafe-group">
+                      <h4>{cafeKindLabel(kind)}</h4>
+                      <ul>
+                        {CAFE_MENU.filter((row) => row.kind === kind).map((item) => (
+                          <li key={item.id}>
+                            <span className="hana-chat-poke-cafe-emoji" aria-hidden="true">{item.emoji}</span>
+                            <div>
+                              <strong>{item.name}</strong>
+                              <small>げんき+{item.energy} おなか+{item.hunger} ◇{item.coins}</small>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={busy || trainer.coins < item.coins}
+                              onClick={() => { void orderCafe(item.id, 'self') }}
+                            >
+                              あげる
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy || !theirMon || trainer.coins < item.coins}
+                              onClick={() => { void orderCafe(item.id, 'mate') }}
+                            >
+                              おくる
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  ))}
+                </div>
+              ) : null}
+
+              {theyAreHere && theirMon ? (
+                <div className="hana-chat-poke-duo">
+                  <p className="hana-chat-poke-duo-copy">一緒だね。ふたりで何かしよう。</p>
+                  <div className="hana-chat-poke-duo-actions">
+                    {duoRows.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          if (item.id === 'treat') setCafeOpen(true)
+                          else void duoAct(item.id)
+                        }}
+                      >
+                        <strong>{item.id === 'treat' ? 'メニューでおごり' : item.label}</strong>
+                        <span>いっしょに</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              <ul className="hana-chat-poke-party">
+                {party.map((row) => (
+                  <li key={row.id}>
                     <button
                       type="button"
-                      disabled={busy}
-                      onClick={() => {
-                        setPhotoTarget(id)
-                        photoRef.current?.click()
-                      }}
+                      className={row.id === trainer.activeId ? 'is-on' : ''}
+                      onClick={() => pickMon(row.id)}
                     >
-                      写真
+                      <PokeSprite id={row.speciesId} />
                     </button>
                   </li>
-                )
-              })}
-            </ul>
-          ) : (
-            <p className="hana-chat-poke-hint">まだゼロ。探索で一枚見つけよう。</p>
+                ))}
+                {party.length < WORLD_PARTY_MAX ? (
+                  <li>
+                    <button type="button" className="is-add" aria-label="ポケモンを迎える" onClick={() => setView('pick')}>+</button>
+                  </li>
+                ) : null}
+              </ul>
+
+              <div className="hana-chat-poke-status">
+                <div className="hana-chat-poke-status-meta">
+                  <strong>{displayName}</strong>
+                  <span>Lv.{mon.level}</span>
+                  <span className="hana-chat-poke-coin">◇ {trainer.coins}</span>
+                </div>
+                <StatBar label="おなか" value={mon.hunger} tone="food" />
+                <StatBar label="きぶん" value={mon.mood} tone="mood" />
+                <StatBar label="げんき" value={mon.energy} tone="energy" />
+                <StatBar label="けんこう" value={mon.health} tone="health" />
+                <StatBar label="なかよし" value={mon.bond} tone="bond" />
+                {mon.sleepAtIso ? (
+                  <p className={`hana-chat-poke-sleep-note is-${mon.sleepKind || 'day'}`}>
+                    前回 {formatTokyoStamp(mon.sleepAtIso)} にねた
+                    {sleepKindLabel ? `（${sleepKindLabel}）` : ''}
+                  </p>
+                ) : null}
+                <p className="hana-chat-poke-hint">{worldEvoHint(mon, myPlace)}</p>
+              </div>
+
+              {mon.log?.length ? (
+                <ol className="hana-chat-poke-log">
+                  {mon.log.slice(0, 12).map((row, i) => (
+                    <li key={`${row.at}-${row.action}-${i}`} data-action={row.action}>
+                      <span className="poke-log-icon">{WORLD_LOG_ICON[row.action] || '▸'}</span>
+                      <span className="poke-log-body">{worldLogLine(row, names)}</span>
+                    </li>
+                  ))}
+                </ol>
+              ) : null}
+            </>
           )}
-          <input
-            ref={photoRef}
-            type="file"
-            accept="image/*"
-            className="sr-only"
-            onChange={(event) => { void onPhoto(event) }}
-          />
-        </div>
-      ) : null}
+        </>
+      )}
     </div>
   )
 })
@@ -766,11 +892,11 @@ export function PokeZukanChip({ expanded, pending, duoStar, chipRef, onToggle })
       type="button"
       className={`hana-chat-poke-chip${expanded ? ' is-open' : ''}${pending ? ' is-pending' : ''}${duoStar ? ' is-star' : ''}`}
       aria-expanded={expanded}
-      aria-label="今日の探索を開く"
-      title="今日の探索"
+      aria-label="ポケの里を開く"
+      title="ポケの里"
       onClick={onToggle}
     >
-      <span className="hana-chat-poke-chip-mark">{duoStar ? '★' : '◆'}</span>
+      <span className="hana-chat-poke-chip-mark">{duoStar ? '★' : '里'}</span>
       {pending ? <i className="hana-chat-poke-dot" /> : null}
     </button>
   )

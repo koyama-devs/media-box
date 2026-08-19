@@ -1,0 +1,45 @@
+﻿commit 287d801b80f7d3f175e21bfcab15397ea0766bdb
+Author: Koyama Mika <koyamamika@vnext.vn>
+Date:   Thu Aug 13 14:58:22 2026 +0900
+
+    feat(chat): turn shared song cards into inline mini-players.
+    
+    Add play/pause with a spinning disc on song cards in chat, plus a control that closes chat and opens the main player.
+    
+    Co-authored-by: Cursor <cursoragent@cursor.com>
+
+diff --git a/client/src/HanaChatMessageList.jsx b/client/src/HanaChatMessageList.jsx
+index 43030e3..3ddee99 100644
+--- a/client/src/HanaChatMessageList.jsx
++++ b/client/src/HanaChatMessageList.jsx
+@@ -10,6 +10,7 @@ import {
+ import { CHAT_PARTY_REACTION } from './FlowerRain'
+ import HanaSticker, { isHanaSticker } from './HanaStickers'
+ import OwnerMessageAssist from './OwnerMessageAssist'
++import { requestChatTrackPlay, trackIdFromShareUrl } from './chatCardShare'
+ 
+ /** Stable empty reactions object so `|| {}` does not defeat memo. */
+ export const EMPTY_CHAT_REACTIONS = Object.freeze({})
+@@ -205,9 +206,20 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
+                     <a
+                       className="hana-chat-song-card-link"
+                       href={songShare.shareUrl}
+-                      target="_blank"
+-                      rel="noreferrer noopener"
+                       data-no-bubble-press="true"
++                      onClick={(event) => {
++                        event.preventDefault()
++                        event.stopPropagation()
++                        const trackId = trackIdFromShareUrl(songShare.shareUrl)
++                        if (!trackId) {
++                          window.location.assign(songShare.shareUrl)
++                          return
++                        }
++                        const result = requestChatTrackPlay(trackId)
++                        if (!result?.accepted) {
++                          window.location.assign(songShare.shareUrl)
++                        }
++                      }}
+                     >
+                       <strong>{songShare.title}</strong>
+                       <span>閨ｴ縺・/span>

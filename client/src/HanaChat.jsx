@@ -968,9 +968,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       const thread = [...matches].sort((a, b) => {
         const score = (entry) => {
           const hasText = String(entry.lastText || '').trim() ? 40 : 0
-          // Prefer the live canonical guest-{key} shell once it has chat, so a
-          // send never "vanishes" into a legacy UUID the roster reopens later.
-          const canonHit = entry.id === canonicalId ? 16 : 0
+          // Canonical bonus only when that shell actually has chat. Poke/weight
+          // can create an empty guest-zen that must not beat the UUID history.
+          const canonHit = entry.id === canonicalId && hasText ? 16 : 0
           const keyHit = entry.guestKey === profile.key ? 1 : 0
           return hasText + canonHit + keyHit
         }
@@ -1238,14 +1238,21 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     if (!showPokeZukan) return false
     const ymd = tokyoZukanYmd()
     const data = pokeZukanData || {}
-    if (actingAsOwner) return data.hanaDoneYmd !== ymd
-    return data.guestDoneYmd !== ymd
+    const world = data.world || {}
+    const who = actingAsOwner ? 'hana' : 'guest'
+    const trainer = world.trainers?.[who]
+    const mon = trainer?.mons?.[trainer.activeId]
+    if (!mon) return true
+    return trainer.lastActYmd !== ymd || Number(mon.hunger) < 36
   }, [showPokeZukan, pokeZukanData, actingAsOwner])
 
   const pokeZukanDuoStar = useMemo(() => {
     const ymd = tokyoZukanYmd()
     const data = pokeZukanData || {}
-    return data.duoStarYmd === ymd || (data.hanaDoneYmd === ymd && data.guestDoneYmd === ymd)
+    const world = data.world || {}
+    const hanaAct = world.trainers?.hana?.lastActYmd === ymd
+    const guestAct = world.trainers?.guest?.lastActYmd === ymd
+    return data.duoStarYmd === ymd || (hanaAct && guestAct)
   }, [pokeZukanData])
 
   const setPokeZukanOpen = (expanded) => {
@@ -1720,6 +1727,53 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     )
     return unsub
   }, [hidden, actingAsOwner, guestOnHuman, guestChatId])
+
+  useEffect(() => {
+    if (hidden || actingAsOwner) return undefined
+    const profile = getGuestProfile(guestKey)
+    if (!profile || !guestChatId) return undefined
+    const canon = `guest-${profile.key}`
+    let cancelled = false
+    void (async () => {
+      try {
+        const resolved = await resolveGuestThreadWithHistory({
+          guestKey: profile.key,
+          canonicalId: canon,
+          guestLabel: profile.displayName,
+          preferredId: guestChatId || canon,
+        })
+        if (cancelled || !resolved) return
+        let openId = resolved
+        if (resolved !== canon) {
+          const checkKey = `${canon}←${resolved}`
+          if (!migrationCheckedRef.current.has(checkKey)) {
+            migrationCheckedRef.current.add(checkKey)
+            const migrated = await migrateLegacyGuestThread({
+              canonicalId: canon,
+              legacyThreadId: resolved,
+              guestLabel: profile.displayName,
+              guestKey: profile.key,
+            })
+            if (migrated) openId = migrated
+          }
+        }
+        if (cancelled || !openId || openId === guestChatId) return
+        const cached = messageCacheRef.current.get(openId)
+          || messageCacheRef.current.get(resolved)
+          || messageCacheRef.current.get(canon)
+        if (Array.isArray(cached) && cached.length) {
+          messageCacheRef.current.set(openId, cached)
+          setHanaMessages(cached)
+        }
+        setGuestChatId(openId)
+      } catch {
+        /* keep guest-zen; owner resolve still finds the UUID thread */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [hidden, actingAsOwner, guestKey, guestChatId])
 
   useEffect(() => {
     if (hidden || !actingAsOwner || !activeThreadId) {
@@ -2622,6 +2676,19 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         return
       }
 
+      const overlayTyping = Boolean(
+        document.activeElement
+        && (
+          pokeZukanDockRef.current?.contains(document.activeElement)
+          || weightGardenDockRef.current?.contains(document.activeElement)
+        )
+      )
+      if (overlayTyping) {
+        keyboardLatched = false
+        pinHeaderFixed({ forceZero: true })
+        return
+      }
+
       if (!keyboardLatched && vvInset > 100) keyboardLatched = true
       if (keyboardLatched && (vvInset < 40 || (!inputFocused && vvInset < 120))) {
         keyboardLatched = false
@@ -2642,10 +2709,18 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         return
       }
 
-      // Mobile dock mode: while the composer is focused, always keep the
-      // fixed dock geometry. Never pin-shrink the panel to visualViewport
-      // (that buries the composer on the 2nd open after dismiss).
+      // Mobile dock mode: while the composer is focused, keep the fixed
+      // dock geometry. On Android the keyboard opens progressively — if we
+      // switch to the dock layout mid-animation, the full-height panel
+      // pushes the input out of viewport and the browser blurs it
+      // (keyboard pops up then immediately drops). Use the visual-keyboard
+      // pin first and let the dock latch only once the keyboard settles.
       if (stickerDockMode && inputFocused) {
+        const isAndroid = /android/i.test(navigator.userAgent)
+        if (isAndroid && !keyboardLatched) {
+          applyVisualKeyboardPin()
+          return
+        }
         stickerDockOpenRef.current = true
         applyStickerDock()
         return
@@ -3652,7 +3727,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     const localBest = [...localMatches].sort((a, b) => {
       const score = (entry) => {
         const hasText = String(entry.lastText || '').trim() ? 40 : 0
-        const canonHit = canon && entry.id === canon ? 16 : 0
+        const canonHit = canon && entry.id === canon && hasText ? 16 : 0
         const keyHit = key && entry.guestKey === key ? 1 : 0
         return hasText + canonHit + keyHit
       }
@@ -3676,6 +3751,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     )
 
     void (async () => {
+      let historyId = openId
       try {
         const resolved = await resolveGuestThreadWithHistory({
           guestKey: key,
@@ -3683,6 +3759,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           guestLabel: label,
           preferredId: openId,
         })
+        if (resolved) historyId = resolved
         if (resolved && resolved !== openId) {
           showThreadMessages(resolved, [...relatedIds, openId, canon, threadId])
           setMessagesHydrated(false)
@@ -3693,19 +3770,19 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         /* ignore */
       }
 
-      if (canon && openId && canon !== openId) {
-        const checkKey = `${canon}←${openId}`
+      if (canon && historyId && canon !== historyId) {
+        const checkKey = `${canon}←${historyId}`
         if (!migrationCheckedRef.current.has(checkKey)) {
           migrationCheckedRef.current.add(checkKey)
           try {
             const migrated = await migrateLegacyGuestThread({
               canonicalId: canon,
-              legacyThreadId: openId,
+              legacyThreadId: historyId,
               guestLabel: label,
               guestKey: key,
             })
-            if (migrated && migrated !== openId) {
-              showThreadMessages(migrated, [...relatedIds, openId, canon])
+            if (migrated && migrated !== historyId) {
+              showThreadMessages(migrated, [...relatedIds, historyId, openId, canon])
               setActiveThreadId(migrated)
             }
           } catch {
@@ -6013,8 +6090,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 onPointerDown={() => {
                   if (voiceNote.open) voiceNote.close()
                   if (!stickerDockMode) return
-                  // First tap on input: raise fixed sticker dock under the IME.
-                  // Later taps: keep dock and ensure keyboard overlay is focused.
+                  if (/android/i.test(navigator.userAgent)) return
                   revealComposerKeyboard()
                 }}
                 onFocus={(event) => {
@@ -6024,7 +6100,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   if (typeof window !== 'undefined' && window.scrollY) window.scrollTo(0, 0)
                   setComposerFocused(true)
                   if (stickerDockMode) {
-                    // Focus without pointerdown (e.g. programmatic): still raise dock.
+                    if (/android/i.test(navigator.userAgent)) return
                     if (!stickerDockOpenRef.current) {
                       revealComposerKeyboard()
                     }

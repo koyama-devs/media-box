@@ -1,0 +1,78 @@
+﻿commit 287d801b80f7d3f175e21bfcab15397ea0766bdb
+Author: Koyama Mika <koyamamika@vnext.vn>
+Date:   Thu Aug 13 14:58:22 2026 +0900
+
+    feat(chat): turn shared song cards into inline mini-players.
+    
+    Add play/pause with a spinning disc on song cards in chat, plus a control that closes chat and opens the main player.
+    
+    Co-authored-by: Cursor <cursoragent@cursor.com>
+
+diff --git a/client/src/App.jsx b/client/src/App.jsx
+index b04ae9f..255d9c2 100644
+--- a/client/src/App.jsx
++++ b/client/src/App.jsx
+@@ -4,7 +4,7 @@ import './App.css'
+ import hanachanArt from './assets/hanachan.svg'
+ import { AVATAR_PRESETS, getAvatarPresetSrc } from './avatarPresets'
+ import { clearBookBookmark, getAllBookBookmarks, getBookBookmark } from './bookProgress'
+-import { requestChatCardShare } from './chatCardShare'
++import { requestChatCardShare, CHAT_PLAY_TRACK_EVENT } from './chatCardShare'
+ import DailyKotoba from './DailyKotoba'
+ import {
+     ACCOUNT_INACTIVE_LOGIN_MESSAGE,
+@@ -2935,6 +2935,54 @@ const playPrevious = useCallback(() => {
+     selectItem,
+   ])
+ 
++  // Chat bubble縲瑚・縺上・ play in-app immediately (skip the welcome postcard).
++  useEffect(() => {
++    const onPlayTrackFromChat = (event) => {
++      const trackId = String(event?.detail?.trackId || '').trim()
++      if (!trackId) return
++      const playable = itemsRef.current.some(
++        (item) => item.id === trackId && (item.kind === 'audio' || item.kind === 'video'),
++      )
++      if (!playable) return
++      if (event?.detail) event.detail.accepted = true
++      try {
++        sessionStorage.setItem(`hana-postcard-welcome-${trackId}`, '1')
++      } catch {
++        /* ignore */
++      }
++      closeListeningPostcard()
++      skipTodayFromDeepLinkRef.current = true
++      setTodayOpen(false)
++      if (selectedItemId === trackId) {
++        shouldAutoPlayRef.current = true
++        const media = mediaRef.current
++        if (media && previewUrl && !loadingPreview) {
++          if (media.ended) media.currentTime = 0
++          const playPromise = media.play()
++          if (playPromise) {
++            playPromise
++              .then(() => {
++                shouldAutoPlayRef.current = false
++              })
++              .catch(() => {
++                /* canPlay may retry */
++              })
++          }
++          return
++        }
++      }
++      selectItem(trackId, true)
++    }
++    window.addEventListener(CHAT_PLAY_TRACK_EVENT, onPlayTrackFromChat)
++    return () => window.removeEventListener(CHAT_PLAY_TRACK_EVENT, onPlayTrackFromChat)
++  }, [
++    closeListeningPostcard,
++    selectedItemId,
++    previewUrl,
++    loadingPreview,
++    selectItem,
++  ])
++
+   const openListeningPostcard = useCallback((item, mode = 'share') => {
+     if (!item || item.kind !== 'audio') return
+     setPostcardMode(mode)

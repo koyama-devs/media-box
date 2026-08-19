@@ -1,0 +1,9 @@
+<ja-JP>
+・Google Play 向け初回リリース
+・公開ロビー＋ホスト承認で入室
+・オフラインモード＋オンライン対戦 / デイリー / ランキング
+・ゲーム内メッセージ表示を改善
+</ja-JP>
+
+
+hanachat hiện tại list sticker đang ở dạng popover nhưng giờ tôi muốn khi nhấn vào nút cion hình kirakira thì hiển thị list sticker dạng docker trồi lên từ dưới đến giữa màn hình, ngay phía trên đó sẽ là ô nhập text composer, khi nhấn vào nút bàn phím thì phần docker sticker sẽ chuyển thành bàn phím để bấm, khi chuyên đổi qua lại giữa 2 mode sticker và bà phím thì ô text composer vẫn ở nguyên 1 vị trí cố định ở giữa màn hình

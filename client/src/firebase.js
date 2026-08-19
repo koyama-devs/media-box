@@ -42,6 +42,23 @@ import {
     uploadBytesResumable,
 } from 'firebase/storage'
 import { collectAccessLogPayload } from './accessLog'
+import {
+    applyPokeWorldAction,
+    applyPokeWorldAdopt,
+    applyPokeWorldCafeClaim,
+    applyPokeWorldCafeOrder,
+    applyPokeWorldDuoAction,
+    applyPokeWorldNickname,
+    applyPokeWorldSelect,
+    applyPokeWorldVisit,
+    applyPokeWorldWake,
+    emptyPokeWorld,
+    pickWorldFindId,
+    serializePokeWorld,
+    tokyoZukanYmd,
+    worldDuoCared,
+    worldRole
+} from './pokeZukan'
 
 const firebaseConfig = {
   apiKey: 'AIzaSyBrzxY4sc2BC_5y1ymax08DkHbVoEKDo-8',
@@ -2093,6 +2110,7 @@ export function serializePokeZukan(raw) {
       giftedSpeciesId: String(expRaw.giftedSpeciesId || '').trim().slice(0, 12),
       giftedBy: String(expRaw.giftedBy || '').trim().slice(0, 12),
     },
+    world: serializePokeWorld(raw?.world || emptyPokeWorld()),
     entries,
   }
 }
@@ -2110,6 +2128,8 @@ function pokeRoleKey(role) {
   return role === 'hana' ? 'hana' : 'guest'
 }
 
+const pokeZukanPatches = new Map()
+
 function applyDuoStar(prev, ymd) {
   const hanaDone = prev.hanaDoneYmd === ymd
   const guestDone = prev.guestDoneYmd === ymd
@@ -2126,12 +2146,144 @@ function applyDuoStar(prev, ymd) {
 async function patchPokeZukan(threadId, mutator) {
   const tid = String(threadId || '').trim()
   if (!tid) throw new Error('スレッドがありません。')
-  const ref = doc(db, CHAT_THREADS_COLLECTION, tid)
-  const snap = await getDoc(ref)
-  const prev = serializePokeZukan(snap.exists() ? snap.data()?.pokeZukan : null)
-  const next = serializePokeZukan(mutator(prev))
-  await setDoc(ref, { pokeZukan: next }, { merge: true })
-  return next
+  const prevWrite = pokeZukanPatches.get(tid) || Promise.resolve()
+  const write = prevWrite.catch(() => {}).then(async () => {
+    const ref = doc(db, CHAT_THREADS_COLLECTION, tid)
+    const snap = await getDoc(ref)
+    const prev = serializePokeZukan(snap.exists() ? snap.data()?.pokeZukan : null)
+    const next = serializePokeZukan(mutator(prev))
+    await setDoc(ref, { pokeZukan: next }, { merge: true })
+    return next
+  })
+  pokeZukanPatches.set(tid, write)
+  return write
+}
+
+function applyWorldDuoStar(prev, ymd) {
+  if (!worldDuoCared(prev.world, ymd)) return prev
+  if (String(prev.duoStarYmd || '') === ymd) return prev
+  return {
+    ...prev,
+    duoStars: prev.duoStars + 1,
+    duoStreak: prev.duoStreak + 1,
+    duoStarYmd: ymd,
+    hanaDoneYmd: ymd,
+    guestDoneYmd: ymd,
+  }
+}
+
+export async function adoptPokeWorldPartner(threadId, { role, speciesId } = {}) {
+  const sid = String(Number(speciesId) || '').trim()
+  return patchPokeZukan(threadId, (prev) => {
+    const world = applyPokeWorldAdopt(prev.world, { role, speciesId: sid })
+    const entries = { ...prev.entries }
+    if (!entries[sid]) {
+      entries[sid] = {
+        caughtAtIso: new Date().toISOString(),
+        photoUrl: '',
+        foil: false,
+        nickname: '',
+      }
+    }
+    return { ...prev, world, entries, partyIds: [sid, ...prev.partyIds.filter((id) => id !== sid)].slice(0, 3) }
+  })
+}
+
+export async function visitPokeWorldPlace(threadId, { role, place } = {}) {
+  const tid = String(threadId || '').trim()
+  if (!tid) throw new Error('スレッドがありません。')
+  return patchPokeZukan(tid, (prev) => {
+    const { world } = applyPokeWorldVisit(prev.world, { role, place })
+    return { ...prev, world }
+  })
+}
+
+export async function wakePokeWorld(threadId, { role } = {}) {
+  return patchPokeZukan(threadId, (prev) => ({
+    ...prev,
+    world: applyPokeWorldWake(prev.world, { role }),
+  }))
+}
+
+export async function syncPokeWorld(threadId) {
+  return patchPokeZukan(threadId, (prev) => prev)
+}
+
+export async function selectPokeWorldMon(threadId, { role, monId } = {}) {
+  return patchPokeZukan(threadId, (prev) => ({
+    ...prev,
+    world: applyPokeWorldSelect(prev.world, { role, monId }),
+  }))
+}
+
+export async function actPokeWorld(threadId, { role, action, ymd } = {}) {
+  const day = String(ymd || tokyoZukanYmd())
+  return patchPokeZukan(threadId, (prev) => {
+    const foundId = action === 'find' ? pickWorldFindId(prev.entries, day) : ''
+    const { world, evolvedTo } = applyPokeWorldAction(prev.world, { role, action, findId: foundId })
+    const entries = { ...prev.entries }
+    if (foundId && !entries[foundId]) {
+      entries[foundId] = {
+        caughtAtIso: new Date().toISOString(),
+        photoUrl: '',
+        foil: false,
+        nickname: '',
+      }
+    }
+    if (evolvedTo && !entries[evolvedTo]) {
+      entries[evolvedTo] = {
+        caughtAtIso: new Date().toISOString(),
+        photoUrl: '',
+        foil: false,
+        nickname: '',
+      }
+    }
+    const next = { ...prev, world, entries }
+    if (foundId) {
+      const who = worldRole(role)
+      next.hanaDoneYmd = who === 'hana' ? day : prev.hanaDoneYmd
+      next.guestDoneYmd = who === 'guest' ? day : prev.guestDoneYmd
+    }
+    return applyWorldDuoStar(next, day)
+  })
+}
+
+export async function duoActPokeWorld(threadId, { role, action } = {}) {
+  return patchPokeZukan(threadId, (prev) => {
+    const { world } = applyPokeWorldDuoAction(prev.world, { role, action })
+    return { ...prev, world }
+  })
+}
+
+export async function orderPokeCafe(threadId, { role, itemId, target } = {}) {
+  return patchPokeZukan(threadId, (prev) => {
+    const { world, evolvedTo } = applyPokeWorldCafeOrder(prev.world, { role, itemId, target })
+    const entries = { ...prev.entries }
+    if (evolvedTo && !entries[evolvedTo]) {
+      entries[evolvedTo] = {
+        caughtAtIso: new Date().toISOString(),
+        photoUrl: '',
+        foil: false,
+        nickname: '',
+      }
+    }
+    return applyWorldDuoStar({ ...prev, world, entries }, tokyoZukanYmd())
+  })
+}
+
+export async function claimPokeCafeGift(threadId, { role, giftId } = {}) {
+  return patchPokeZukan(threadId, (prev) => {
+    const { world } = applyPokeWorldCafeClaim(prev.world, { role, giftId })
+    return { ...prev, world }
+  })
+}
+
+export async function nicknamePokeWorldPartner(threadId, { role, nickname } = {}) {
+  const name = String(nickname || '').trim().slice(0, 16)
+  return patchPokeZukan(threadId, (prev) => ({
+    ...prev,
+    world: applyPokeWorldNickname(prev.world, { role, nickname: name }),
+  }))
 }
 
 export async function recordPokeZukanCatch(threadId, { role, speciesId, ymd, foil = false } = {}) {
@@ -2516,6 +2668,12 @@ export function deliveryStatusLabel(status) {
   return ''
 }
 
+function rowsFromMessageSnap(snap) {
+  return snap.docs
+    .map((document) => serializeChatMessage(document.id, document.data()))
+    .filter((message) => !message.deleted)
+}
+
 /** @returns {() => void} */
 export function subscribeChatMessages(threadId, onData, onError) {
   if (!threadId) {
@@ -2525,18 +2683,36 @@ export function subscribeChatMessages(threadId, onData, onError) {
   // Must orderBy newest-first. limit(N) alone returns arbitrary/oldest docs,
   // so new sends never appear in the bubble list (push/preview still work).
   const messagesRef = collection(db, CHAT_THREADS_COLLECTION, threadId, 'messages')
-  return onSnapshot(
+  let isoRows = []
+  let createdRows = []
+  const emit = () => {
+    const byId = new Map()
+    createdRows.forEach((row) => byId.set(row.id, row))
+    isoRows.forEach((row) => byId.set(row.id, row))
+    onData?.(sortChatMessages([...byId.values()]))
+  }
+  const unsubIso = onSnapshot(
     query(messagesRef, orderBy('createdAtIso', 'desc'), limit(300)),
     (snap) => {
-      const rows = sortChatMessages(
-        snap.docs
-          .map((document) => serializeChatMessage(document.id, document.data()))
-          .filter((message) => !message.deleted),
-      )
-      onData?.(rows)
+      isoRows = rowsFromMessageSnap(snap)
+      emit()
     },
     (error) => onError?.(error),
   )
+  // Old docs may lack createdAtIso and miss the main query. Keep that query;
+  // merge a createdAt fallback so history still paints.
+  const unsubCreated = onSnapshot(
+    query(messagesRef, orderBy('createdAt', 'desc'), limit(300)),
+    (snap) => {
+      createdRows = rowsFromMessageSnap(snap)
+      emit()
+    },
+    () => {},
+  )
+  return () => {
+    unsubIso()
+    unsubCreated()
+  }
 }
 
 const CHAT_CALLS_SUBCOLLECTION = 'calls'
@@ -2840,6 +3016,20 @@ export function subscribeChatCallCandidates(threadId, callId, role, onCandidate,
   )
 }
 
+async function collectLegacyMessageDocs(messagesRef) {
+  const byId = new Map()
+  const take = (snap) => {
+    snap?.docs?.forEach((document) => byId.set(document.id, document))
+  }
+  take(await getDocs(query(messagesRef, orderBy('createdAtIso', 'desc'), limit(300))))
+  try {
+    take(await getDocs(query(messagesRef, orderBy('createdAt', 'desc'), limit(300))))
+  } catch {
+    /* createdAt index/query is optional */
+  }
+  return [...byId.values()]
+}
+
 /**
  * If a known guest still has history on a legacy UUID thread, copy it into guest-{key}
  * so owner + guest share one conversation.
@@ -2855,18 +3045,24 @@ export async function migrateLegacyGuestThread({
     return canonicalId || legacyThreadId
   }
 
-  // Fast path: canonical already has history — open that, not the legacy id.
   const canonMessagesRef = collection(db, CHAT_THREADS_COLLECTION, canonicalId, 'messages')
-  const canonSnap = await getDocs(query(canonMessagesRef, limit(1)))
-  if (!canonSnap.empty) return canonicalId
-
   const legacyMessagesRef = collection(db, CHAT_THREADS_COLLECTION, legacyThreadId, 'messages')
-  const [legacySnap, legacyThreadSnap] = await Promise.all([
-    getDocs(query(legacyMessagesRef, limit(200))),
+
+  // Only skip copy when canonical already has queryable newest messages.
+  const canonIsoSnap = await getDocs(query(
+    canonMessagesRef,
+    orderBy('createdAtIso', 'desc'),
+    limit(1),
+  ))
+  if (!canonIsoSnap.empty) return canonicalId
+
+  const [legacyDocs, legacyThreadSnap] = await Promise.all([
+    collectLegacyMessageDocs(legacyMessagesRef),
     getDoc(doc(db, CHAT_THREADS_COLLECTION, legacyThreadId)),
   ])
 
-  if (legacySnap.empty) return canonicalId
+  // Empty canonical must not steal the live UUID thread.
+  if (!legacyDocs.length) return legacyThreadId
 
   const legacyMeta = legacyThreadSnap.exists() ? legacyThreadSnap.data() : {}
   const nowIso = new Date().toISOString()
@@ -2889,11 +3085,18 @@ export async function migrateLegacyGuestThread({
     { merge: true },
   )
 
-  const docs = legacySnap.docs
-  for (let i = 0; i < docs.length; i += 50) {
+  for (let i = 0; i < legacyDocs.length; i += 50) {
     const batch = writeBatch(db)
-    docs.slice(i, i + 50).forEach((messageDoc) => {
-      batch.set(doc(canonMessagesRef, messageDoc.id), messageDoc.data(), { merge: true })
+    legacyDocs.slice(i, i + 50).forEach((messageDoc) => {
+      const data = messageDoc.data() || {}
+      const createdAtIso = data.createdAtIso
+        || data.createdAt?.toDate?.()?.toISOString?.()
+        || nowIso
+      batch.set(
+        doc(canonMessagesRef, messageDoc.id),
+        { ...data, createdAtIso },
+        { merge: true },
+      )
     })
     await batch.commit()
   }
@@ -3022,27 +3225,26 @@ export async function resolveGuestThreadWithHistory({
   const rows = [...candidates.values()]
   if (!rows.length) return preferredId || canon || ''
 
-  // Empty guest-{key} shells often beat UUID threads that still hold history but
-  // lack lastText. Probe messages so real history always wins.
+  // Empty guest-{key} shells (poke/weight writes) often have lastText leftover
+  // or no lastText at all. Always probe queryable messages so real history wins.
   await Promise.all(rows.map(async (entry) => {
-    if (String(entry.lastText || '').trim()) {
-      entry._hasMessages = true
-      return
-    }
+    const messagesRef = collection(db, CHAT_THREADS_COLLECTION, entry.id, 'messages')
     try {
-      const snap = await getDocs(query(
-        collection(db, CHAT_THREADS_COLLECTION, entry.id, 'messages'),
-        limit(1),
-      ))
-      entry._hasMessages = !snap.empty
+      const isoSnap = await getDocs(query(messagesRef, orderBy('createdAtIso', 'desc'), limit(1)))
+      if (!isoSnap.empty) {
+        entry._hasMessages = true
+        return
+      }
+      const createdSnap = await getDocs(query(messagesRef, orderBy('createdAt', 'desc'), limit(1)))
+      entry._hasMessages = !createdSnap.empty
     } catch {
-      entry._hasMessages = false
+      entry._hasMessages = Boolean(String(entry.lastText || '').trim())
     }
   }))
 
   rows.sort((a, b) => {
     const score = (entry) => {
-      const hasHistory = (String(entry.lastText || '').trim() || entry._hasMessages) ? 40 : 0
+      const hasHistory = entry._hasMessages ? 40 : 0
       // Prefer canonical guest-{key} when it already has history so new sends
       // land where reopen will look.
       const canonWithHistory = canon && entry.id === canon && entry._hasMessages ? 16 : 0

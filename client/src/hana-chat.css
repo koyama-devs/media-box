@@ -4520,7 +4520,9 @@ body.hana-chat-scroll-lock #root {
 .hana-chat-poke-dock .hana-chat-poke-panel {
   pointer-events: auto;
   max-height: min(74vh, 560px);
+  max-height: min(74lvh, 560px);
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 12px 12px 14px;
   border-radius: 16px;
   border: 1px solid rgba(186, 230, 253, 0.28);
@@ -5136,10 +5138,13 @@ body.hana-chat-scroll-lock #root {
 }
 
 .hana-chat-poke-gift {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   min-height: 36px;
+  padding: 6px 10px;
   border-radius: 12px;
   border: 1px solid rgba(186, 230, 253, 0.35);
   background: rgba(186, 230, 253, 0.12);
@@ -5147,6 +5152,25 @@ body.hana-chat-scroll-lock #root {
   font: inherit;
   font-size: 0.78rem;
   cursor: pointer;
+}
+
+.hana-chat-poke-gift.is-cafe {
+  border-color: rgba(251, 191, 36, 0.4);
+  background: rgba(251, 191, 36, 0.14);
+}
+
+.hana-chat-poke-gift b {
+  font-size: 1.05rem;
+}
+
+.hana-chat-poke-gift span {
+  flex: 1;
+  text-align: left;
+}
+
+.hana-chat-poke-gift strong {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
 }
 
 .hana-chat-poke-regions {
@@ -5166,6 +5190,1159 @@ body.hana-chat-scroll-lock #root {
   border-radius: 10px;
   background: rgba(255, 248, 240, 0.05);
   font-size: 0.68rem;
+}
+
+.hana-chat-poke-map {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 10px;
+}
+
+.hana-chat-poke-map button {
+  flex: 1 1 0;
+  min-width: 56px;
+  min-height: 34px;
+  padding: 6px 4px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 248, 240, 0.14);
+  background: rgba(255, 248, 240, 0.05);
+  color: rgba(255, 248, 240, 0.78);
+  font: inherit;
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.hana-chat-poke-map button.is-here {
+  border-color: rgba(186, 230, 253, 0.55);
+  background: rgba(186, 230, 253, 0.18);
+  color: #fffaf5;
+}
+
+.hana-chat-poke-scene {
+  position: relative;
+  overflow: hidden;
+  min-height: 176px;
+  margin: 0 0 10px;
+  padding: 10px 10px 58px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 248, 240, 0.12);
+  transition: background 0.45s ease, border-color 0.45s ease;
+}
+
+.hana-chat-poke-scene.is-sleeping {
+  padding-bottom: 72px;
+  background: #12141f;
+  border-color: rgba(90, 110, 170, 0.28);
+}
+
+.hana-chat-poke-scene.is-sleeping .hana-chat-poke-scene-people {
+  opacity: 0.38;
+}
+
+.hana-chat-poke-scene.is-sleeping .hana-chat-poke-glow {
+  opacity: 0;
+}
+
+.hana-chat-poke-bed-btn {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 4;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 248, 240, 0.22);
+  border-radius: 999px;
+  background: rgba(18, 20, 32, 0.72);
+  color: #fff8f0;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.hana-chat-poke-scene.is-sleeping .hana-chat-poke-bed-btn {
+  border-color: rgba(165, 180, 255, 0.35);
+  background: rgba(40, 48, 78, 0.82);
+}
+
+.hana-chat-poke-cafe-menu {
+  margin: 0 0 10px;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 248, 240, 0.14);
+  background: rgba(42, 28, 24, 0.72);
+}
+
+.hana-chat-poke-cafe-menu-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.hana-chat-poke-cafe-menu-head strong {
+  flex: 1;
+  font-size: 0.82rem;
+}
+
+.hana-chat-poke-cafe-menu-head span {
+  font-size: 0.72rem;
+  opacity: 0.8;
+}
+
+.hana-chat-poke-cafe-menu-head button {
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 248, 240, 0.2);
+  background: rgba(255, 248, 240, 0.08);
+  color: inherit;
+  font: inherit;
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.hana-chat-poke-cafe-group {
+  margin: 0 0 8px;
+}
+
+.hana-chat-poke-cafe-group h4 {
+  margin: 0 0 4px;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  color: rgba(255, 248, 240, 0.62);
+}
+
+.hana-chat-poke-cafe-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.hana-chat-poke-cafe-group li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px 6px 4px;
+  border-radius: 10px;
+  background: rgba(255, 248, 240, 0.06);
+}
+
+.hana-chat-poke-cafe-emoji {
+  text-align: center;
+  font-size: 1.05rem;
+}
+
+.hana-chat-poke-cafe-group li div {
+  min-width: 0;
+}
+
+.hana-chat-poke-cafe-group li strong {
+  display: block;
+  font-size: 0.74rem;
+}
+
+.hana-chat-poke-cafe-group li small {
+  display: block;
+  font-size: 0.58rem;
+  opacity: 0.7;
+}
+
+.hana-chat-poke-cafe-group li button {
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.14);
+  color: inherit;
+  font: inherit;
+  font-size: 0.62rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.hana-chat-poke-cafe-group li button:last-child {
+  border-color: rgba(186, 230, 253, 0.35);
+  background: rgba(186, 230, 253, 0.14);
+}
+
+.hana-chat-poke-cafe-group li button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.hana-chat-poke-set {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.hana-chat-poke-scene-people,
+.hana-chat-poke-scene-mon,
+.hana-chat-poke-scene-foe,
+.hana-chat-poke-scene-cap {
+  position: relative;
+  z-index: 1;
+}
+
+.hana-chat-poke-scene-people {
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.hana-chat-poke-scene-me img,
+.hana-chat-poke-scene-them img,
+.hana-chat-poke-scene-me em,
+.hana-chat-poke-scene-them em {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.28);
+}
+
+.hana-chat-poke-scene-me em,
+.hana-chat-poke-scene-them em {
+  display: grid;
+  place-items: center;
+  background: rgba(255, 248, 240, 0.2);
+  font-size: 0.72rem;
+  font-style: normal;
+}
+
+.hana-chat-poke-scene-mon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 4px;
+  position: relative;
+}
+
+.hana-chat-poke-figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transform-origin: 50% 90%;
+  animation: poke-idle 3.6s ease-in-out infinite;
+}
+
+.hana-chat-poke-scene-mon.is-small .hana-chat-poke-figure { animation-duration: 2.4s; }
+.hana-chat-poke-scene-mon.is-heavy .hana-chat-poke-figure { animation-duration: 4.8s; }
+.hana-chat-poke-scene-mon.is-playful .hana-chat-poke-figure { animation-duration: 2.2s; }
+.hana-chat-poke-scene-mon.is-sleepy .hana-chat-poke-figure { animation-duration: 5.2s; }
+.hana-chat-poke-scene-mon.is-shy .hana-chat-poke-figure { animation-name: poke-idle-shy; }
+.hana-chat-poke-scene-mon.is-proud .hana-chat-poke-figure { animation-name: poke-idle-proud; }
+
+.hana-chat-poke-nametag {
+  position: relative;
+  z-index: 2;
+  max-width: 148px;
+  margin: 0 0 4px;
+  padding: 3px 11px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #fffdf8 0%, #ffe9f0 100%);
+  color: #5a3048;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.7),
+    0 3px 0 #f4b3c4,
+    0 6px 12px rgba(90, 40, 60, 0.22);
+}
+
+.hana-chat-poke-nametag::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  background: #ffe9f0;
+  transform: rotate(45deg);
+  box-shadow: 2px 2px 0 #f4b3c4;
+}
+
+.hana-chat-poke-nametag.is-nick {
+  padding-left: 22px;
+  background: linear-gradient(180deg, #fff8fc 0%, #ffd6e8 100%);
+}
+
+.hana-chat-poke-nametag.is-nick::before {
+  content: '♡';
+  position: absolute;
+  left: 7px;
+  top: 50%;
+  transform: translateY(-52%);
+  color: #ef7aa0;
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+
+.hana-chat-poke-nametag.is-mini {
+  max-width: 72px;
+  margin-bottom: 2px;
+  padding: 1px 6px 2px;
+  font-size: 0.52rem;
+  box-shadow:
+    0 0 0 1.5px rgba(255, 255, 255, 0.7),
+    0 2px 0 #f4b3c4,
+    0 4px 8px rgba(90, 40, 60, 0.18);
+}
+
+.hana-chat-poke-nametag.is-mini.is-nick {
+  padding-left: 14px;
+}
+
+.hana-chat-poke-nametag.is-mini.is-nick::before {
+  left: 4px;
+  font-size: 0.48rem;
+}
+
+.hana-chat-poke-nametag.is-mini::after {
+  bottom: -4px;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+}
+
+.hana-chat-poke-scene-mon img {
+  width: 108px;
+  height: 108px;
+  object-fit: contain;
+}
+
+.hana-chat-poke-sleep {
+  position: relative;
+  display: grid;
+  place-items: end center;
+  width: 156px;
+  min-height: 118px;
+}
+
+.hana-chat-poke-sleep .hana-chat-poke-nest {
+  position: absolute;
+  left: 50%;
+  bottom: -4px;
+  z-index: 0;
+  width: 156px;
+  height: 76px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.hana-chat-poke-sleep img {
+  position: relative;
+  z-index: 1;
+}
+
+.hana-chat-poke-sleep .hana-chat-poke-cover {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  z-index: 2;
+  width: 132px;
+  height: 52px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.hana-chat-poke-sleep.is-mini {
+  width: 64px;
+  min-height: 48px;
+}
+
+.hana-chat-poke-sleep.is-mini .hana-chat-poke-nest {
+  width: 64px;
+  height: 32px;
+  bottom: -1px;
+}
+
+.hana-chat-poke-sleep.is-mini .hana-chat-poke-cover {
+  width: 56px;
+  height: 24px;
+  bottom: 4px;
+}
+
+.hana-chat-poke-scene-mon.is-asleep .hana-chat-poke-figure {
+  animation: none;
+}
+
+.hana-chat-poke-scene-mon.is-asleep .hana-chat-poke-sleep {
+  animation: poke-sleep-breathe 2.8s ease-in-out infinite;
+  width: 200px;
+  height: 108px;
+  min-height: 108px;
+}
+
+.hana-chat-poke-scene-foe.is-asleep .hana-chat-poke-sleep {
+  animation: poke-sleep-breathe 2.8s ease-in-out infinite;
+}
+
+.hana-chat-poke-scene-mon.is-asleep .hana-chat-poke-nest {
+  width: 200px;
+  height: 108px;
+  bottom: 0;
+}
+
+.hana-chat-poke-scene-mon.is-asleep img,
+.hana-chat-poke-scene-foe.is-asleep img {
+  position: absolute;
+  left: 22px;
+  bottom: 34px;
+  width: 42px;
+  height: 42px;
+  transform: rotate(-90deg) translate(4px, 2px);
+  transform-origin: 50% 70%;
+  z-index: 1;
+  animation: none;
+}
+
+.hana-chat-poke-scene-mon.is-asleep .hana-chat-poke-cover {
+  left: 46px;
+  right: 12px;
+  bottom: 28px;
+  width: auto;
+  height: 58px;
+  transform: none;
+  z-index: 2;
+}
+
+.hana-chat-poke-scene-foe.is-asleep img {
+  left: 6px;
+  bottom: 14px;
+  width: 24px;
+  height: 24px;
+}
+
+.hana-chat-poke-scene-foe.is-asleep .hana-chat-poke-cover {
+  left: 16px;
+  right: 2px;
+  bottom: 10px;
+  height: 28px;
+}
+
+.hana-chat-poke-scene-mon.is-asleep .hana-chat-poke-sleep::after,
+.hana-chat-poke-scene-foe.is-asleep .hana-chat-poke-sleep::after {
+  content: 'Z';
+  position: absolute;
+  top: -2px;
+  left: 22px;
+  right: auto;
+  z-index: 3;
+  color: #c5d8ff;
+  font-size: 0.78rem;
+  font-weight: 800;
+  animation: poke-sleep-z 2.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.hana-chat-poke-scene-foe.is-asleep .hana-chat-poke-sleep::after {
+  font-size: 0.5rem;
+  right: 0;
+  top: -2px;
+}
+
+@keyframes poke-sleep-breathe {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(2px); }
+}
+
+@keyframes poke-sleep-z {
+  0% { opacity: 0.2; transform: translate(0, 4px) scale(0.8); }
+  50% { opacity: 1; transform: translate(6px, -8px) scale(1); }
+  100% { opacity: 0; transform: translate(10px, -16px) scale(1.1); }
+}
+
+.hana-chat-poke-scene-mon.is-act-pet .hana-chat-poke-figure { animation: poke-pet 0.65s ease; }
+.hana-chat-poke-scene-mon.is-act-feed .hana-chat-poke-figure { animation: poke-feed 0.68s ease; }
+.hana-chat-poke-scene-mon.is-act-walk .hana-chat-poke-figure { animation: poke-walk 0.72s ease; }
+.hana-chat-poke-scene-mon.is-act-find .hana-chat-poke-figure { animation: poke-find 0.62s ease; }
+.hana-chat-poke-scene-mon.is-act-cafe .hana-chat-poke-figure { animation: poke-cafe 0.68s ease; }
+.hana-chat-poke-scene-mon.is-act-train .hana-chat-poke-figure { animation: poke-train 0.62s ease; }
+.hana-chat-poke-scene-mon.is-act-evolve .hana-chat-poke-figure { animation: poke-evolve 0.88s ease; }
+.hana-chat-poke-scene-mon.is-act-nap .hana-chat-poke-figure { animation: poke-nap-body 0.7s ease; }
+.hana-chat-poke-scene-mon.is-act-treat .hana-chat-poke-figure { animation: poke-cafe 0.72s ease; }
+.hana-chat-poke-scene-mon.is-act-petFriend .hana-chat-poke-figure { animation: poke-pet 0.7s ease; }
+.hana-chat-poke-scene-mon.is-act-cheer .hana-chat-poke-figure { animation: poke-train 0.7s ease; }
+.hana-chat-poke-scene-mon.is-act-gift .hana-chat-poke-figure { animation: poke-free 0.72s ease; }
+.hana-chat-poke-scene-mon.is-act-duo .hana-chat-poke-figure { animation: poke-duo 0.8s ease; }
+.hana-chat-poke-scene-mon.is-act-free .hana-chat-poke-figure { animation: poke-free 0.56s ease; }
+.hana-chat-poke-scene-mon.is-act-freecombo .hana-chat-poke-figure { animation: poke-freecombo 0.78s ease; }
+.hana-chat-poke-scene-mon.is-act-nap img { animation: poke-nap 0.7s ease; }
+.hana-chat-poke-scene-mon.is-asleep .hana-chat-poke-figure,
+.hana-chat-poke-scene-mon.is-asleep.is-act-nap .hana-chat-poke-figure,
+.hana-chat-poke-scene-mon.is-asleep.is-act-free .hana-chat-poke-figure {
+  animation: none;
+}
+.hana-chat-poke-scene-mon.is-asleep img,
+.hana-chat-poke-scene-mon.is-asleep.is-act-nap img,
+.hana-chat-poke-scene-mon.is-asleep.is-act-free img {
+  animation: none;
+  transform: rotate(-90deg) translate(4px, 2px);
+}
+
+.hana-chat-poke-fx {
+  position: absolute;
+  inset: 8px 0 auto;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.hana-chat-poke-fx span {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  opacity: 0;
+  font-weight: 800;
+  animation: poke-fx-pop 0.5s ease forwards;
+}
+
+.hana-chat-poke-fx span:nth-child(1) { --dx: -44px; --dy: -56px; --delay: 0ms; }
+.hana-chat-poke-fx span:nth-child(2) { --dx: 40px; --dy: -52px; --delay: 35ms; }
+.hana-chat-poke-fx span:nth-child(3) { --dx: -26px; --dy: -20px; --delay: 70ms; }
+.hana-chat-poke-fx span:nth-child(4) { --dx: 30px; --dy: -18px; --delay: 110ms; }
+.hana-chat-poke-fx span:nth-child(5) { --dx: 0px; --dy: -68px; --delay: 150ms; }
+.hana-chat-poke-fx span:nth-child(6) { --dx: -52px; --dy: -30px; --delay: 190ms; }
+.hana-chat-poke-fx span:nth-child(7) { --dx: 52px; --dy: -30px; --delay: 230ms; }
+
+.hana-chat-poke-fx.is-pet span { color: #ff9bc4; font-size: 1rem; }
+.hana-chat-poke-fx.is-feed span { color: #ffd78f; font-size: 0.94rem; }
+.hana-chat-poke-fx.is-nap span { color: #b9d5ff; font-size: 0.96rem; }
+.hana-chat-poke-fx.is-walk span { color: #c2f2d5; font-size: 0.9rem; }
+.hana-chat-poke-fx.is-find span { color: #ffe99a; font-size: 1.02rem; }
+.hana-chat-poke-fx.is-cafe span { color: #f8c2a8; font-size: 0.92rem; }
+.hana-chat-poke-fx.is-train span { color: #ffb7a8; font-size: 1.02rem; }
+.hana-chat-poke-fx.is-evolve span { color: #f6de8c; font-size: 1.08rem; }
+
+.hana-chat-poke-scene-foe {
+  position: absolute;
+  right: 10px;
+  bottom: 28px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  pointer-events: none;
+}
+
+.hana-chat-poke-scene-foe img {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+}
+
+.hana-chat-poke-scene-foe span {
+  font-size: 0.58rem;
+  color: rgba(255, 248, 240, 0.78);
+}
+
+.hana-chat-poke-scene-foe.is-duo {
+  animation: poke-duo-mate 0.8s ease;
+}
+
+.hana-chat-poke-bubble {
+  margin: 2px 0 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 248, 240, 0.92);
+  color: #2a1814;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.hana-chat-poke-scene-mon[class*='is-act-'] .hana-chat-poke-bubble {
+  animation: poke-bubble-pop 1.2s ease;
+}
+
+.hana-chat-poke-scene.is-shake {
+  animation: poke-scene-shake 0.46s ease;
+}
+
+.hana-chat-poke-duo {
+  margin: 0 0 8px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(186, 230, 253, 0.28);
+  background: rgba(186, 230, 253, 0.08);
+}
+
+.hana-chat-poke-duo-copy {
+  margin: 0 0 6px;
+  font-size: 0.68rem;
+  color: rgba(255, 248, 240, 0.88);
+}
+
+.hana-chat-poke-duo-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.hana-chat-poke-duo-actions button {
+  min-height: 42px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(252, 211, 77, 0.35);
+  background: rgba(252, 211, 77, 0.16);
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 1px;
+}
+
+.hana-chat-poke-duo-actions button strong {
+  font-size: 0.66rem;
+}
+
+.hana-chat-poke-duo-actions button span {
+  font-size: 0.56rem;
+  opacity: 0.82;
+}
+
+.hana-chat-poke-scene-cap {
+  margin: 6px 0 0;
+  text-align: center;
+  font-size: 0.68rem;
+  color: rgba(255, 248, 240, 0.82);
+}
+
+.hana-chat-poke-scene-mon.is-live {
+  touch-action: manipulation;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  outline: none;
+}
+
+.hana-chat-poke-guide {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  z-index: 4;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px 9px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 236, 214, 0.42);
+  background: linear-gradient(180deg, rgba(36, 28, 44, 0.94), rgba(18, 16, 28, 0.92));
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.32);
+  color: #fff8ee;
+  animation: poke-guide-in 0.32s ease;
+  pointer-events: none;
+}
+
+.hana-chat-poke-guide-mark {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 42%, #fff 0 5px, #c45c4a 5.5px 7px, #fffaf2 7.5px);
+  box-shadow: 0 0 0 2px rgba(255, 248, 240, 0.35);
+}
+
+.hana-chat-poke-guide p {
+  margin: 0;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.hana-chat-poke-guide strong {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  line-height: 1.3;
+}
+
+.hana-chat-poke-guide span {
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: rgba(255, 236, 214, 0.78);
+}
+
+.hana-chat-poke-guide.is-say {
+  border-color: rgba(242, 184, 196, 0.55);
+}
+
+.hana-chat-poke-guide.is-ok {
+  border-color: rgba(252, 211, 77, 0.65);
+}
+
+.hana-chat-poke-guide.is-wait {
+  border-color: rgba(186, 230, 253, 0.4);
+}
+
+@keyframes poke-guide-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.hana-chat-poke-party {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.hana-chat-poke-party button {
+  width: 40px;
+  height: 40px;
+  padding: 2px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 248, 240, 0.16);
+  background: rgba(255, 248, 240, 0.06);
+  color: inherit;
+  cursor: pointer;
+}
+
+.hana-chat-poke-party button.is-on {
+  border-color: rgba(186, 230, 253, 0.7);
+  background: rgba(186, 230, 253, 0.18);
+}
+
+.hana-chat-poke-party button.is-add {
+  font-size: 1.35rem;
+  line-height: 1;
+  min-width: 44px;
+  min-height: 44px;
+  width: 44px;
+  height: 44px;
+}
+
+.hana-chat-poke-party img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.hana-chat-poke-acts button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+
+.hana-chat-poke-acts button small {
+  font-size: 0.58rem;
+  opacity: 0.72;
+}
+
+@keyframes poke-idle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes poke-idle-shy {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-2px) rotate(-4deg); }
+}
+
+@keyframes poke-idle-proud {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-2px) scale(1.03); }
+}
+
+@keyframes poke-nap {
+  0%, 100% { transform: rotate(0); }
+  50% { transform: rotate(-12deg); }
+}
+
+@keyframes poke-pet {
+  0% { transform: translateY(0) scale(1); }
+  35% { transform: translateY(-6px) scale(1.04); }
+  70% { transform: translateY(-2px) scale(1.02); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes poke-feed {
+  0% { transform: translateY(0) rotate(0deg); }
+  28% { transform: translateY(-6px) rotate(-4deg); }
+  55% { transform: translateY(-4px) rotate(4deg); }
+  100% { transform: translateY(0) rotate(0deg); }
+}
+
+@keyframes poke-walk {
+  0% { transform: translateX(0) translateY(0); }
+  25% { transform: translateX(-8px) translateY(-3px); }
+  50% { transform: translateX(8px) translateY(-1px); }
+  75% { transform: translateX(-5px) translateY(-2px); }
+  100% { transform: translateX(0) translateY(0); }
+}
+
+@keyframes poke-find {
+  0% { transform: translateY(0) rotate(0deg); }
+  28% { transform: translateY(-7px) rotate(-8deg); }
+  58% { transform: translateY(-7px) rotate(8deg); }
+  100% { transform: translateY(0) rotate(0deg); }
+}
+
+@keyframes poke-cafe {
+  0% { transform: translateY(0) scale(1); }
+  40% { transform: translateY(-6px) scale(1.03); }
+  60% { transform: translateY(-3px) scale(0.98); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes poke-train {
+  0% { transform: translateY(0) rotate(0deg); }
+  22% { transform: translateY(-8px) rotate(-7deg); }
+  45% { transform: translateY(-2px) rotate(8deg); }
+  68% { transform: translateY(-6px) rotate(-6deg); }
+  100% { transform: translateY(0) rotate(0deg); }
+}
+
+@keyframes poke-evolve {
+  0% { transform: scale(1) rotate(0deg); filter: brightness(1); }
+  35% { transform: scale(1.12) rotate(4deg); filter: brightness(1.18); }
+  68% { transform: scale(1.08) rotate(-4deg); filter: brightness(1.15); }
+  100% { transform: scale(1) rotate(0deg); filter: brightness(1); }
+}
+
+@keyframes poke-nap-body {
+  0% { transform: translateY(0); }
+  32% { transform: translateY(2px); }
+  66% { transform: translateY(-2px); }
+  100% { transform: translateY(0); }
+}
+
+@keyframes poke-free {
+  0% { transform: translateY(0) scale(1); }
+  30% { transform: translateY(-6px) scale(1.05) rotate(-3deg); }
+  60% { transform: translateY(-2px) scale(1.02) rotate(3deg); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes poke-freecombo {
+  0% { transform: translateY(0) scale(1); }
+  20% { transform: translateY(-8px) scale(1.08) rotate(-6deg); }
+  45% { transform: translateY(-4px) scale(1.04) rotate(7deg); }
+  70% { transform: translateY(-7px) scale(1.07) rotate(-5deg); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes poke-duo {
+  0% { transform: translateX(0) translateY(0) scale(1); }
+  30% { transform: translateX(8px) translateY(-5px) scale(1.04); }
+  60% { transform: translateX(5px) translateY(-2px) scale(1.02); }
+  100% { transform: translateX(0) translateY(0) scale(1); }
+}
+
+@keyframes poke-duo-mate {
+  0% { transform: translateX(0) translateY(0); }
+  30% { transform: translateX(-8px) translateY(-5px); }
+  60% { transform: translateX(-5px) translateY(-2px); }
+  100% { transform: translateX(0) translateY(0); }
+}
+
+@keyframes poke-fx-pop {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+  18% { opacity: 1; transform: translate(calc(-50% + var(--dx) * 0.35), calc(-50% + var(--dy) * 0.35)) scale(1); }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(1.08); }
+}
+
+@keyframes poke-bubble-pop {
+  0% { transform: translateY(2px) scale(0.94); opacity: 0.2; }
+  25% { transform: translateY(-2px) scale(1.05); opacity: 1; }
+  78% { transform: translateY(0) scale(1); opacity: 1; }
+  100% { transform: translateY(-2px) scale(0.98); opacity: 0; }
+}
+
+@keyframes poke-scene-shake {
+  0% { transform: translateX(0); }
+  20% { transform: translateX(-3px); }
+  40% { transform: translateX(3px); }
+  60% { transform: translateX(-2px); }
+  80% { transform: translateX(2px); }
+  100% { transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hana-chat-poke-figure,
+  .hana-chat-poke-scene-mon img,
+  .hana-chat-poke-guide,
+  .hana-chat-poke-fx span,
+  .hana-chat-poke-bubble {
+    animation: none !important;
+  }
+}
+
+.hana-chat-poke-status {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 8px;
+}
+
+.hana-chat-poke-status-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.78rem;
+}
+
+.hana-chat-poke-status-meta strong {
+  font-size: 0.92rem;
+}
+
+.hana-chat-poke-coin {
+  margin-left: auto;
+  opacity: 0.8;
+}
+
+.hana-chat-poke-bar {
+  display: grid;
+  grid-template-columns: 3.6em 1fr;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  color: rgba(255, 248, 240, 0.7);
+}
+
+.hana-chat-poke-bar i {
+  display: block;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 248, 240, 0.1);
+}
+
+.hana-chat-poke-bar b {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.hana-chat-poke-bar.is-food b { background: #f59e8b; }
+.hana-chat-poke-bar.is-mood b { background: #f9c5d5; }
+.hana-chat-poke-bar.is-energy b { background: #86efac; }
+.hana-chat-poke-bar.is-health b { background: #7dd3fc; }
+.hana-chat-poke-bar.is-bond b { background: #fcd34d; }
+
+.hana-chat-poke-sleep-note {
+  margin: 4px 0 0;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  color: rgba(255, 248, 240, 0.62);
+}
+
+.hana-chat-poke-sleep-note.is-early { color: #86efac; }
+.hana-chat-poke-sleep-note.is-late { color: #f9a8d4; }
+
+.hana-chat-poke-acts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 8px 0 4px;
+}
+
+.hana-chat-poke-acts button,
+.hana-chat-poke-nick button {
+  min-height: 36px;
+  border-radius: 12px;
+  border: 1px solid rgba(186, 230, 253, 0.28);
+  background: rgba(186, 230, 253, 0.12);
+  color: inherit;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.hana-chat-poke-acts button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.hana-chat-poke-dock .hana-chat-poke-panel.is-nick-focus {
+  overflow: hidden;
+}
+
+.hana-chat-poke-nick {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+
+.hana-chat-poke-nick.is-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin: 0 0 8px;
+  padding: 6px 0 8px;
+  background: linear-gradient(180deg, rgba(32, 36, 52, 0.98), rgba(22, 24, 36, 0.96));
+}
+
+.hana-chat-poke-nick input {
+  flex: 1;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 248, 240, 0.16);
+  background: rgba(255, 248, 240, 0.06);
+  color: inherit;
+  font: inherit;
+  font-size: 16px;
+}
+
+.hana-chat-poke-nick button {
+  flex: 0 0 auto;
+  padding: 0 12px;
+}
+
+.hana-chat-poke-log {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 6px;
+  max-height: 156px;
+  overflow: auto;
+  border-radius: 14px;
+  background: rgba(255, 248, 240, 0.05);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.hana-chat-poke-log li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px 3px 5px;
+  border-radius: 20px;
+  background: rgba(255, 248, 240, 0.08);
+  font-size: 0.6rem;
+  line-height: 1.3;
+  color: rgba(255, 248, 240, 0.78);
+  white-space: nowrap;
+}
+
+.hana-chat-poke-log li[data-action="nap"],
+.hana-chat-poke-log li[data-action="wake"] {
+  background: rgba(120, 140, 200, 0.18);
+}
+.hana-chat-poke-log li[data-action="feed"],
+.hana-chat-poke-log li[data-action="cafe"] {
+  background: rgba(255, 200, 100, 0.15);
+}
+.hana-chat-poke-log li[data-action="train"] {
+  background: rgba(255, 120, 100, 0.15);
+}
+.hana-chat-poke-log li[data-action="walk"],
+.hana-chat-poke-log li[data-action="find"] {
+  background: rgba(100, 200, 140, 0.15);
+}
+.hana-chat-poke-log li[data-action="evolve"] {
+  background: rgba(255, 220, 80, 0.22);
+}
+.hana-chat-poke-log li[data-action="cafeGift"],
+.hana-chat-poke-log li[data-action="cafeClaim"],
+.hana-chat-poke-log li[data-action="gift"] {
+  background: rgba(240, 140, 200, 0.18);
+}
+.hana-chat-poke-log li[data-action="adopt"] {
+  background: rgba(160, 200, 255, 0.18);
+}
+
+.poke-log-icon {
+  font-size: 0.82rem;
+  flex-shrink: 0;
+}
+
+.poke-log-body {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hana-chat-poke-starters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.hana-chat-poke-starters button,
+.hana-chat-poke-album button,
+.hana-chat-poke-party button {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgba(186, 230, 253, 0.35);
+}
+
+.hana-chat-poke-starters button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-height: 88px;
+  padding: 8px 4px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 248, 240, 0.14);
+  background: rgba(255, 248, 240, 0.06);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.hana-chat-poke-starters img,
+.hana-chat-poke-party img,
+.hana-chat-poke-album img,
+.hana-chat-poke-scene-mon img {
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.hana-chat-poke-starters img {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+}
+
+.hana-chat-poke-starters strong {
+  font-size: 0.68rem;
+  pointer-events: none;
+}
+
+.hana-chat-poke-swap-cancel {
+  display: block;
+  width: 100%;
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 248, 240, 0.16);
+  background: rgba(255, 248, 240, 0.06);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
 }
 
 .hana-chat-tcg-slab {
