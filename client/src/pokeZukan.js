@@ -476,6 +476,36 @@ export function binderProgress(entries) {
 export const WORLD_VER = 2
 export const WORLD_SEASON = 'hana-gabu-1'
 export const WORLD_PARTY_MAX = 3
+
+export function monIsFullyEvolved(mon) {
+  if (!mon) return false
+  return !WORLD_EVO[String(mon.speciesId)]
+}
+
+export function trainerCanAdopt(trainer) {
+  const mons = Object.values(trainer?.mons || {})
+  if (mons.length === 0) return true
+  if (mons.length >= WORLD_PARTY_MAX) return false
+  return mons.every((m) => monIsFullyEvolved(m))
+}
+
+/** First party slot that is not at final evolution — only this mon can be raised. */
+export function trainerTrainableMonId(trainer) {
+  const order = Array.isArray(trainer?.partyOrder) && trainer.partyOrder.length
+    ? trainer.partyOrder
+    : Object.keys(trainer?.mons || {})
+  for (const id of order) {
+    const mon = trainer?.mons?.[id]
+    if (mon && !monIsFullyEvolved(mon)) return id
+  }
+  return order[order.length - 1] || String(trainer?.activeId || '').trim()
+}
+
+function careMonForTrainer(trainer) {
+  const id = trainerTrainableMonId(trainer)
+  const mon = trainer?.mons?.[id] || null
+  return { id, mon }
+}
 export const WORLD_ACT_LIMIT = 8
 export const XP_PER_LEVEL = 20
 export const WORLD_SLEEP_MS = 8 * 60 * 60 * 1000
@@ -487,8 +517,8 @@ export const WORLD_COOL_MS = {
   nap: 0,
   walk: 3 * 60 * 60 * 1000,
   find: 4 * 60 * 60 * 1000,
-  cafe: 20 * 60 * 1000,
-  cafeGift: 30 * 60 * 1000,
+  cafe: 0,
+  cafeGift: 0,
   train: 8 * 60 * 60 * 1000,
 }
 
@@ -893,41 +923,91 @@ export function trainerOwnsFamily(trainer, speciesId) {
   return Object.values(trainer?.mons || {}).some((mon) => fam.has(String(mon.speciesId)))
 }
 
-function preferredMon(a, b) {
+function preferredMon(a, b, preferId) {
+  if (preferId) {
+    if (a.id === preferId) return a
+    if (b.id === preferId) return b
+  }
+  const aDone = monIsFullyEvolved(a)
+  const bDone = monIsFullyEvolved(b)
+  if (aDone !== bDone) return aDone ? b : a
   const an = Boolean(a?.nickname)
   const bn = Boolean(b?.nickname)
   if (an !== bn) return bn ? b : a
   if ((a.level || 1) !== (b.level || 1)) return (a.level || 1) >= (b.level || 1) ? a : b
   if ((a.bond || 0) !== (b.bond || 0)) return (a.bond || 0) >= (b.bond || 0) ? a : b
-  return a
+  return a.id <= b.id ? a : b
 }
 
-function dedupeTrainerMons(mons, activeId, partyOrder) {
+function stablePartyOrder(partyOrder, mons) {
+  const seen = new Set()
+  const out = []
+  const fallback = Object.keys(mons || {}).sort()
+  for (const id of [...(Array.isArray(partyOrder) ? partyOrder : []), ...fallback]) {
+    const key = String(id || '').trim()
+    if (!mons?.[key] || seen.has(key)) continue
+    seen.add(key)
+    out.push(key)
+  }
+  return out.slice(0, WORLD_PARTY_MAX)
+}
+
+/** One trainable mon at a time — drop later slots until earlier ones fully evolve. */
+function enforceSequentialParty(mons, partyOrder) {
+  const order = stablePartyOrder(partyOrder, mons)
+  const kept = {}
+  const out = []
+  for (const id of order) {
+    const mon = mons[id]
+    if (!mon) continue
+    out.push(id)
+    kept[id] = mon
+    if (!monIsFullyEvolved(mon)) break
+  }
+  return { mons: kept, partyOrder: out }
+}
+
+function dedupeTrainerMons(mons, preferId, partyOrder) {
+  const all = Object.values(mons || {})
   const kept = {}
   const winnerByFam = new Map()
-  for (const mon of Object.values(mons || {})) {
-    const key = [...evoFamily(mon.speciesId)].sort().join('-') || mon.speciesId
+  for (const mon of all) {
+    const fam = evoFamily(mon.speciesId)
+    const key = fam.size > 0 ? [...fam].sort().join('-') : mon.id
     const prev = winnerByFam.get(key)
-    const win = prev ? preferredMon(prev, mon) : mon
+    const win = prev ? preferredMon(prev, mon, preferId) : mon
     winnerByFam.set(key, win)
   }
   for (const mon of winnerByFam.values()) kept[mon.id] = mon
-  const seen = new Set()
-  const order = []
-  for (const id of [...(Array.isArray(partyOrder) ? partyOrder : []), ...Object.keys(mons || {}), ...Object.keys(kept)]) {
-    const key = String(id || '').trim()
-    if (!kept[key] || seen.has(key)) continue
-    seen.add(key)
-    order.push(key)
-  }
+  const order = stablePartyOrder(partyOrder, kept)
   const ordered = {}
   for (const id of order) ordered[id] = kept[id]
-  let nextActive = order.includes(activeId) ? activeId : ''
-  if (!nextActive) {
-    const named = order.find((id) => ordered[id].nickname)
-    nextActive = named || order[0] || ''
+  return { mons: ordered, partyOrder: order }
+}
+
+function normalizeTrainer(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {}
+  const mons = {}
+  const srcMons = src.mons && typeof src.mons === 'object' ? src.mons : {}
+  for (const [id, mon] of Object.entries(srcMons)) {
+    const row = serializeMon(mon, id)
+    if (!row.id || !row.speciesId) continue
+    mons[row.id] = row
   }
-  return { mons: ordered, activeId: nextActive, partyOrder: order.slice(0, WORLD_PARTY_MAX) }
+  const order0 = stablePartyOrder(src.partyOrder, mons)
+  const preCareId = trainerTrainableMonId({ mons, partyOrder: order0, activeId: src.activeId })
+  const deduped = dedupeTrainerMons(mons, preCareId, order0)
+  const sequential = enforceSequentialParty(deduped.mons, deduped.partyOrder)
+  const careId = trainerTrainableMonId({
+    mons: sequential.mons,
+    partyOrder: sequential.partyOrder,
+    activeId: preCareId,
+  })
+  return {
+    activeId: careId || sequential.partyOrder[0] || '',
+    mons: sequential.mons,
+    partyOrder: sequential.partyOrder,
+  }
 }
 
 function logOnMon(mon, entry) {
@@ -938,27 +1018,13 @@ function logOnMon(mon, entry) {
 
 function serializeTrainer(raw) {
   const src = raw && typeof raw === 'object' ? raw : {}
-  const mons = {}
-  const srcMons = src.mons && typeof src.mons === 'object' ? src.mons : {}
-  let n = 0
-  for (const [id, mon] of Object.entries(srcMons)) {
-    if (n >= WORLD_PARTY_MAX) break
-    const row = serializeMon(mon, id)
-    if (!row.id || !row.speciesId) continue
-    mons[row.id] = row
-    n += 1
-  }
-  const unique = dedupeTrainerMons(
-    mons,
-    String(src.activeId || '').trim().slice(0, 20),
-    src.partyOrder,
-  )
+  const norm = normalizeTrainer(src)
   return {
-    activeId: unique.activeId,
+    activeId: norm.activeId,
     coins: Math.max(0, Math.min(999, Math.round(Number(src.coins) || 24))),
     lastActYmd: String(src.lastActYmd || '').trim().slice(0, 12),
-    mons: unique.mons,
-    partyOrder: unique.partyOrder,
+    mons: norm.mons,
+    partyOrder: norm.partyOrder,
     gifts: serializeCafeGifts(src.gifts),
   }
 }
@@ -1103,36 +1169,21 @@ export function worldRole(role) {
 }
 
 export function worldTrainer(world, role) {
-  const trainers = world?.trainers
-  if (trainers?.hana && trainers?.guest) return trainers[worldRole(role)] || trainers.guest
   return serializePokeWorld(world).trainers[worldRole(role)]
 }
 
 export function worldActiveMon(world, role) {
   const trainer = worldTrainer(world, role)
-  return trainer.mons[trainer.activeId] || null
+  const { mon } = careMonForTrainer(trainer)
+  return mon
 }
 
 export function worldPartyList(world, role) {
   const trainer = worldTrainer(world, role)
-  const mons = trainer.mons || {}
   const order = Array.isArray(trainer.partyOrder) && trainer.partyOrder.length
     ? trainer.partyOrder
-    : Object.keys(mons)
-  const seen = new Set()
-  const out = []
-  for (const id of order) {
-    const mon = mons[id]
-    if (!mon || seen.has(mon.id)) continue
-    seen.add(mon.id)
-    out.push(mon)
-  }
-  for (const mon of Object.values(mons)) {
-    if (seen.has(mon.id)) continue
-    seen.add(mon.id)
-    out.push(mon)
-  }
-  return out
+    : Object.keys(trainer.mons || {})
+  return order.map((id) => trainer.mons[id]).filter(Boolean)
 }
 
 export function worldMonStyle(mon) {
@@ -1203,7 +1254,6 @@ export function worldGestureAction(placeId, kind, suggested = '') {
     if (kind === 'stroke') return 'pet'
     if (kind === 'hold') return 'nap'
     if (want === 'feed') return 'feed'
-    if (want === 'nap') return 'nap'
     return 'pet'
   }
   if (place === 'park') {
@@ -1310,7 +1360,7 @@ export { WORLD_LOG_ICON }
 export function worldPendingFor(world, role, ymd = tokyoZukanYmd()) {
   const w = applyPokeWorldDecay(world)
   const trainer = w.trainers[worldRole(role)]
-  const mon = trainer.mons[trainer.activeId]
+  const { mon } = careMonForTrainer(trainer)
   if (!mon) return true
   return trainer.lastActYmd !== ymd || mon.hunger < 36 || mon.mood < 36
 }
@@ -1321,7 +1371,7 @@ export function worldDuoCared(world, ymd = tokyoZukanYmd()) {
 }
 
 function wakeTrainerMon(trainer) {
-  const mon = trainer?.mons?.[trainer.activeId]
+  const { id, mon } = careMonForTrainer(trainer)
   if (!mon) return trainer
   const sleeping = Boolean(String(mon.sleepingUntilIso || '').trim())
   const hadNapCool = Boolean(String(mon.cool?.nap || '').trim())
@@ -1330,7 +1380,7 @@ function wakeTrainerMon(trainer) {
     ...trainer,
     mons: {
       ...trainer.mons,
-      [mon.id]: { ...mon, sleepingUntilIso: '', cool: { ...(mon.cool || {}), nap: '' } },
+      [id]: { ...mon, sleepingUntilIso: '', cool: { ...(mon.cool || {}), nap: '' } },
     },
   }
 }
@@ -1340,10 +1390,11 @@ export function applyPokeWorldWake(world, { role, now } = {}) {
   const t = now instanceof Date ? now : new Date(now || Date.now())
   const next = serializePokeWorld(world)
   const trainer = next.trainers[who]
-  const mon = trainer?.mons?.[trainer.activeId]
+  const { id: careId, mon } = careMonForTrainer(trainer)
   const wasSleeping = Boolean(String(mon?.sleepingUntilIso || '').trim()) || worldMonIsSleeping(mon, t.getTime())
   const woken = wakeTrainerMon(trainer)
   if (woken === trainer && !wasSleeping) return next
+  if (!mon) return next
   const span = formatSleepSpan(sleepDurationMs(mon, t))
   const place = next[who === 'hana' ? 'hanaPlace' : 'guestPlace']
   const entry = {
@@ -1360,6 +1411,7 @@ export function applyPokeWorldWake(world, { role, now } = {}) {
       ...next.trainers,
       [who]: {
         ...woken,
+        activeId: careId,
         mons: { ...woken.mons, [mon.id]: wokenMon },
       },
     },
@@ -1375,11 +1427,11 @@ export function applyPokeWorldVisit(world, { role, place, now } = {}) {
   const key = who === 'hana' ? 'hanaPlace' : 'guestPlace'
   const atKey = who === 'hana' ? 'hanaPlaceAt' : 'guestPlaceAt'
   const trainer = next.trainers[who]
-  const mon = trainer?.mons?.[trainer.activeId]
+  const { id: careId, mon } = careMonForTrainer(trainer)
   const wasSleeping = Boolean(String(mon?.sleepingUntilIso || '').trim()) || worldMonIsSleeping(mon, t.getTime())
   const woken = wakeTrainerMon(trainer)
   let log = next.log
-  let logMon = woken.mons[woken.activeId] || woken.mons[mon?.id]
+  let logMon = mon ? (woken.mons[careId] || woken.mons[mon.id]) : null
   if (wasSleeping && logMon) {
     const wakeEntry = {
       at: t.toISOString(),
@@ -1408,6 +1460,7 @@ export function applyPokeWorldVisit(world, { role, place, now } = {}) {
       ...next.trainers,
       [who]: {
         ...woken,
+        activeId: careId,
         mons: logMon ? { ...woken.mons, [logMon.id]: logMon } : woken.mons,
       },
     },
@@ -1425,6 +1478,9 @@ export function applyPokeWorldAdopt(world, { role, speciesId, now } = {}) {
   const trainer = base.trainers[who]
   if (Object.keys(trainer.mons).length >= WORLD_PARTY_MAX) {
     throw new Error('なかまは3匹まで。')
+  }
+  if (!trainerCanAdopt(trainer)) {
+    throw new Error('今のなかまをさいしゅうしんかさせよう。')
   }
   if (trainerOwnsFamily(trainer, sid)) {
     throw new Error('同じポケモンはすでにいるよ。')
@@ -1456,13 +1512,12 @@ export function applyPokeWorldSelect(world, { role, monId } = {}) {
   const who = worldRole(role)
   const next = serializePokeWorld(world)
   const trainer = next.trainers[who]
-  const id = String(monId || '').trim()
-  if (!trainer.mons[id]) throw new Error('そのポケモンはいない。')
+  const careId = trainerTrainableMonId(trainer)
   return serializePokeWorld({
     ...next,
     trainers: {
       ...next.trainers,
-      [who]: { ...trainer, activeId: id },
+      [who]: { ...trainer, activeId: careId },
     },
   })
 }
@@ -1471,7 +1526,7 @@ export function applyPokeWorldNickname(world, { role, nickname } = {}) {
   const who = worldRole(role)
   const next = serializePokeWorld(world)
   const trainer = next.trainers[who]
-  const mon = trainer.mons[trainer.activeId]
+  const { id: careId, mon } = careMonForTrainer(trainer)
   if (!mon) return next
   return serializePokeWorld({
     ...next,
@@ -1479,6 +1534,7 @@ export function applyPokeWorldNickname(world, { role, nickname } = {}) {
       ...next.trainers,
       [who]: {
         ...trainer,
+        activeId: careId,
         mons: {
           ...trainer.mons,
           [mon.id]: { ...mon, nickname: String(nickname || '').trim().slice(0, 16) },
@@ -1496,7 +1552,8 @@ export function applyPokeWorldAction(world, { role, action, now, findId } = {}) 
   const day = tokyoZukanYmd(t)
   let next = applyPokeWorldDecay(world, t)
   const trainer = next.trainers[who]
-  let mon = trainer.mons[trainer.activeId]
+  const { id: careId, mon: careMon } = careMonForTrainer(trainer)
+  let mon = careMon
   if (!mon) throw new Error('先にポケモンを迎えてください。')
   if (next[who === 'hana' ? 'hanaPlace' : 'guestPlace'] !== spec.place) {
     throw new Error(`${worldPlace(spec.place).label}へ行ってから。`)
@@ -1554,6 +1611,7 @@ export function applyPokeWorldAction(world, { role, action, now, findId } = {}) 
       ...next.trainers,
       [who]: {
         ...trainer,
+        activeId: careId,
         coins: Math.max(0, trainer.coins + spec.coins + (together && spec.coins > 0 ? 2 : 0)),
         lastActYmd: day,
         mons: { ...trainer.mons, [mon.id]: mon },
@@ -1579,8 +1637,8 @@ export function applyPokeWorldDuoAction(world, { role, action, now } = {}) {
   let next = applyPokeWorldDecay(world, t)
   const myTrainer = next.trainers[who]
   const mateTrainer = next.trainers[mate]
-  const myMon = myTrainer.mons[myTrainer.activeId]
-  const mateMon = mateTrainer.mons[mateTrainer.activeId]
+  const { id: careId, mon: myMon } = careMonForTrainer(myTrainer)
+  const { mon: mateMon } = careMonForTrainer(mateTrainer)
   if (!myMon || !mateMon) throw new Error('ふたりともポケモンを連れてきて。')
   const myPlace = next[who === 'hana' ? 'hanaPlace' : 'guestPlace']
   const matePlace = next[mate === 'hana' ? 'hanaPlace' : 'guestPlace']
@@ -1617,12 +1675,14 @@ export function applyPokeWorldDuoAction(world, { role, action, now } = {}) {
       ...next.trainers,
       [who]: {
         ...myTrainer,
+        activeId: careId,
         coins: Math.max(0, myTrainer.coins + (Number(spec.coins) || 0)),
         lastActYmd: day,
         mons: { ...myTrainer.mons, [nextMyMon.id]: nextMyMon },
       },
       [mate]: {
         ...mateTrainer,
+        activeId: trainerTrainableMonId(mateTrainer),
         lastActYmd: day,
         mons: { ...mateTrainer.mons, [nextMateMon.id]: nextMateMon },
       },
@@ -1657,12 +1717,11 @@ export function applyPokeWorldCafeOrder(world, { role, itemId, target = 'self', 
   const myPlace = next[who === 'hana' ? 'hanaPlace' : 'guestPlace']
   if (myPlace !== 'cafe') throw new Error('カフェへ行ってから。')
   const myTrainer = next.trainers[who]
-  const myMon = myTrainer.mons[myTrainer.activeId]
+  const { id: careId, mon: myMon } = careMonForTrainer(myTrainer)
   if (!myMon) throw new Error('先にポケモンを迎えてください。')
   const coolKey = send ? 'cafeGift' : 'cafe'
   const wait = coolLeftMs(myMon, coolKey, t.getTime())
   if (wait > 0) throw new Error(`まだ早い。あと${formatCoolLeft(wait)}`)
-  if (myTrainer.coins < item.coins) throw new Error('コインが足りない。')
 
   if (!send) {
     const xpGate = grantCareXp(myMon, 'cafe', day, 1)
@@ -1684,6 +1743,7 @@ export function applyPokeWorldCafeOrder(world, { role, itemId, target = 'self', 
         ...next.trainers,
         [who]: {
           ...myTrainer,
+          activeId: careId,
           coins: Math.max(0, myTrainer.coins - item.coins),
           lastActYmd: day,
           mons: { ...myTrainer.mons, [mon.id]: mon },
@@ -1695,7 +1755,7 @@ export function applyPokeWorldCafeOrder(world, { role, itemId, target = 'self', 
   }
 
   const mateTrainer = next.trainers[mate]
-  const mateMon = mateTrainer.mons[mateTrainer.activeId]
+  const { mon: mateMon } = careMonForTrainer(mateTrainer)
   if (!mateMon) throw new Error('相手のポケモンがまだいないよ。')
   const gifts = serializeCafeGifts(mateTrainer.gifts)
   if (gifts.length >= 4) throw new Error('相手の贈り物がいっぱい。')
@@ -1723,6 +1783,7 @@ export function applyPokeWorldCafeOrder(world, { role, itemId, target = 'self', 
       ...next.trainers,
       [who]: {
         ...myTrainer,
+        activeId: careId,
         coins: Math.max(0, myTrainer.coins - item.coins),
         lastActYmd: day,
         mons: { ...myTrainer.mons, [nextMyMon.id]: nextMyMon },
@@ -1749,7 +1810,7 @@ export function applyPokeWorldCafeClaim(world, { role, giftId, now } = {}) {
   const day = tokyoZukanYmd(t)
   let next = applyPokeWorldDecay(world, t)
   const trainer = next.trainers[who]
-  const mon = trainer.mons[trainer.activeId]
+  const { id: careId, mon } = careMonForTrainer(trainer)
   if (!mon) throw new Error('先にポケモンを迎えてください。')
   const gifts = serializeCafeGifts(trainer.gifts)
   const idx = gifts.findIndex((row) => row.id === String(giftId || '').trim())
@@ -1772,6 +1833,7 @@ export function applyPokeWorldCafeClaim(world, { role, giftId, now } = {}) {
       ...next.trainers,
       [who]: {
         ...trainer,
+        activeId: careId,
         lastActYmd: day,
         mons: { ...trainer.mons, [nextMon.id]: nextMon },
         gifts: rest,

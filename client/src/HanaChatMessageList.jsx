@@ -230,7 +230,12 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
       data-chat-msg={messageId}
     >
       {!isOwn ? (
-        <img className="hana-chat-msg-avatar" src={avatarSrc} alt="" />
+        <img
+          className="hana-chat-msg-avatar"
+          src={avatarSrc}
+          alt=""
+          referrerPolicy="no-referrer"
+        />
       ) : null}
       <div className="hana-chat-msg-column">
         <div className="hana-chat-msg-main">

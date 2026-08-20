@@ -498,13 +498,11 @@ export function suggestHanaStickers(value, limit = 8, { feminine = false } = {})
     .map((item) => {
       const aliases = item.aliases.map(normalizeStickerQuery)
       const score = aliases.reduce((best, alias) => {
-        // Ultra-short aliases ("ok") false-fire while composing on mobile IME.
         if (!alias || alias.length < 3) return best
         if (query === alias) return Math.max(best, 4)
         if (query.startsWith(alias) || alias.startsWith(query)) {
-          // Allow tiny suffix/prefix only while still near the keyword.
           if (Math.abs(query.length - alias.length) <= 2) return Math.max(best, 3)
-          if (alias.startsWith(query) && query.length >= 3) return Math.max(best, 1)
+          if (alias.startsWith(query) && query.length >= 2) return Math.max(best, 1)
           return best
         }
         return best

@@ -108,7 +108,7 @@ import {
   collectUnansweredOwnerAssistMessages,
   ownerAssistShouldCollapse,
 } from './OwnerMessageAssist'
-import { POKE_ZUKAN_GUEST, tokyoZukanYmd } from './pokeZukan'
+import { POKE_ZUKAN_GUEST, tokyoZukanYmd, worldActiveMon } from './pokeZukan'
 import useComposerVoiceNote, { formatVoiceClock } from './useComposerVoiceNote'
 import { bindForegroundPush, ensureWebPush } from './webPush'
 
@@ -912,8 +912,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     || { id: stickerFeminine ? 'hana' : 'kaito', items: [] }
   const deferredDraft = useDeferredValue(draft)
   const stickerSuggestions = useMemo(
-    () => suggestHanaStickers(deferredDraft, 12, { feminine: stickerFeminine }),
-    [deferredDraft, stickerFeminine],
+    () => suggestHanaStickers(draft, 12, { feminine: stickerFeminine }),
+    [draft, stickerFeminine],
   )
   const sessionProfile = useMemo(
     () => resolveSessionProfile(actingAsOwner ? 'owner' : 'guest', guestKey),
@@ -1240,10 +1240,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     const data = pokeZukanData || {}
     const world = data.world || {}
     const who = actingAsOwner ? 'hana' : 'guest'
-    const trainer = world.trainers?.[who]
-    const mon = trainer?.mons?.[trainer.activeId]
+    const mon = worldActiveMon(world, who)
     if (!mon) return true
-    return trainer.lastActYmd !== ymd || Number(mon.hunger) < 36
+    const trainer = world.trainers?.[who]
+    return trainer?.lastActYmd !== ymd || Number(mon.hunger) < 36
   }, [showPokeZukan, pokeZukanData, actingAsOwner])
 
   const pokeZukanDuoStar = useMemo(() => {
@@ -5060,7 +5060,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               </button>
             ) : (
               <div className={`hana-chat-avatar${speaking ? ' is-speaking' : ''}`}>
-                <img src={partnerAvatarSrc} alt="" />
+                <img src={partnerAvatarSrc} alt="" referrerPolicy="no-referrer" />
                 <span
                   className={`hana-chat-presence ${partnerPresence.className}`}
                   title={presenceLabel}
