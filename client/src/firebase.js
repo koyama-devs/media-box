@@ -1924,6 +1924,33 @@ export function serializeWeightGarden(raw) {
   return { startKg, goalKg, logs }
 }
 
+function weightGardenNewestLogMs(garden) {
+  const at = garden?.logs?.[0]?.atIso
+  return Date.parse(at || '') || 0
+}
+
+/** Prefer the garden with more weigh-ins (then newer). */
+function pickRicherWeightGarden(a, b) {
+  const left = serializeWeightGarden(a)
+  const right = serializeWeightGarden(b)
+  if (left.logs.length !== right.logs.length) {
+    return left.logs.length > right.logs.length ? left : right
+  }
+  if (!left.logs.length && !right.logs.length) {
+    // Keep non-default goals if one side customized them.
+    const leftTouched = left.startKg !== WEIGHT_GARDEN_DEFAULT_START_KG
+      || left.goalKg !== WEIGHT_GARDEN_DEFAULT_GOAL_KG
+    const rightTouched = right.startKg !== WEIGHT_GARDEN_DEFAULT_START_KG
+      || right.goalKg !== WEIGHT_GARDEN_DEFAULT_GOAL_KG
+    if (leftTouched !== rightTouched) return leftTouched ? left : right
+  }
+  return weightGardenNewestLogMs(left) >= weightGardenNewestLogMs(right) ? left : right
+}
+
+function weightGardenHasLogs(raw) {
+  return serializeWeightGarden(raw).logs.length > 0
+}
+
 export function weightGardenProgress(garden) {
   const data = serializeWeightGarden(garden)
   const currentKg = data.logs.length
@@ -1946,23 +1973,48 @@ export function weightGardenProgress(garden) {
   }
 }
 
-/** Seed defaults on the thread if weightGarden is missing. */
+/**
+ * Seed defaults on the thread if weightGarden is missing.
+ * Also heals after thread migration: weigh-ins often stayed on a legacy UUID
+ * while the UI moved to guest-gabusan (empty blossom).
+ */
 export async function ensureWeightGardenDefaults(threadId) {
   const tid = String(threadId || '').trim()
   if (!tid) return null
   const ref = doc(db, CHAT_THREADS_COLLECTION, tid)
   const snap = await getDoc(ref)
-  const existing = snap.exists() ? snap.data()?.weightGarden : null
-  if (existing && typeof existing === 'object') {
-    return serializeWeightGarden(existing)
+  const data = snap.exists() ? snap.data() || {} : {}
+  let best = serializeWeightGarden(data.weightGarden)
+  const guestKey = normalizeAccountKey(
+    data.guestKey || String(tid).replace(/^guest-/, ''),
+  )
+
+  if (guestKey) {
+    try {
+      const sibSnap = await getDocs(query(
+        collection(db, CHAT_THREADS_COLLECTION),
+        where('guestKey', '==', guestKey),
+        limit(25),
+      ))
+      for (const sibling of sibSnap.docs) {
+        best = pickRicherWeightGarden(best, sibling.data()?.weightGarden)
+      }
+    } catch {
+      /* index/query optional — keep local garden */
+    }
   }
-  const weightGarden = serializeWeightGarden({
-    startKg: WEIGHT_GARDEN_DEFAULT_START_KG,
-    goalKg: WEIGHT_GARDEN_DEFAULT_GOAL_KG,
-    logs: [],
-  })
-  await setDoc(ref, { weightGarden }, { merge: true })
-  return weightGarden
+
+  const had = data.weightGarden && typeof data.weightGarden === 'object'
+  const local = serializeWeightGarden(data.weightGarden)
+  const healed = best.logs.length > local.logs.length
+    || weightGardenNewestLogMs(best) > weightGardenNewestLogMs(local)
+    || best.startKg !== local.startKg
+    || best.goalKg !== local.goalKg
+
+  if (!had || healed) {
+    await setDoc(ref, { weightGarden: best }, { merge: true })
+  }
+  return best
 }
 
 /** Guest logs a weigh-in (newest first). */
@@ -3146,40 +3198,76 @@ export async function migrateLegacyGuestThread({
   const canonMessagesRef = collection(db, CHAT_THREADS_COLLECTION, canonicalId, 'messages')
   const legacyMessagesRef = collection(db, CHAT_THREADS_COLLECTION, legacyThreadId, 'messages')
 
-  // Only skip copy when canonical already has queryable newest messages.
+  // Only skip message copy when canonical already has queryable newest messages.
+  // Still heal weightGarden / pokeWorld if they were left on the legacy UUID.
   const canonIsoSnap = await getDocs(query(
     canonMessagesRef,
     orderBy('createdAtIso', 'desc'),
     limit(1),
   ))
+  const [legacyThreadSnap, canonThreadSnap] = await Promise.all([
+    getDoc(doc(db, CHAT_THREADS_COLLECTION, legacyThreadId)),
+    getDoc(doc(db, CHAT_THREADS_COLLECTION, canonicalId)),
+  ])
+  const legacyMeta = legacyThreadSnap.exists() ? legacyThreadSnap.data() : {}
+  const canonMeta = canonThreadSnap.exists() ? canonThreadSnap.data() : {}
+
+  const healPatch = {}
+  const mergedGarden = pickRicherWeightGarden(canonMeta.weightGarden, legacyMeta.weightGarden)
+  const localGarden = serializeWeightGarden(canonMeta.weightGarden)
+  if (
+    weightGardenHasLogs(mergedGarden)
+    && (
+      mergedGarden.logs.length > localGarden.logs.length
+      || weightGardenNewestLogMs(mergedGarden) > weightGardenNewestLogMs(localGarden)
+    )
+  ) {
+    healPatch.weightGarden = mergedGarden
+  }
+  const canonPoke = serializePokeZukan(canonMeta.pokeZukan)
+  const legacyPoke = serializePokeZukan(legacyMeta.pokeZukan)
+  const canonPokeEmpty = !canonMeta.pokeZukan || String(canonPoke?.world?.season || '') === ''
+  if (legacyMeta.pokeZukan && canonPokeEmpty) {
+    healPatch.pokeZukan = legacyPoke
+  }
+  if (legacyMeta.jpTripArrivedAtIso && !canonMeta.jpTripArrivedAtIso) {
+    healPatch.jpTripArrivedAtIso = legacyMeta.jpTripArrivedAtIso
+    if (legacyMeta.jpTripArrivedAt) healPatch.jpTripArrivedAt = legacyMeta.jpTripArrivedAt
+  }
+  if (Object.keys(healPatch).length) {
+    await setDoc(doc(db, CHAT_THREADS_COLLECTION, canonicalId), healPatch, { merge: true })
+  }
+
   if (!canonIsoSnap.empty) return canonicalId
 
-  const [legacyDocs, legacyThreadSnap] = await Promise.all([
-    collectLegacyMessageDocs(legacyMessagesRef),
-    getDoc(doc(db, CHAT_THREADS_COLLECTION, legacyThreadId)),
-  ])
+  const legacyDocs = await collectLegacyMessageDocs(legacyMessagesRef)
 
   // Empty canonical must not steal the live UUID thread.
   if (!legacyDocs.length) return legacyThreadId
 
-  const legacyMeta = legacyThreadSnap.exists() ? legacyThreadSnap.data() : {}
   const nowIso = new Date().toISOString()
+  const patch = {
+    guestLabel: guestLabel || legacyMeta.guestLabel || guestLabelFromUid(canonicalId),
+    guestKey: guestKey || legacyMeta.guestKey || String(canonicalId).replace(/^guest-/, ''),
+    lastText: legacyMeta.lastText || '',
+    updatedAt: serverTimestamp(),
+    updatedAtIso: legacyMeta.updatedAtIso || nowIso,
+    unreadByHana: Boolean(legacyMeta.unreadByHana),
+    unreadByGuest: Boolean(legacyMeta.unreadByGuest),
+    unreadCountHana: Math.max(0, Number(legacyMeta.unreadCountHana) || 0),
+    unreadCountGuest: Math.max(0, Number(legacyMeta.unreadCountGuest) || 0),
+    guestLastReadAt: legacyMeta.guestLastReadAt || null,
+    hanaLastReadAt: legacyMeta.hanaLastReadAt || null,
+    migratedFrom: legacyThreadId,
+    ...healPatch,
+  }
+  if (!healPatch.weightGarden && (legacyMeta.weightGarden || canonMeta.weightGarden)) {
+    patch.weightGarden = mergedGarden
+  }
+
   await setDoc(
     doc(db, CHAT_THREADS_COLLECTION, canonicalId),
-    {
-      guestLabel: guestLabel || legacyMeta.guestLabel || guestLabelFromUid(canonicalId),
-      guestKey: guestKey || legacyMeta.guestKey || String(canonicalId).replace(/^guest-/, ''),
-      lastText: legacyMeta.lastText || '',
-      updatedAt: serverTimestamp(),
-      updatedAtIso: legacyMeta.updatedAtIso || nowIso,
-      unreadByHana: Boolean(legacyMeta.unreadByHana),
-      unreadByGuest: Boolean(legacyMeta.unreadByGuest),
-      unreadCountHana: Math.max(0, Number(legacyMeta.unreadCountHana) || 0),
-      unreadCountGuest: Math.max(0, Number(legacyMeta.unreadCountGuest) || 0),
-      guestLastReadAt: legacyMeta.guestLastReadAt || null,
-      hanaLastReadAt: legacyMeta.hanaLastReadAt || null,
-      migratedFrom: legacyThreadId,
-    },
+    patch,
     { merge: true },
   )
 
