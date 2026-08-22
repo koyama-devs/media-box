@@ -4,13 +4,14 @@ import './App.css'
 import hanachanArt from './assets/hanachan.svg'
 import { AVATAR_PRESETS, getAvatarPresetSrc } from './avatarPresets'
 import { clearBookBookmark, getAllBookBookmarks, getBookBookmark } from './bookProgress'
+import ChatAvatar from './ChatAvatar'
 import {
-  requestChatCardShare,
-  CHAT_PLAY_TRACK_EVENT,
-  CHAT_TOGGLE_TRACK_EVENT,
-  CHAT_OPEN_MAIN_PLAYER_EVENT,
-  CHAT_CLOSE_EVENT,
-  publishChatPlaybackState,
+    CHAT_CLOSE_EVENT,
+    CHAT_OPEN_MAIN_PLAYER_EVENT,
+    CHAT_PLAY_TRACK_EVENT,
+    CHAT_TOGGLE_TRACK_EVENT,
+    publishChatPlaybackState,
+    requestChatCardShare,
 } from './chatCardShare'
 import DailyKotoba from './DailyKotoba'
 import {
@@ -3377,7 +3378,12 @@ const playPrevious = useCallback(() => {
                     disabled={avatarUploading}
                     aria-label="アバターを変更"
                   >
-                    <img src={sessionAvatarSrc} alt="" className="session-user-avatar" />
+                    <ChatAvatar
+                      src={sessionAvatarSrc}
+                      className="session-user-avatar"
+                      profileId={sessionProfile.id}
+                      displayName={sessionProfile.displayName}
+                    />
                   </button>
                   <button
                     type="button"

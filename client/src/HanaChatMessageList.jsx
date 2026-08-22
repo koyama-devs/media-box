@@ -1,4 +1,5 @@
 import { memo } from 'react'
+import ChatAvatar from './ChatAvatar'
 import { messageMatchesSearch, splitHighlightedText } from './chatMessageSearch'
 import ChatSongMiniPlayer from './ChatSongMiniPlayer'
 import ChatSwipeBubble, { canMutateOwnMessage } from './ChatSwipeBubble'
@@ -164,6 +165,8 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
   delivery,
   isOwn,
   avatarSrc,
+  avatarProfileId = '',
+  avatarDisplayName = '',
   defaultReaction,
   reactorId,
   coarsePointer,
@@ -230,11 +233,11 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
       data-chat-msg={messageId}
     >
       {!isOwn ? (
-        <img
+        <ChatAvatar
           className="hana-chat-msg-avatar"
           src={avatarSrc}
-          alt=""
-          referrerPolicy="no-referrer"
+          profileId={avatarProfileId}
+          displayName={avatarDisplayName}
         />
       ) : null}
       <div className="hana-chat-msg-column">
@@ -344,6 +347,7 @@ const HanaChatMessageList = memo(function HanaChatMessageList({
   guestOnHuman,
   resolveDelivery,
   avatarSrcForMessage,
+  avatarMetaForMessage,
   defaultReaction,
   reactorId,
   coarsePointer,
@@ -378,6 +382,8 @@ const HanaChatMessageList = memo(function HanaChatMessageList({
             delivery={resolveDelivery(message)}
             isOwn={isOwn}
             avatarSrc={avatarSrcForMessage(message)}
+            avatarProfileId={avatarMetaForMessage(message).profileId}
+            avatarDisplayName={avatarMetaForMessage(message).displayName}
             defaultReaction={defaultReaction}
             reactorId={reactorId}
             coarsePointer={coarsePointer}

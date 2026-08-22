@@ -2,6 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, use
 import { createPortal, flushSync } from 'react-dom'
 import { setAppUnreadBadge } from './appBadge'
 import hanachanArt from './assets/hanachan.svg'
+import ChatAvatar from './ChatAvatar'
 import { CHAT_CARD_SHARE_EVENT, CHAT_CLOSE_EVENT } from './chatCardShare'
 import {
   addChatReminder,
@@ -48,6 +49,7 @@ import {
   ensureDefaultChatAccounts,
   ensureGuestChatId,
   ensureWeightGardenDefaults,
+  fetchChatThreadMediaItems,
   formatChatFileSize,
   formatChatTimestamp,
   getChatMessageAttachments,
@@ -64,6 +66,7 @@ import {
   normalizeChatPresenceMode,
   OWNER_PROFILE,
   pulseChatPresence,
+  resolveAccountKey,
   resolveAvatarSrc,
   resolveChatPresence,
   resolveGuestDisplayName,
@@ -747,6 +750,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [menuPage, setMenuPage] = useState('home')
   const [mediaFilter, setMediaFilter] = useState('all')
+  const [mediaHistoryItems, setMediaHistoryItems] = useState([])
+  const [mediaHistoryLoading, setMediaHistoryLoading] = useState(false)
+  const mediaHistoryLoadedRef = useRef('')
+  const mediaHistoryAbortRef = useRef(null)
   const [defaultReaction, setDefaultReaction] = useState(() => readDefaultReaction())
   const [enterToSend, setEnterToSend] = useState(() => readEnterToSend())
   const [voiceSkin, setVoiceSkin] = useState(() => readVoiceSkin())
@@ -1652,8 +1659,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     const ids = [
       OWNER_PROFILE.key,
       ...chatAccounts.map((profile) => profile.key),
-      sessionProfile.id,
-      ownerActiveGuestKey,
+      resolveAccountKey(sessionProfile.id),
+      resolveAccountKey(ownerActiveGuestKey),
     ].filter(Boolean)
     return subscribeChatProfiles(
       ids,
@@ -2968,17 +2975,21 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   }, [messageSearchHits.length])
 
   const threadMediaItems = useMemo(() => {
-    const items = []
+    const byId = new Map()
+    for (const item of mediaHistoryItems) {
+      if (item?.id) byId.set(item.id, item)
+    }
     for (const message of visibleMessages) {
       if (message.deleted) continue
       const attachments = getChatMessageAttachments(message)
       attachments.forEach((att, index) => {
         if (!att?.url) return
         const kind = isChatAudioAttachment(att.fileMime, att.fileName) ? 'file' : att.kind
-        items.push({
-          id: `${message.id}-${index}-${att.url}`,
+        const id = `${message.id}-${index}-${att.url}`
+        byId.set(id, {
+          id,
           messageId: message.id,
-          createdAt: message.createdAt,
+          createdAt: message.createdAtIso || message.createdAt || '',
           kind,
           url: att.url,
           fileName: att.fileName,
@@ -2987,14 +2998,54 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         })
       })
     }
-    items.sort((a, b) => (Date.parse(b.createdAt || 0) || 0) - (Date.parse(a.createdAt || 0) || 0))
-    return items
-  }, [visibleMessages])
+    return [...byId.values()].sort(
+      (a, b) => (Date.parse(b.createdAt || 0) || 0) - (Date.parse(a.createdAt || 0) || 0),
+    )
+  }, [visibleMessages, mediaHistoryItems])
 
   const visibleMediaItems = useMemo(() => {
     if (mediaFilter === 'all') return threadMediaItems
     return threadMediaItems.filter((item) => item.kind === mediaFilter)
   }, [mediaFilter, threadMediaItems])
+
+  const mediaThreadId = actingAsOwner ? activeThreadId : (guestOnHuman ? guestChatId : '')
+
+  useEffect(() => {
+    if (menuPage !== 'media' || !mediaThreadId) return undefined
+    if (mediaHistoryLoadedRef.current === mediaThreadId) return undefined
+
+    const controller = new AbortController()
+    mediaHistoryAbortRef.current?.abort()
+    mediaHistoryAbortRef.current = controller
+    setMediaHistoryLoading(true)
+
+    void fetchChatThreadMediaItems(mediaThreadId, {
+      signal: controller.signal,
+      onBatch: (items) => {
+        if (controller.signal.aborted) return
+        setMediaHistoryItems(items)
+      },
+    }).then((items) => {
+      if (controller.signal.aborted) return
+      mediaHistoryLoadedRef.current = mediaThreadId
+      setMediaHistoryItems(items)
+    }).catch((err) => {
+      if (err?.name === 'AbortError') return
+    }).finally(() => {
+      if (!controller.signal.aborted) setMediaHistoryLoading(false)
+    })
+
+    return () => {
+      controller.abort()
+    }
+  }, [menuPage, mediaThreadId])
+
+  useEffect(() => {
+    mediaHistoryLoadedRef.current = ''
+    setMediaHistoryItems([])
+    setMediaHistoryLoading(false)
+    mediaHistoryAbortRef.current?.abort()
+  }, [mediaThreadId])
 
   const visibleMessagesByIdRef = useRef(new Map())
   const visibleMessagesById = useMemo(() => {
@@ -3597,29 +3648,35 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   }, [actingAsOwner, ownerActiveGuestLabel, guestDisplayName])
 
   const avatarSrcForProfile = useCallback((profileId, displayName) => {
-    const id = String(profileId || '').trim().toLowerCase() || 'guest'
+    const id = resolveAccountKey(profileId) || 'guest'
     const fallback = id === OWNER_PROFILE.key || id === 'hana' ? hanachanArt : ''
     return resolveAvatarSrc(id, displayName || id, chatProfiles[id]?.avatarUrl || '', fallback)
   }, [chatProfiles])
 
-  const avatarSrcForMessage = useCallback((message) => {
+  const avatarMetaForMessage = useCallback((message) => {
     const role = message.sender || message.role
-    if (role === 'hanachan') return hanachanArt
-    if (role === 'hana') return avatarSrcForProfile(OWNER_PROFILE.key, OWNER_PROFILE.displayName)
+    if (role === 'hanachan') return { profileId: 'hanachan', displayName: 'はなちゃん' }
+    if (role === 'hana') return { profileId: OWNER_PROFILE.key, displayName: OWNER_PROFILE.displayName }
     const guestId = actingAsOwner
-      ? (ownerActiveGuestKey || 'guest')
-      : (guestProfile?.key || sessionProfile.id || 'guest')
+      ? resolveAccountKey(ownerActiveGuestKey || 'guest')
+      : resolveAccountKey(guestProfile?.key || sessionProfile.id || 'guest')
     const name = actingAsOwner ? ownerActiveGuestLabel : guestDisplayName
-    return avatarSrcForProfile(guestId, name)
+    return { profileId: guestId, displayName: name }
   }, [
     actingAsOwner,
-    avatarSrcForProfile,
     ownerActiveGuestKey,
     ownerActiveGuestLabel,
     guestProfile?.key,
     sessionProfile.id,
     guestDisplayName,
   ])
+
+  const avatarSrcForMessage = useCallback((message) => {
+    const { profileId, displayName } = avatarMetaForMessage(message)
+    if ((message.sender || message.role) === 'hanachan') return hanachanArt
+    if ((message.sender || message.role) === 'hana') return avatarSrcForProfile(OWNER_PROFILE.key, OWNER_PROFILE.displayName)
+    return avatarSrcForProfile(profileId, displayName)
+  }, [avatarMetaForMessage, avatarSrcForProfile])
 
   // Header shows the selected guest for owner inbox; guests see Hana / Hanachan.
   const partnerAvatarSrc = (() => {
@@ -5048,7 +5105,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 title="はなちゃんに戻る"
                 aria-label="はなちゃんに戻る"
               >
-                <img src={partnerAvatarSrc} alt="" />
+                <ChatAvatar src={partnerAvatarSrc} profileId={actingAsOwner ? resolveAccountKey(ownerActiveGuestKey || 'guest') : OWNER_PROFILE.key} displayName={actingAsOwner ? ownerActiveGuestLabel : OWNER_PROFILE.displayName} />
                 <span
                   className={`hana-chat-presence ${partnerPresence.className}`}
                   title={presenceLabel}
@@ -5060,7 +5117,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               </button>
             ) : (
               <div className={`hana-chat-avatar${speaking ? ' is-speaking' : ''}`}>
-                <img src={partnerAvatarSrc} alt="" referrerPolicy="no-referrer" />
+                <ChatAvatar src={partnerAvatarSrc} profileId={actingAsOwner ? resolveAccountKey(ownerActiveGuestKey || 'guest') : OWNER_PROFILE.key} displayName={actingAsOwner ? ownerActiveGuestLabel : OWNER_PROFILE.displayName} />
                 <span
                   className={`hana-chat-presence ${partnerPresence.className}`}
                   title={presenceLabel}
@@ -5120,13 +5177,14 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                             >
                               <span className="hana-chat-guest-option-main">
                                 <span className="hana-chat-thread-avatar-wrap">
-                                  <img
+                                  <ChatAvatar
                                     className="hana-chat-thread-avatar"
                                     src={avatarSrcForProfile(
                                       entry.guestKey || entry.canonicalId.replace(/^guest-/, '') || 'guest',
                                       entry.label,
                                     )}
-                                    alt=""
+                                    profileId={resolveAccountKey(entry.guestKey || entry.canonicalId.replace(/^guest-/, '') || 'guest')}
+                                    displayName={entry.label}
                                   />
                                   <span
                                     className={`hana-chat-thread-dot ${guestPresence.className}`}
@@ -5324,7 +5382,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     {menuPage === 'media' ? (
                       <>
                         <p className="hana-chat-settings-title">メディア</p>
-                        <p className="hana-chat-settings-hint">このチャットで読み込んだ写真・動画・ファイル</p>
+                        <p className="hana-chat-settings-hint">
+                          このチャットの写真・動画・ファイル（過去分も含む）
+                          {mediaHistoryLoading ? ' · 読み込み中…' : ''}
+                        </p>
                         <div className="hana-chat-media-filters" role="tablist" aria-label="メディアの種類">
                           {[
                             ['all', 'すべて'],
@@ -5739,6 +5800,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               guestOnHuman={guestOnHuman}
               resolveDelivery={resolveDelivery}
               avatarSrcForMessage={avatarSrcForMessage}
+              avatarMetaForMessage={avatarMetaForMessage}
               defaultReaction={defaultReaction}
               reactorId={reactorId}
               coarsePointer={coarsePointer}

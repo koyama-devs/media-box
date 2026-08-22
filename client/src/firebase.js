@@ -26,6 +26,7 @@ import {
     query,
     serverTimestamp,
     setDoc,
+    startAfter,
     updateDoc,
     where,
     writeBatch,
@@ -181,6 +182,19 @@ function setChatAccountsCache(next) {
 
 export function normalizeAccountKey(value) {
   return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '')
+}
+
+/** Stable Firestore profile id — maps pass keys like gabu → gabusan. */
+export function resolveAccountKey(keyOrPass = '') {
+  const needle = normalizeAccountKey(keyOrPass)
+  if (!needle) return ''
+  if (needle === OWNER_PROFILE.key || needle === 'hana') return OWNER_PROFILE.key
+  const byPass = findChatAccountByPassKey(needle)
+  if (byPass?.key) return byPass.key
+  const live = chatAccountsCache.find((account) => account.key === needle)
+  if (live?.key) return live.key
+  if (GUEST_PROFILES[needle]?.key) return GUEST_PROFILES[needle].key
+  return needle
 }
 
 export function isValidAccountKey(value) {
@@ -545,13 +559,14 @@ export function getDefaultAvatarDataUrl(profileId, displayName = '') {
 
 /** Prefer custom URL, else cached, else optional fallback (e.g. Hana art), else initials. */
 export function resolveAvatarSrc(profileId, displayName, customUrl = '', fallbackUrl = '', presetSrc = '') {
-  const url = String(customUrl || getCachedAvatarUrl(profileId) || '').trim()
+  const id = resolveAccountKey(profileId) || normalizeAccountKey(profileId) || 'guest'
+  const url = String(customUrl || getCachedAvatarUrl(id) || '').trim()
   if (url && !url.startsWith('preset:')) return url
   const preset = String(presetSrc || '').trim()
   if (preset) return preset
   const fallback = String(fallbackUrl || '').trim()
   if (fallback) return fallback
-  return getDefaultAvatarDataUrl(profileId, displayName)
+  return getDefaultAvatarDataUrl(id, displayName)
 }
 
 function serializeChatProfile(id, data) {
@@ -906,7 +921,12 @@ export function subscribeChatProfile(profileId, onData, onError) {
         return
       }
       const profile = serializeChatProfile(snap.id, snap.data())
-      if (profile.avatarUrl) setCachedAvatarUrl(profileId, profile.avatarUrl)
+      if (profile.avatarUrl) {
+        setCachedAvatarUrl(profileId, profile.avatarUrl)
+        if (profile.passKey && profile.passKey !== profileId) {
+          setCachedAvatarUrl(profile.passKey, profile.avatarUrl)
+        }
+      }
       onData?.(profile)
     },
     (error) => onError?.(error),
@@ -2674,6 +2694,9 @@ function rowsFromMessageSnap(snap) {
     .filter((message) => !message.deleted)
 }
 
+/** Live chat bubbles stay at newest 300 — do not raise this for media/search. */
+export const CHAT_MESSAGE_LIVE_LIMIT = 300
+
 /** @returns {() => void} */
 export function subscribeChatMessages(threadId, onData, onError) {
   if (!threadId) {
@@ -2692,7 +2715,7 @@ export function subscribeChatMessages(threadId, onData, onError) {
     onData?.(sortChatMessages([...byId.values()]))
   }
   const unsubIso = onSnapshot(
-    query(messagesRef, orderBy('createdAtIso', 'desc'), limit(300)),
+    query(messagesRef, orderBy('createdAtIso', 'desc'), limit(CHAT_MESSAGE_LIVE_LIMIT)),
     (snap) => {
       isoRows = rowsFromMessageSnap(snap)
       emit()
@@ -2702,7 +2725,7 @@ export function subscribeChatMessages(threadId, onData, onError) {
   // Old docs may lack createdAtIso and miss the main query. Keep that query;
   // merge a createdAt fallback so history still paints.
   const unsubCreated = onSnapshot(
-    query(messagesRef, orderBy('createdAt', 'desc'), limit(300)),
+    query(messagesRef, orderBy('createdAt', 'desc'), limit(CHAT_MESSAGE_LIVE_LIMIT)),
     (snap) => {
       createdRows = rowsFromMessageSnap(snap)
       emit()
@@ -2713,6 +2736,81 @@ export function subscribeChatMessages(threadId, onData, onError) {
     unsubIso()
     unsubCreated()
   }
+}
+
+function mediaItemsFromChatMessage(message) {
+  if (!message || message.deleted) return []
+  const attachments = getChatMessageAttachments(message)
+  const out = []
+  attachments.forEach((att, index) => {
+    if (!att?.url) return
+    const kind = isChatAudioAttachment(att.fileMime, att.fileName) ? 'file' : att.kind
+    out.push({
+      id: `${message.id}-${index}-${att.url}`,
+      messageId: message.id,
+      createdAt: message.createdAtIso || message.createdAt || '',
+      kind,
+      url: att.url,
+      fileName: att.fileName,
+      fileMime: att.fileMime,
+      fileSize: att.fileSize,
+    })
+  })
+  return out
+}
+
+/**
+ * Page through every message in a thread and collect image/video/file attachments.
+ * Live chat stays limited to CHAT_MESSAGE_LIVE_LIMIT; media gallery uses this.
+ * @param {string} threadId
+ * @param {{ pageSize?: number, onBatch?: (items: object[]) => void, signal?: AbortSignal }} [options]
+ */
+export async function fetchChatThreadMediaItems(threadId, options = {}) {
+  const tid = String(threadId || '').trim()
+  if (!tid) return []
+  const pageSize = Math.max(50, Math.min(400, Number(options.pageSize) || 200))
+  const onBatch = typeof options.onBatch === 'function' ? options.onBatch : null
+  const signal = options.signal
+  const messagesRef = collection(db, CHAT_THREADS_COLLECTION, tid, 'messages')
+  const byId = new Map()
+
+  const walk = async (field) => {
+    let cursor = null
+    let guard = 0
+    while (guard < 80) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+      guard += 1
+      const parts = [orderBy(field, 'desc'), limit(pageSize)]
+      const q = cursor
+        ? query(messagesRef, orderBy(field, 'desc'), startAfter(cursor), limit(pageSize))
+        : query(messagesRef, ...parts)
+      let snap
+      try {
+        snap = await getDocs(q)
+      } catch {
+        break
+      }
+      if (snap.empty) break
+      for (const document of snap.docs) {
+        const message = serializeChatMessage(document.id, document.data())
+        for (const item of mediaItemsFromChatMessage(message)) {
+          byId.set(item.id, item)
+        }
+      }
+      cursor = snap.docs[snap.docs.length - 1]
+      onBatch?.([...byId.values()].sort(
+        (a, b) => (Date.parse(b.createdAt || 0) || 0) - (Date.parse(a.createdAt || 0) || 0),
+      ))
+      if (snap.size < pageSize) break
+    }
+  }
+
+  await walk('createdAtIso')
+  await walk('createdAt')
+
+  return [...byId.values()].sort(
+    (a, b) => (Date.parse(b.createdAt || 0) || 0) - (Date.parse(a.createdAt || 0) || 0),
+  )
 }
 
 const CHAT_CALLS_SUBCOLLECTION = 'calls'

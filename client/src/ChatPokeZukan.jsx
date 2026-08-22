@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import ChatAvatar from './ChatAvatar'
 import {
     actPokeWorld,
     adoptPokeWorldPartner,
@@ -496,14 +497,14 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
       <div className="hana-chat-poke-trainers is-world">
         <div className={`hana-chat-poke-seat${me === 'hana' ? ' is-mine' : ''}`}>
           <div className="hana-chat-poke-seat-face">
-            {hanaAvatar ? <img src={hanaAvatar} alt="" /> : <span className="hana-chat-poke-seat-fallback">{hanaName.slice(0, 1)}</span>}
+            {hanaAvatar ? <ChatAvatar src={hanaAvatar} profileId="hana" displayName={hanaName} /> : <span className="hana-chat-poke-seat-fallback">{hanaName.slice(0, 1)}</span>}
           </div>
           <strong>{hanaName}</strong>
         </div>
         <span className="hana-chat-poke-link" aria-hidden="true" />
         <div className={`hana-chat-poke-seat${me === 'guest' ? ' is-mine' : ''}`}>
           <div className="hana-chat-poke-seat-face">
-            {guestAvatar ? <img src={guestAvatar} alt="" /> : <span className="hana-chat-poke-seat-fallback">{guestName.slice(0, 1)}</span>}
+            {guestAvatar ? <ChatAvatar src={guestAvatar} profileId="gabusan" displayName={guestName} /> : <span className="hana-chat-poke-seat-fallback">{guestName.slice(0, 1)}</span>}
           </div>
           <strong>{guestName}</strong>
         </div>
