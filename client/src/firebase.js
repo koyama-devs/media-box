@@ -1895,6 +1895,7 @@ export const WEIGHT_GARDEN_DEFAULT_START_KG = 65
 export const WEIGHT_GARDEN_DEFAULT_GOAL_KG = 55
 export const WEIGHT_GARDEN_STAGE_COUNT = 12
 export const WEIGHT_GARDEN_LOG_LIMIT = 60
+const WEIGHT_GARDEN_CANONICAL_THREAD_ID = 'guest-gabusan'
 
 function clampWeightKg(value, fallback) {
   const n = Number(value)
@@ -1902,31 +1903,67 @@ function clampWeightKg(value, fallback) {
   return Math.min(80, Math.max(40, Math.round(n * 10) / 10))
 }
 
+function coerceWeightAtIso(value) {
+  if (value == null || value === '') return ''
+  if (typeof value === 'string') {
+    const s = value.trim()
+    if (!s || s === '[object Object]') return ''
+    return Number.isNaN(Date.parse(s)) ? '' : s
+  }
+  if (typeof value?.toDate === 'function') {
+    try {
+      return value.toDate().toISOString()
+    } catch {
+      return ''
+    }
+  }
+  const seconds = value?.seconds ?? value?._seconds
+  if (typeof seconds === 'number') {
+    return new Date(seconds * 1000).toISOString()
+  }
+  return ''
+}
+
 export function serializeWeightGarden(raw) {
   const startKg = clampWeightKg(raw?.startKg, WEIGHT_GARDEN_DEFAULT_START_KG)
   const goalKg = clampWeightKg(raw?.goalKg, WEIGHT_GARDEN_DEFAULT_GOAL_KG)
   const logs = []
   if (Array.isArray(raw?.logs)) {
-    for (const entry of raw.logs) {
-      if (!entry || typeof entry !== 'object') continue
-      const kg = Number(entry.kg)
-      if (!Number.isFinite(kg) || kg < 30 || kg > 200) continue
-      const atIso = String(entry.atIso || entry.at || '').trim()
-      if (!atIso) continue
+    raw.logs.forEach((entry, index) => {
+      if (!entry || typeof entry !== 'object') return
+      const kgRaw = typeof entry.kg === 'string' ? entry.kg.replace(',', '.') : entry.kg
+      const kg = Number(kgRaw)
+      if (!Number.isFinite(kg) || kg < 30 || kg > 200) return
+      let atIso = coerceWeightAtIso(entry.atIso || entry.at || entry.createdAt)
+      // Never drop a valid kg row just because timestamp shape was odd.
+      if (!atIso) atIso = `1970-01-01T00:00:00.${String(index).padStart(3, '0')}Z`
       logs.push({
         kg: Math.round(kg * 10) / 10,
         atIso,
         note: String(entry.note || '').trim().slice(0, 80),
       })
-      if (logs.length >= WEIGHT_GARDEN_LOG_LIMIT) break
-    }
+    })
   }
-  return { startKg, goalKg, logs }
+  logs.sort((a, b) => Date.parse(b.atIso) - Date.parse(a.atIso))
+  return { startKg, goalKg, logs: logs.slice(0, WEIGHT_GARDEN_LOG_LIMIT) }
 }
 
 function weightGardenNewestLogMs(garden) {
   const at = garden?.logs?.[0]?.atIso
   return Date.parse(at || '') || 0
+}
+
+function rawWeightGardenLogCount(raw) {
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.logs)) return 0
+  return raw.logs.length
+}
+
+/** Never allow a write that shrinks the stored weigh-in list. */
+function weightGardenMayWrite(beforeRaw, afterGarden) {
+  const afterCount = afterGarden?.logs?.length || 0
+  if (rawWeightGardenLogCount(beforeRaw) > afterCount) return false
+  if (serializeWeightGarden(beforeRaw).logs.length > afterCount) return false
+  return true
 }
 
 /** Prefer the garden with more weigh-ins (then newer). */
@@ -1949,6 +1986,37 @@ function pickRicherWeightGarden(a, b) {
 
 function weightGardenHasLogs(raw) {
   return serializeWeightGarden(raw).logs.length > 0
+}
+
+function isGabusanWeightThread(threadId, guestKey = '') {
+  const key = normalizeAccountKey(guestKey || String(threadId || '').replace(/^guest-/, ''))
+  return key === 'gabusan'
+}
+
+/** Mirror weigh-ins onto guest-gabusan so UUID ↔ canonical never diverge. */
+async function mirrorWeightGardenIfNeeded(sourceThreadId, weightGarden) {
+  const tid = String(sourceThreadId || '').trim()
+  if (!tid || tid === WEIGHT_GARDEN_CANONICAL_THREAD_ID) return
+  if (!isGabusanWeightThread(tid)) return
+  if (!weightGardenMayWrite(null, weightGarden)) return
+  const canonRef = doc(db, CHAT_THREADS_COLLECTION, WEIGHT_GARDEN_CANONICAL_THREAD_ID)
+  try {
+    const snap = await getDoc(canonRef)
+    const prevRaw = snap.exists() ? snap.data()?.weightGarden : null
+    const merged = pickRicherWeightGarden(prevRaw, weightGarden)
+    if (!weightGardenMayWrite(prevRaw, merged)) return
+    if (
+      serializeWeightGarden(prevRaw).logs.length === merged.logs.length
+      && weightGardenNewestLogMs(serializeWeightGarden(prevRaw)) >= weightGardenNewestLogMs(merged)
+      && serializeWeightGarden(prevRaw).goalKg === merged.goalKg
+      && serializeWeightGarden(prevRaw).startKg === merged.startKg
+    ) {
+      return
+    }
+    await setDoc(canonRef, { weightGarden: merged }, { merge: true })
+  } catch {
+    /* mirror is best-effort — primary write already succeeded */
+  }
 }
 
 export function weightGardenProgress(garden) {
@@ -1977,6 +2045,7 @@ export function weightGardenProgress(garden) {
  * Seed defaults on the thread if weightGarden is missing.
  * Also heals after thread migration: weigh-ins often stayed on a legacy UUID
  * while the UI moved to guest-gabusan (empty blossom).
+ * Never writes a garden with fewer logs than what is already stored.
  */
 export async function ensureWeightGardenDefaults(threadId) {
   const tid = String(threadId || '').trim()
@@ -2004,14 +2073,33 @@ export async function ensureWeightGardenDefaults(threadId) {
     }
   }
 
+  // Always check canonical Gabu doc even if sibling query missed it.
+  if (guestKey === 'gabusan' && tid !== WEIGHT_GARDEN_CANONICAL_THREAD_ID) {
+    try {
+      const canonSnap = await getDoc(doc(db, CHAT_THREADS_COLLECTION, WEIGHT_GARDEN_CANONICAL_THREAD_ID))
+      if (canonSnap.exists()) {
+        best = pickRicherWeightGarden(best, canonSnap.data()?.weightGarden)
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   const had = data.weightGarden && typeof data.weightGarden === 'object'
   const local = serializeWeightGarden(data.weightGarden)
-  const healed = best.logs.length > local.logs.length
-    || weightGardenNewestLogMs(best) > weightGardenNewestLogMs(local)
-    || best.startKg !== local.startKg
-    || best.goalKg !== local.goalKg
+  // Only upgrade when we actually gained weigh-ins (never rewrite for goal/start alone).
+  const upgraded = best.logs.length > local.logs.length
+    || (
+      best.logs.length > 0
+      && best.logs.length === local.logs.length
+      && weightGardenNewestLogMs(best) > weightGardenNewestLogMs(local)
+    )
 
-  if (!had || healed) {
+  if (!had) {
+    if (weightGardenMayWrite(null, best)) {
+      await setDoc(ref, { weightGarden: best }, { merge: true })
+    }
+  } else if (upgraded && weightGardenMayWrite(data.weightGarden, best)) {
     await setDoc(ref, { weightGarden: best }, { merge: true })
   }
   return best
@@ -2027,7 +2115,8 @@ export async function logWeightGardenEntry(threadId, { kg, note = '' } = {}) {
   }
   const ref = doc(db, CHAT_THREADS_COLLECTION, tid)
   const snap = await getDoc(ref)
-  const prev = serializeWeightGarden(snap.exists() ? snap.data()?.weightGarden : null)
+  const prevRaw = snap.exists() ? snap.data()?.weightGarden : null
+  const prev = serializeWeightGarden(prevRaw)
   const entry = {
     kg: Math.round(nextKg * 10) / 10,
     atIso: new Date().toISOString(),
@@ -2038,7 +2127,11 @@ export async function logWeightGardenEntry(threadId, { kg, note = '' } = {}) {
     goalKg: prev.goalKg,
     logs: [entry, ...prev.logs].slice(0, WEIGHT_GARDEN_LOG_LIMIT),
   }
+  if (!weightGardenMayWrite(prevRaw, weightGarden)) {
+    throw new Error('記録の保存に失敗しました。もう一度試してください。')
+  }
   await setDoc(ref, { weightGarden }, { merge: true })
+  await mirrorWeightGardenIfNeeded(tid, weightGarden)
   return weightGardenProgress(weightGarden)
 }
 
@@ -2048,12 +2141,17 @@ export async function setWeightGardenGoal(threadId, goalKg) {
   if (!tid) throw new Error('スレッドがありません。')
   const ref = doc(db, CHAT_THREADS_COLLECTION, tid)
   const snap = await getDoc(ref)
-  const prev = serializeWeightGarden(snap.exists() ? snap.data()?.weightGarden : null)
+  const prevRaw = snap.exists() ? snap.data()?.weightGarden : null
+  const prev = serializeWeightGarden(prevRaw)
   const weightGarden = {
     ...prev,
     goalKg: clampWeightKg(goalKg, prev.goalKg),
   }
+  if (!weightGardenMayWrite(prevRaw, weightGarden)) {
+    throw new Error('目標の更新に失敗しました。もう一度試してください。')
+  }
   await setDoc(ref, { weightGarden }, { merge: true })
+  await mirrorWeightGardenIfNeeded(tid, weightGarden)
   return weightGardenProgress(weightGarden)
 }
 
@@ -3221,6 +3319,7 @@ export async function migrateLegacyGuestThread({
       mergedGarden.logs.length > localGarden.logs.length
       || weightGardenNewestLogMs(mergedGarden) > weightGardenNewestLogMs(localGarden)
     )
+    && weightGardenMayWrite(canonMeta.weightGarden, mergedGarden)
   ) {
     healPatch.weightGarden = mergedGarden
   }
@@ -3261,7 +3360,12 @@ export async function migrateLegacyGuestThread({
     migratedFrom: legacyThreadId,
     ...healPatch,
   }
-  if (!healPatch.weightGarden && (legacyMeta.weightGarden || canonMeta.weightGarden)) {
+  if (
+    !healPatch.weightGarden
+    && (legacyMeta.weightGarden || canonMeta.weightGarden)
+    && weightGardenMayWrite(canonMeta.weightGarden, mergedGarden)
+    && mergedGarden.logs.length >= localGarden.logs.length
+  ) {
     patch.weightGarden = mergedGarden
   }
 
