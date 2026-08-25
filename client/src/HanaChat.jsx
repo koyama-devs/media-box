@@ -83,6 +83,7 @@ import {
   subscribeChatThreads,
   subscribeOwnChatThread,
   subscribeToAuthUser,
+  subscribeWeightGarden,
   suggestHanaChat,
   threadUnreadCount,
   toggleChatReaction,
@@ -1167,6 +1168,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   }, [jpTripAddressCopied])
 
   const [weightGardenExpanded, setWeightGardenExpanded] = useState(false)
+  const [weightGardenData, setWeightGardenData] = useState(null)
   const weightGardenDockRef = useRef(null)
   const weightGardenChipRef = useRef(null)
   const [pokeZukanExpanded, setPokeZukanExpanded] = useState(false)
@@ -1183,29 +1185,27 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     }
   }
 
-  const weightGardenThreadId = useMemo(() => {
-    if (actingAsOwner) {
-      if (ownerActiveGuestKey !== WEIGHT_GARDEN_GUEST) return ''
-      return activeThreadId || ''
-    }
-    if (String(guestKey || '').trim().toLowerCase() !== WEIGHT_GARDEN_GUEST) return ''
-    return guestChatId || ''
-  }, [actingAsOwner, ownerActiveGuestKey, activeThreadId, guestKey, guestChatId])
-
   const showWeightGarden = canSeeWeightGarden({
     actingAsOwner,
     guestKey,
     ownerThreadGuestKey: ownerActiveGuestKey,
-  }) && Boolean(weightGardenThreadId)
+  })
 
-  const weightGardenData = useMemo(() => {
-    if (!weightGardenThreadId) return null
-    if (actingAsOwner) {
-      const thread = threads.find((entry) => entry.id === weightGardenThreadId)
-      return thread?.weightGarden || null
+  // Storage is shared-state (not chat thread). Keep a stable id for the panel API.
+  const weightGardenThreadId = showWeightGarden ? 'guest-gabusan' : ''
+
+  useEffect(() => {
+    if (hidden || !showWeightGarden) {
+      setWeightGardenData(null)
+      return undefined
     }
-    return ownThread?.weightGarden || null
-  }, [actingAsOwner, weightGardenThreadId, threads, ownThread])
+    const unsub = subscribeWeightGarden(
+      (next) => setWeightGardenData(next),
+      () => {},
+    )
+    void ensureWeightGardenDefaults().catch(() => {})
+    return unsub
+  }, [hidden, showWeightGarden])
 
   const setWeightGardenOpen = (expanded) => {
     setWeightGardenExpanded(expanded)
@@ -1296,17 +1296,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       document.removeEventListener('keydown', onKeyDown)
     }
   }, [showPokeZukan, pokeZukanExpanded])
-
-  useEffect(() => {
-    if (!showWeightGarden) {
-      setWeightGardenExpanded(false)
-      return undefined
-    }
-    void ensureWeightGardenDefaults(weightGardenThreadId).catch(() => {
-      /* defaults are optional; serialize falls back client-side */
-    })
-    return undefined
-  }, [showWeightGarden, weightGardenThreadId])
 
   useEffect(() => {
     if (!open || !showWeightGarden) return
