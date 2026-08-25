@@ -462,11 +462,20 @@ function App() {
 
   // Web: register FCM under the stable account key (not the login passKey).
   useEffect(() => {
-    if (!isLoggedIn || !guestKey) return
+    if (!isLoggedIn || !guestKey) return undefined
     const pushKey = resolvePushUserKey(authRole, guestKey)
-    if (!pushKey) return
+    if (!pushKey) return undefined
     bindForegroundPush()
     void ensureWebPush(pushKey)
+    const refresh = () => {
+      if (document.visibilityState === 'visible') void ensureWebPush(pushKey)
+    }
+    document.addEventListener('visibilitychange', refresh)
+    window.addEventListener('focus', refresh)
+    return () => {
+      document.removeEventListener('visibilitychange', refresh)
+      window.removeEventListener('focus', refresh)
+    }
   }, [isLoggedIn, guestKey, authRole])
 
   // Refresh lastAccessAt while the session is alive (activity, not only password login).
@@ -2550,7 +2559,11 @@ const playPrevious = useCallback(() => {
       setError('')
       void touchAccountAccess(verdict.account.key)
       // Safari only allows Notification.requestPermission inside this click stack.
-      void ensureWebPush(verdict.account.key, { requestPermission: true })
+      // Always register under the stable push key (owner → hana), never a passKey typo.
+      void ensureWebPush(
+        resolvePushUserKey(role, verdict.account.passKey || verdict.account.key),
+        { requestPermission: true },
+      )
     } catch (loginError) {
       console.error(loginError)
       setError(getFirebaseErrorMessage(loginError) || loginError?.message || 'ログインに失敗しました。')
