@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 function guessDownloadName(src, alt = '写真') {
@@ -76,6 +76,22 @@ async function shareImageFile(file, title) {
   return true
 }
 
+function normalizeGallery(src, alt, items, index) {
+  const list = Array.isArray(items)
+    ? items
+      .map((row) => ({
+        src: String(row?.src || '').trim(),
+        alt: String(row?.alt || '写真').trim() || '写真',
+      }))
+      .filter((row) => row.src)
+    : []
+  if (!list.length && src) {
+    list.push({ src: String(src), alt: String(alt || '写真') })
+  }
+  const start = Math.max(0, Math.min(list.length - 1, Number(index) || 0))
+  return { list, start }
+}
+
 /** Simple download-to-device glyph. */
 function IconSave() {
   return (
@@ -118,19 +134,46 @@ function IconShare() {
 }
 
 /**
- * Full-screen image preview.
+ * Full-screen image preview with optional multi-image gallery (swipe / arrows).
  * Save = download image (gallery / Downloads) + success toast.
  * Share = OS share sheet.
  */
-export default function ChatImageLightbox({ src, alt = '写真', onClose }) {
+export default function ChatImageLightbox({
+  src,
+  alt = '写真',
+  items = null,
+  index = 0,
+  onClose,
+}) {
+  const { list: gallery, start } = normalizeGallery(src, alt, items, index)
+  const [idx, setIdx] = useState(start)
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
+  const touchRef = useRef(null)
   const canShareApi = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
+  const multi = gallery.length > 1
+  const safeIdx = Math.max(0, Math.min(gallery.length - 1, idx))
+  const current = gallery[safeIdx] || null
+  const currentSrc = current?.src || ''
+  const currentAlt = current?.alt || '写真'
 
   useEffect(() => {
-    if (!src) return undefined
+    setIdx(start)
+  }, [start, src, items])
+
+  useEffect(() => {
+    if (!currentSrc) return undefined
+    const goPrev = () => setIdx((n) => (n <= 0 ? gallery.length - 1 : n - 1))
+    const goNext = () => setIdx((n) => (n >= gallery.length - 1 ? 0 : n + 1))
     const onKey = (event) => {
       if (event.key === 'Escape') onClose?.()
+      else if (multi && event.key === 'ArrowLeft') {
+        event.preventDefault()
+        goPrev()
+      } else if (multi && event.key === 'ArrowRight') {
+        event.preventDefault()
+        goNext()
+      }
     }
     window.addEventListener('keydown', onKey)
     const prevOverflow = document.body.style.overflow
@@ -139,7 +182,7 @@ export default function ChatImageLightbox({ src, alt = '写真', onClose }) {
       window.removeEventListener('keydown', onKey)
       document.body.style.overflow = prevOverflow
     }
-  }, [src, onClose])
+  }, [currentSrc, onClose, multi, gallery.length])
 
   useEffect(() => {
     if (!note) return undefined
@@ -147,16 +190,47 @@ export default function ChatImageLightbox({ src, alt = '写真', onClose }) {
     return () => window.clearTimeout(id)
   }, [note])
 
-  if (!src || typeof document === 'undefined') return null
+  if (!currentSrc || typeof document === 'undefined') return null
 
-  const fileName = guessDownloadName(src, alt)
+  const fileName = guessDownloadName(currentSrc, currentAlt)
+
+  const goPrev = (event) => {
+    event?.stopPropagation?.()
+    if (!multi) return
+    setIdx((n) => (n <= 0 ? gallery.length - 1 : n - 1))
+  }
+
+  const goNext = (event) => {
+    event?.stopPropagation?.()
+    if (!multi) return
+    setIdx((n) => (n >= gallery.length - 1 ? 0 : n + 1))
+  }
+
+  const onTouchStart = (event) => {
+    if (!multi) return
+    const touch = event.changedTouches?.[0]
+    if (!touch) return
+    touchRef.current = { x: touch.clientX, y: touch.clientY, at: Date.now() }
+  }
+
+  const onTouchEnd = (event) => {
+    if (!multi || !touchRef.current) return
+    const touch = event.changedTouches?.[0]
+    if (!touch) return
+    const dx = touch.clientX - touchRef.current.x
+    const dy = touch.clientY - touchRef.current.y
+    touchRef.current = null
+    if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy) * 1.2) return
+    if (dx < 0) goNext(event)
+    else goPrev(event)
+  }
 
   const handleSave = async (event) => {
     event.stopPropagation()
     if (busy) return
     setBusy(true)
     try {
-      const raw = await fetchImageBlob(src)
+      const raw = await fetchImageBlob(currentSrc)
       const blob = await toSaveableImageBlob(raw)
       const saveName = String(blob.type || '').includes('png')
         ? fileName.replace(/\.[^.]+$/, '.png')
@@ -178,21 +252,20 @@ export default function ChatImageLightbox({ src, alt = '写真', onClose }) {
     try {
       let shared = false
       try {
-        const blob = await fetchImageBlob(src)
+        const blob = await fetchImageBlob(currentSrc)
         const file = new File([blob], fileName, { type: blob.type || 'image/jpeg' })
-        shared = await shareImageFile(file, alt || '写真')
+        shared = await shareImageFile(file, currentAlt || '写真')
       } catch {
         /* fall through to URL share */
       }
-      if (!shared && /^https:\/\//i.test(src)) {
+      if (!shared && /^https:\/\//i.test(currentSrc)) {
         await navigator.share({
-          title: alt || '写真',
+          title: currentAlt || '写真',
           text: 'Hana Mediaboxの写真',
-          url: src,
+          url: currentSrc,
         })
         shared = true
       }
-      // Share promise resolves after the user picks an action (save / send / …).
       if (shared) setNote('完了')
       else setNote('共有に失敗しました')
     } catch (err) {
@@ -205,11 +278,13 @@ export default function ChatImageLightbox({ src, alt = '写真', onClose }) {
 
   return createPortal(
     <div
-      className="hana-chat-lightbox"
+      className={`hana-chat-lightbox${multi ? ' is-gallery' : ''}`}
       role="dialog"
       aria-modal="true"
       aria-label="画像プレビュー"
       onClick={onClose}
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
     >
       <button
         type="button"
@@ -223,14 +298,44 @@ export default function ChatImageLightbox({ src, alt = '写真', onClose }) {
         ×
       </button>
 
+      {multi ? (
+        <p className="hana-chat-lightbox-counter" aria-live="polite">
+          {safeIdx + 1} / {gallery.length}
+        </p>
+      ) : null}
+
+      {multi ? (
+        <button
+          type="button"
+          className="hana-chat-lightbox-nav is-prev"
+          aria-label="前の画像"
+          onClick={goPrev}
+        >
+          ‹
+        </button>
+      ) : null}
+
       <img
+        key={currentSrc}
         className="hana-chat-lightbox-image"
-        src={src}
-        alt={alt}
+        src={currentSrc}
+        alt={currentAlt}
         onClick={(event) => {
           event.stopPropagation()
         }}
+        draggable={false}
       />
+
+      {multi ? (
+        <button
+          type="button"
+          className="hana-chat-lightbox-nav is-next"
+          aria-label="次の画像"
+          onClick={goNext}
+        >
+          ›
+        </button>
+      ) : null}
 
       <div
         className="hana-chat-lightbox-toolbar"

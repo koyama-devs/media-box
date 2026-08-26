@@ -1835,7 +1835,11 @@ body.hana-chat-scroll-lock #root {
 .hana-chat-bubble.is-image {
   padding: 4px;
   overflow: hidden;
-  max-width: min(280px, 72vw);
+  max-width: min(300px, 78vw);
+}
+
+.hana-chat-bubble.is-image:has(.hana-chat-attach-album.is-many) {
+  max-width: min(320px, 84vw);
 }
 
 .hana-chat-image-link {
@@ -2173,6 +2177,54 @@ body.hana-chat-scroll-lock #root {
 .hana-chat-lightbox-close:hover,
 .hana-chat-lightbox-close:focus-visible {
   background: rgba(255, 248, 240, 0.24);
+  outline: none;
+}
+
+.hana-chat-lightbox-counter {
+  position: absolute;
+  top: max(18px, calc(env(safe-area-inset-top) + 8px));
+  left: 50%;
+  z-index: 1;
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(12, 8, 14, 0.55);
+  color: rgba(255, 248, 240, 0.92);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.hana-chat-lightbox-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 1;
+  width: 44px;
+  height: 44px;
+  margin-top: -22px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 248, 240, 0.14);
+  color: rgba(255, 248, 240, 0.95);
+  font-size: 1.8rem;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.hana-chat-lightbox-nav.is-prev {
+  left: max(10px, env(safe-area-inset-left));
+}
+
+.hana-chat-lightbox-nav.is-next {
+  right: max(10px, env(safe-area-inset-right));
+}
+
+.hana-chat-lightbox-nav:hover,
+.hana-chat-lightbox-nav:focus-visible {
+  background: rgba(255, 248, 240, 0.26);
   outline: none;
 }
 
@@ -7317,19 +7369,21 @@ body.hana-chat-scroll-lock #root {
 
 .hana-chat-composer-attach {
   grid-column: 1 / -1;
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
   gap: 8px;
-  overflow-x: auto;
-  padding: 0 2px 2px;
+  max-height: min(42vh, 220px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 2px;
   scrollbar-width: thin;
 }
 
 .hana-chat-composer-attach-item {
   position: relative;
-  flex: 0 0 56px;
-  width: 56px;
-  height: 56px;
-  border-radius: 10px;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 12px;
   overflow: hidden;
   background: rgba(255, 248, 240, 0.1);
   border: 1px solid rgba(198, 140, 120, 0.28);
@@ -7347,7 +7401,7 @@ body.hana-chat-scroll-lock #root {
   align-items: center;
   justify-content: center;
   height: 100%;
-  padding: 4px;
+  padding: 6px;
   font-size: 0.62rem;
   line-height: 1.2;
   text-align: center;
@@ -7357,16 +7411,16 @@ body.hana-chat-scroll-lock #root {
 
 .hana-chat-composer-attach-remove {
   position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 18px;
-  height: 18px;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
   border: 0;
   border-radius: 999px;
   padding: 0;
   line-height: 1;
-  font-size: 12px;
-  background: rgba(20, 12, 16, 0.72);
+  font-size: 14px;
+  background: rgba(20, 12, 16, 0.78);
   color: #fff;
   cursor: pointer;
 }
@@ -7375,14 +7429,86 @@ body.hana-chat-scroll-lock #root {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
+}
+
+.hana-chat-attach-album {
+  display: block;
+  min-width: 0;
+}
+
+.hana-chat-attach-album > * {
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.hana-chat-attach-album.is-many {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.hana-chat-attach-album.is-many .hana-chat-image-card,
+.hana-chat-attach-album.is-many .hana-chat-video-wrap,
+.hana-chat-attach-album.is-many .hana-chat-file-card {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  border-radius: 0;
+  overflow: hidden;
+  aspect-ratio: 1;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.hana-chat-attach-album.is-many .hana-chat-image-link,
+.hana-chat-attach-album.is-many .hana-chat-image,
+.hana-chat-attach-album.is-many .hana-chat-video {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+  object-fit: cover;
+}
+
+.hana-chat-attach-album.is-many .hana-chat-video-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hana-chat-attach-album.is-many .hana-chat-file-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 8px;
+  aspect-ratio: 1;
+  text-align: center;
+}
+
+.hana-chat-attach-album.is-count-1 {
+  display: block;
+}
+
+.hana-chat-attach-album.is-count-3 > :last-child {
+  grid-column: 1 / -1;
+  aspect-ratio: 16 / 10;
+}
+
+.hana-chat-attach-album.is-count-3 > :last-child .hana-chat-image-link,
+.hana-chat-attach-album.is-count-3 > :last-child .hana-chat-image,
+.hana-chat-attach-album.is-count-3 > :last-child .hana-chat-video {
+  aspect-ratio: auto;
 }
 
 .hana-chat-attach-stack.is-many {
-  max-height: min(42vh, 340px);
-  overflow-x: hidden;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
+  max-height: none;
+  overflow: visible;
 }
 
 .hana-chat-bubble-caption {
@@ -8162,7 +8288,7 @@ body.hana-chat-scroll-lock #root {
   .hana-chat-panel.is-keyboard .hana-chat-attach-stack.is-many,
   .hana-chat-panel.is-bottom-chrome .hana-chat-attach-stack.is-many,
   .hana-chat-panel.is-sticker-dock .hana-chat-attach-stack.is-many {
-    max-height: min(28vh, 220px);
+    max-height: none;
   }
 
   .chat-swipe-track,

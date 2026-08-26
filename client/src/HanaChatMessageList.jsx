@@ -25,7 +25,7 @@ function isGenericMediaCaption(text) {
   return value === '写真' || value === '動画' || value === 'ファイル'
 }
 
-function ChatAttachmentBlock({ attachment, uploading, onOpenImage }) {
+function ChatAttachmentBlock({ attachment, uploading, onOpenImage, galleryItems = null, galleryIndex = 0 }) {
   if (!attachment) return null
   if (attachment.kind === 'image') {
     return (
@@ -39,9 +39,14 @@ function ChatAttachmentBlock({ attachment, uploading, onOpenImage }) {
             event.preventDefault()
             event.stopPropagation()
             if (uploading) return
+            const items = Array.isArray(galleryItems) && galleryItems.length
+              ? galleryItems
+              : [{ src: attachment.url, alt: attachment.fileName || '写真' }]
             onOpenImage({
               src: attachment.url,
               alt: attachment.fileName || '写真',
+              items,
+              index: galleryIndex,
             })
           }}
         >
@@ -185,6 +190,9 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
   const isSearchHit = Boolean(highlightQuery) && messageMatchesSearch(message, highlightQuery, translation)
   const showsSticker = !message.deleted && isHanaSticker(message.sticker)
   const attachments = !message.deleted ? getChatMessageAttachments(message) : []
+  const imageGallery = attachments
+    .filter((item) => item.kind === 'image')
+    .map((item) => ({ src: item.url, alt: item.fileName || '写真' }))
   const showsImage = attachments.some((item) => item.kind === 'image')
   const showsVideo = attachments.some((item) => item.kind === 'video')
   const showsFile = attachments.some((item) => item.kind === 'file')
@@ -288,14 +296,28 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
                 <HanaSticker id={message.sticker} size={104} title={message.text} />
               ) : showsMedia ? (
                 <div className={`hana-chat-attach-stack${attachments.length > 1 ? ' is-many' : ''}`}>
-                  {attachments.map((item, index) => (
-                    <ChatAttachmentBlock
-                      key={`${item.url}-${index}`}
-                      attachment={item}
-                      uploading={message.uploading && index === 0}
-                      onOpenImage={onOpenImage}
-                    />
-                  ))}
+                  <div
+                    className={`hana-chat-attach-album${attachments.length > 1 ? ` is-many is-count-${Math.min(attachments.length, 9)}` : ''}`}
+                    data-count={attachments.length}
+                  >
+                    {attachments.map((item, index) => {
+                      const galleryIndex = item.kind === 'image'
+                        ? attachments
+                          .slice(0, index + 1)
+                          .filter((row) => row.kind === 'image').length - 1
+                        : 0
+                      return (
+                        <ChatAttachmentBlock
+                          key={`${item.url}-${index}`}
+                          attachment={item}
+                          uploading={message.uploading && index === 0}
+                          onOpenImage={onOpenImage}
+                          galleryItems={item.kind === 'image' ? imageGallery : null}
+                          galleryIndex={Math.max(0, galleryIndex)}
+                        />
+                      )
+                    })}
+                  </div>
                   {songShare ? (
                     <ChatSongMiniPlayer
                       title={songShare.title}
