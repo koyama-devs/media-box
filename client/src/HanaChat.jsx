@@ -6618,6 +6618,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         <ChatImageLightbox
           src={previewImage.src}
           alt={previewImage.alt}
+          items={previewImage.items}
+          index={previewImage.index}
           onClose={() => setPreviewImage(null)}
         />
       ) : null}
