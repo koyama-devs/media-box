@@ -56,7 +56,6 @@ import {
   getFirebaseErrorMessage,
   getGuestProfile,
   getMessageDeliveryStatus,
-  isAdminUser,
   isChatAudioAttachment,
   listGuestProfiles,
   markThreadRead,
@@ -82,7 +81,6 @@ import {
   subscribeChatProfiles,
   subscribeChatThreads,
   subscribeOwnChatThread,
-  subscribeToAuthUser,
   subscribeWeightGarden,
   suggestHanaChat,
   threadUnreadCount,
@@ -720,7 +718,8 @@ function ChatVoiceNoteDock({
 
 export default function HanaChat({ hidden = false, appRole = 'guest', guestKey = '' }) {
   const [open, setOpen] = useState(false)
-  const [authUser, setAuthUser] = useState(null)
+  const openRef = useRef(false)
+  openRef.current = open
   const [guestChatId, setGuestChatId] = useState('')
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -907,8 +906,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const guestAddressAs = guestProfile?.addressAs || guestDisplayName
   const guestThreadLabel = guestProfile?.displayName || guestDisplayName
 
-  const isAdmin = isAdminUser(authUser)
-  const actingAsOwner = appRole === 'owner' || isAdmin
+  // Chat role follows password login only. Google admin auth must NOT force
+  // the Hana inbox when the session is a guest (zen / gabusan / …).
+  const actingAsOwner = appRole === 'owner'
   // Owner/Hana → feminine packs; guests (mostly male) → masculine packs.
   const stickerFeminine = actingAsOwner
   const visibleStickerSets = useMemo(
@@ -1425,12 +1425,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     return () => window.removeEventListener('hana-chat-push', onPush)
   }, [hidden, notifyIncomingMessage])
 
-
-  useEffect(() => {
-    if (hidden) return undefined
-    return subscribeToAuthUser(setAuthUser)
-  }, [hidden])
-
   useEffect(() => {
     if (hidden) {
       setStorageReady(false)
@@ -1718,6 +1712,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         setHanaMessages((prev) => mergeServerMessagesWithPending(filtered, prev))
         setMessagesHydrated(true)
         setError('')
+        // Advance 既読 on every live snapshot while the guest chat is open.
+        if (openRef.current && document.visibilityState === 'visible') {
+          markThreadRead(guestChatId, 'guest').catch(() => {})
+        }
       },
       (err) => setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。'),
     )
@@ -1785,6 +1783,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         messageCacheRef.current.set(activeThreadId, filtered)
         setHanaMessages((prev) => mergeServerMessagesWithPending(filtered, prev))
         setMessagesHydrated(true)
+        if (openRef.current && document.visibilityState === 'visible') {
+          markThreadRead(activeThreadId, 'hana').catch(() => {})
+        }
         setError('')
       },
       (err) => {
@@ -1928,33 +1929,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     return undefined
   }, [hidden, actingAsOwner, activeThreadId, hanaMessages, requestOwnerAssist])
 
-  // Only mark read while the chat panel is actually open and visible.
-  useEffect(() => {
-    if (hidden || !open) return undefined
-
-    const threadId = actingAsOwner
-      ? activeThreadId
-      : (guestOnHuman ? guestChatId : null)
-    if (!threadId) return undefined
-
-    const reader = actingAsOwner ? 'hana' : 'guest'
-    const markIfVisible = () => {
-      if (document.visibilityState === 'visible') {
-        markThreadRead(threadId, reader).catch(() => {})
-      }
-    }
-    markIfVisible()
-    document.addEventListener('visibilitychange', markIfVisible)
-    return () => document.removeEventListener('visibilitychange', markIfVisible)
-  }, [
-    hidden,
-    open,
-    actingAsOwner,
-    activeThreadId,
-    guestOnHuman,
-    guestChatId,
-  ])
-
   const messagesScrollKey = useMemo(() => {
     const list = actingAsOwner || guestOnHuman ? hanaMessages : aiMessages
     const last = list[list.length - 1]
@@ -2031,6 +2005,38 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     }
     return ownThread
   }, [actingAsOwner, threads, activeThreadId, ownThread])
+
+  // Mark read while chat is open+visible. Must re-run when new partner messages
+  // arrive — otherwise 既読 sticks at the first open and never advances.
+  useEffect(() => {
+    if (hidden || !open) return undefined
+
+    const threadId = actingAsOwner
+      ? activeThreadId
+      : (guestOnHuman ? guestChatId : null)
+    if (!threadId) return undefined
+
+    const reader = actingAsOwner ? 'hana' : 'guest'
+    const markIfVisible = () => {
+      if (document.visibilityState === 'visible') {
+        markThreadRead(threadId, reader).catch(() => {})
+      }
+    }
+    markIfVisible()
+    document.addEventListener('visibilitychange', markIfVisible)
+    return () => document.removeEventListener('visibilitychange', markIfVisible)
+  }, [
+    hidden,
+    open,
+    actingAsOwner,
+    activeThreadId,
+    guestOnHuman,
+    guestChatId,
+    hanaMessages[hanaMessages.length - 1]?.id,
+    activeThreadMeta?.unreadByHana,
+    activeThreadMeta?.unreadByGuest,
+    activeThreadMeta?.updatedAt,
+  ])
 
   const sharedThreadPins = useMemo(() => {
     if (!(actingAsOwner || guestOnHuman)) return []

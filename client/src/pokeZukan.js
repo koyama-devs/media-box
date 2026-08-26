@@ -507,19 +507,22 @@ function careMonForTrainer(trainer) {
   return { id, mon }
 }
 export const WORLD_ACT_LIMIT = 8
-export const XP_PER_LEVEL = 20
+/** XP needed per level — keep low so care + gym feel rewarding within a day or two. */
+export const XP_PER_LEVEL = 12
+/** Soft cap: feed/nap/cafe XP earned per Tokyo day (train/walk/find are uncapped). */
+export const CARE_XP_DAY_CAP = 36
 export const WORLD_SLEEP_MS = 8 * 60 * 60 * 1000
 export const WORLD_STARTER = { hana: '172', guest: '4' }
 
 export const WORLD_COOL_MS = {
   pet: 0,
-  feed: 0,
+  feed: 20 * 60 * 1000,
   nap: 0,
   walk: 3 * 60 * 60 * 1000,
   find: 4 * 60 * 60 * 1000,
   cafe: 0,
   cafeGift: 0,
-  train: 8 * 60 * 60 * 1000,
+  train: 4 * 60 * 60 * 1000,
 }
 
 export const WORLD_DUO_COOL_MS = {
@@ -533,7 +536,7 @@ export const WORLD_PLACES = [
   { id: 'home', label: 'おうち', kicker: 'ふたりの家', hint: 'なでて、ごはん、おやすみ' },
   { id: 'park', label: 'こうえん', kicker: 'そよ風の道', hint: 'おさんぽして、草むらをのぞく' },
   { id: 'cafe', label: 'カフェ', kicker: 'ショーケース', hint: 'メニューから選んで、あげる／おくる' },
-  { id: 'gym', label: 'ジム', kicker: '特訓ひろば', hint: 'きたえるとレベルが上がり、しんかする' },
+  { id: 'gym', label: 'ジム', kicker: '特訓ひろば', hint: 'きたえるとレベルが上がりやすい。ヒトカゲはLv.5でリザード' },
 ]
 
 export const WORLD_STARTERS = [
@@ -661,12 +664,12 @@ export function cafeKindLabel(kind) {
 
 export const WORLD_ACTIONS = {
   pet: { place: 'home', label: 'なでる', hunger: 0, mood: 14, energy: 2, bond: 4, coins: 0, xp: 0 },
-  feed: { place: 'home', label: 'えさ', hunger: 22, mood: 6, energy: 4, bond: 2, coins: 0, xp: 1 },
-  nap: { place: 'home', label: 'おやすみ', hunger: -4, mood: 4, energy: 26, bond: 2, coins: 0, xp: 1 },
-  walk: { place: 'park', label: 'おさんぽ', hunger: -8, mood: 16, energy: -8, bond: 5, coins: 3, xp: 1 },
-  find: { place: 'park', label: 'さがす', hunger: -4, mood: 8, energy: -6, bond: 3, coins: 4, xp: 1 },
-  cafe: { place: 'cafe', label: 'ごはん', hunger: 26, mood: 12, energy: 6, bond: 6, coins: -4, xp: 1 },
-  train: { place: 'gym', label: 'きたえる', hunger: -10, mood: 6, energy: -16, bond: 4, coins: 2, xp: 2 },
+  feed: { place: 'home', label: 'えさ', hunger: 22, mood: 6, energy: 4, bond: 2, coins: 0, xp: 3 },
+  nap: { place: 'home', label: 'おやすみ', hunger: -4, mood: 4, energy: 26, bond: 2, coins: 0, xp: 3 },
+  walk: { place: 'park', label: 'おさんぽ', hunger: -8, mood: 16, energy: -8, bond: 5, coins: 3, xp: 3 },
+  find: { place: 'park', label: 'さがす', hunger: -4, mood: 8, energy: -6, bond: 3, coins: 4, xp: 3 },
+  cafe: { place: 'cafe', label: 'ごはん', hunger: 26, mood: 12, energy: 6, bond: 6, coins: -4, xp: 2 },
+  train: { place: 'gym', label: 'きたえる', hunger: -10, mood: 6, energy: -16, bond: 4, coins: 2, xp: 6 },
 }
 
 export const WORLD_DUO_ACTIONS = {
@@ -758,6 +761,7 @@ function emptyMon(id, speciesId = '') {
     sleepingUntilIso: '',
     careXpYmd: '',
     careXpActs: {},
+    careXpEarned: 0,
     log: [],
   }
 }
@@ -878,6 +882,7 @@ function serializeMon(raw, id) {
     sleepingUntilIso: String(src.sleepingUntilIso || '').trim().slice(0, 40),
     careXpYmd: String(src.careXpYmd || '').trim().slice(0, 12),
     careXpActs: serializeCareXpActs(src.careXpActs),
+    careXpEarned: Math.max(0, Math.min(999, Math.round(Number(src.careXpEarned) || 0))),
     log: serializeWorldLog(src.log),
   }
 }
@@ -1129,15 +1134,24 @@ function applyXp(mon, amount) {
 
 const DAILY_CARE_XP = new Set(['feed', 'nap', 'cafe'])
 
+/** Care XP can stack through the day, up to CARE_XP_DAY_CAP (was once-per-action = stuck at Lv.1). */
 function grantCareXp(mon, action, day, amount) {
   const gain = Math.max(0, Math.round(Number(amount) || 0))
   if (!gain) return { mon, gain: 0 }
   if (!DAILY_CARE_XP.has(action)) return { mon, gain }
-  const acts = mon.careXpYmd === day ? { ...(mon.careXpActs || {}) } : {}
-  if (acts[action]) return { mon, gain: 0 }
+  const sameDay = mon.careXpYmd === day
+  const earned = sameDay ? Math.max(0, Number(mon.careXpEarned) || 0) : 0
+  const acts = sameDay ? { ...(mon.careXpActs || {}) } : {}
+  if (earned >= CARE_XP_DAY_CAP) return { mon, gain: 0 }
+  const allowed = Math.min(gain, CARE_XP_DAY_CAP - earned)
   return {
-    mon: { ...mon, careXpYmd: day, careXpActs: { ...acts, [action]: true } },
-    gain,
+    mon: {
+      ...mon,
+      careXpYmd: day,
+      careXpEarned: earned + allowed,
+      careXpActs: { ...acts, [action]: true },
+    },
+    gain: allowed,
   }
 }
 
@@ -1310,17 +1324,35 @@ export function worldGuide(mon, placeId, now = Date.now()) {
   return { action, wait: 0, gesture: g.gesture, line: g.line, how: g.how }
 }
 
+export function worldXpProgress(mon) {
+  const level = Math.max(1, Number(mon?.level) || 1)
+  const xp = Math.max(0, Number(mon?.xp) || 0)
+  const need = XP_PER_LEVEL
+  return {
+    level,
+    xp,
+    need,
+    pct: Math.max(0, Math.min(100, Math.round((xp / need) * 100))),
+    toNext: Math.max(0, need - xp),
+  }
+}
+
 export function worldEvoHint(mon, place) {
   if (!mon) return ''
   const evo = evoFor(mon, place)
-  if (!evo) return 'これ以上はしんかしない'
+  const prog = worldXpProgress(mon)
+  const xpBit = `けいけん ${prog.xp}/${prog.need}`
+  if (!evo) return `これ以上はしんかしない・${xpBit}`
   if (Number(mon.speciesId) === 133) {
-    return `Lv.${evo.level}・今の場所だと${pokeNameJa(evo.into)}`
+    return `Lv.${evo.level}・今の場所だと${pokeNameJa(evo.into)}・${xpBit}`
   }
   if (evo.needBond && mon.bond < evo.needBond) {
-    return `なかよし${evo.needBond}とLv.${evo.level}で${pokeNameJa(evo.into)}`
+    return `なかよし${evo.needBond}とLv.${evo.level}で${pokeNameJa(evo.into)}・${xpBit}`
   }
-  return `Lv.${evo.level}で${pokeNameJa(evo.into)}にしんか`
+  if (mon.level < evo.level) {
+    return `Lv.${evo.level}で${pokeNameJa(evo.into)}（あと${evo.level - mon.level}レベル）・ジムの特訓がはやい・${xpBit}`
+  }
+  return `Lv.${evo.level}で${pokeNameJa(evo.into)}にしんか・${xpBit}`
 }
 
 function togetherNow(world, place, who) {
@@ -1584,6 +1616,7 @@ export function applyPokeWorldAction(world, { role, action, now, findId } = {}) 
     }
     napNote = `${timing.kind}:${formatTokyoHm(t)}`
   }
+  const levelBefore = careMon.level
   const xpGate = grantCareXp(mon, action, day, spec.xp)
   mon = applyXp({
     ...xpGate.mon,
@@ -1595,6 +1628,7 @@ export function applyPokeWorldAction(world, { role, action, now, findId } = {}) 
     cool: { ...mon.cool, [action]: t.toISOString() },
     ...sleepPatch,
   }, xpGate.gain)
+  const leveled = mon.level > levelBefore
   const evo = maybeEvolveMon(mon, spec.place)
   mon = evo.mon
   const actEntry = {
@@ -1624,6 +1658,8 @@ export function applyPokeWorldAction(world, { role, action, now, findId } = {}) 
     together,
     foundId: action === 'find' ? String(Number(findId) || '').trim() : '',
     evolvedTo: evo.evolvedTo || '',
+    xpGain: xpGate.gain,
+    leveled,
   }
 }
 
@@ -1724,7 +1760,8 @@ export function applyPokeWorldCafeOrder(world, { role, itemId, target = 'self', 
   if (wait > 0) throw new Error(`まだ早い。あと${formatCoolLeft(wait)}`)
 
   if (!send) {
-    const xpGate = grantCareXp(myMon, 'cafe', day, 1)
+    if (myTrainer.coins < item.coins) throw new Error('コインが足りない。')
+    const xpGate = grantCareXp(myMon, 'cafe', day, Math.max(1, Number(item.xp) || 0))
     let mon = sipCafeItem(xpGate.mon, { ...item, xp: 0 }, { cool: { cafe: t.toISOString() } })
     mon = applyXp(mon, xpGate.gain)
     const evo = maybeEvolveMon(mon, 'cafe')
@@ -1732,9 +1769,9 @@ export function applyPokeWorldCafeOrder(world, { role, itemId, target = 'self', 
     const cafeEntry = {
       at: t.toISOString(),
       by: who,
-      action: 'cafe',
+      action: evo.evolvedTo ? 'evolve' : 'cafe',
       place: 'cafe',
-      note: item.name,
+      note: evo.evolvedTo || item.name,
     }
     mon = logOnMon(mon, cafeEntry)
     next = {
@@ -1751,7 +1788,7 @@ export function applyPokeWorldCafeOrder(world, { role, itemId, target = 'self', 
       },
       log: pushWorldLog(next, cafeEntry),
     }
-    return { world: serializePokeWorld(next), evolvedTo: evo.evolvedTo || '', item }
+    return { world: serializePokeWorld(next), evolvedTo: evo.evolvedTo || '', item, xpGain: xpGate.gain }
   }
 
   const mateTrainer = next.trainers[mate]

@@ -44,18 +44,62 @@ import {
     worldPlace,
     worldSleepNest,
     worldTrainer,
+    worldXpProgress,
 } from './pokeZukan'
 
 function zukanState(raw) {
   return serializePokeZukan(raw)
 }
 
-function StatBar({ label, value, tone }) {
-  const n = Math.max(0, Math.min(100, Number(value) || 0))
+function StatBar({ label, value, tone, max = 100 }) {
+  const ceiling = Math.max(1, Number(max) || 100)
+  const n = Math.max(0, Math.min(ceiling, Number(value) || 0))
+  const pct = Math.round((n / ceiling) * 100)
   return (
     <div className={`hana-chat-poke-bar is-${tone}`}>
       <span>{label}</span>
-      <i><b style={{ width: `${n}%` }} /></i>
+      <i><b style={{ width: `${pct}%` }} /></i>
+    </div>
+  )
+}
+
+function MonStatusBlock({
+  mon,
+  displayName,
+  placeLabel,
+  asleep,
+  sleepKindLabel,
+  evoHint,
+  coins = null,
+}) {
+  if (!mon) {
+    return <p className="hana-chat-poke-hint">まだポケモンがいないよ。</p>
+  }
+  const xp = worldXpProgress(mon)
+  return (
+    <div className="hana-chat-poke-status">
+      <div className="hana-chat-poke-status-meta">
+        <strong>{displayName}</strong>
+        <span>Lv.{mon.level}</span>
+        {placeLabel ? <span className="hana-chat-poke-place-chip">{placeLabel}</span> : null}
+        {coins != null ? <span className="hana-chat-poke-coin">◇ {coins}</span> : null}
+      </div>
+      <StatBar label="けいけん" value={xp.xp} max={xp.need} tone="xp" />
+      <p className="hana-chat-poke-xp-note">次のレベルまで {xp.toNext}（{xp.xp}/{xp.need}）</p>
+      <StatBar label="おなか" value={mon.hunger} tone="food" />
+      <StatBar label="きぶん" value={mon.mood} tone="mood" />
+      <StatBar label="げんき" value={mon.energy} tone="energy" />
+      <StatBar label="けんこう" value={mon.health} tone="health" />
+      <StatBar label="なかよし" value={mon.bond} tone="bond" />
+      {asleep ? (
+        <p className="hana-chat-poke-sleep-note is-day">いまねている…</p>
+      ) : mon.sleepAtIso ? (
+        <p className={`hana-chat-poke-sleep-note is-${mon.sleepKind || 'day'}`}>
+          前回 {formatTokyoStamp(mon.sleepAtIso)} にねた
+          {sleepKindLabel ? `（${sleepKindLabel}）` : ''}
+        </p>
+      ) : null}
+      {evoHint ? <p className="hana-chat-poke-hint">{evoHint}</p> : null}
     </div>
   )
 }
@@ -142,6 +186,7 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
   const [toast, setToast] = useState(null)
   const [localAsleep, setLocalAsleep] = useState(false)
   const [cafeOpen, setCafeOpen] = useState(false)
+  const [statusFocus, setStatusFocus] = useState('mine')
   const justWokeRef = useRef(false)
   const touchRef = useRef(null)
   const tapBurstRef = useRef({ count: 0, at: 0 })
@@ -267,6 +312,8 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
       if (nextMon?.speciesId && nextMon.speciesId !== mon.speciesId) {
         setAnim('evolve')
         say('ok', 'しんかした！', `${pokeNameJa(mon.speciesId, 'なかま')}は${pokeNameJa(nextMon.speciesId)}に`)
+      } else if (nextMon && nextMon.level > mon.level) {
+        say('ok', `レベルアップ！ Lv.${nextMon.level}`, worldEvoHint(nextMon, place.id))
       } else if (action === 'find') {
         const foundId = Object.keys(next?.entries || {}).find((id) => !state.entries[id])
         if (foundId) say('ok', `${pokeNameJa(foundId, 'ポケモン')}をみつけた！`)
@@ -277,6 +324,9 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
         if (kind === 'early') say('ok', `${clock}におやすみ`, '早寝できた。けんこうアップ')
         else if (kind === 'late') say('say', `${clock}におやすみ`, '夜ふかし…けんこうダウン')
         else say('say', ACT_BUBBLE.nap, clock ? `${clock}にひるね` : '')
+      } else if (action === 'train' || action === 'feed' || action === 'walk') {
+        const xp = worldXpProgress(nextMon || mon)
+        say('say', ACT_BUBBLE[action] || 'いいね！', `けいけん ${xp.xp}/${xp.need}・次まで${xp.toNext}`)
       } else {
         say('say', ACT_BUBBLE[action] || 'いいね！')
       }
@@ -419,7 +469,8 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
     try {
       const next = await orderPokeCafe(threadId, { role: me, itemId, target })
       const nextMon = worldActiveMon(next?.world || {}, me)
-      if (target === 'mate') setCafeOpen(false)
+      // Keep the menu open so they can order / send more items.
+      setCafeOpen(true)
       if (nextMon?.speciesId && nextMon.speciesId !== mon.speciesId) {
         setAnim('evolve')
         say('ok', 'しんかした！', `${pokeNameJa(mon.speciesId, 'なかま')}は${pokeNameJa(nextMon.speciesId)}に`)
@@ -500,6 +551,7 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
             {hanaAvatar ? <ChatAvatar src={hanaAvatar} profileId="hana" displayName={hanaName} /> : <span className="hana-chat-poke-seat-fallback">{hanaName.slice(0, 1)}</span>}
           </div>
           <strong>{hanaName}</strong>
+          <em>{worldPlace(world.hanaPlace).label}</em>
         </div>
         <span className="hana-chat-poke-link" aria-hidden="true" />
         <div className={`hana-chat-poke-seat${me === 'guest' ? ' is-mine' : ''}`}>
@@ -507,6 +559,7 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
             {guestAvatar ? <ChatAvatar src={guestAvatar} profileId="gabusan" displayName={guestName} /> : <span className="hana-chat-poke-seat-fallback">{guestName.slice(0, 1)}</span>}
           </div>
           <strong>{guestName}</strong>
+          <em>{worldPlace(world.guestPlace).label}</em>
         </div>
         <div className={`hana-chat-poke-star-chip${duoStar ? ' is-on' : ''}`} title="ふたり星">
           <b>★</b>
@@ -769,7 +822,12 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
               </div>
 
               {cafeOpen && place.id === 'cafe' ? (
-                <div className="hana-chat-poke-cafe-menu" role="dialog" aria-label="カフェメニュー">
+                <div
+                  className="hana-chat-poke-cafe-menu"
+                  role="dialog"
+                  aria-label="カフェメニュー"
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
                   <div className="hana-chat-poke-cafe-menu-head">
                     <strong>きょうのメニュー</strong>
                     <span>◇ {trainer.coins}</span>
@@ -852,25 +910,52 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
                 ) : null}
               </ul>
 
-              <div className="hana-chat-poke-status">
-                <div className="hana-chat-poke-status-meta">
-                  <strong>{displayName}</strong>
-                  <span>Lv.{mon.level}</span>
-                  <span className="hana-chat-poke-coin">◇ {trainer.coins}</span>
-                </div>
-                <StatBar label="おなか" value={mon.hunger} tone="food" />
-                <StatBar label="きぶん" value={mon.mood} tone="mood" />
-                <StatBar label="げんき" value={mon.energy} tone="energy" />
-                <StatBar label="けんこう" value={mon.health} tone="health" />
-                <StatBar label="なかよし" value={mon.bond} tone="bond" />
-                {mon.sleepAtIso ? (
-                  <p className={`hana-chat-poke-sleep-note is-${mon.sleepKind || 'day'}`}>
-                    前回 {formatTokyoStamp(mon.sleepAtIso)} にねた
-                    {sleepKindLabel ? `（${sleepKindLabel}）` : ''}
-                  </p>
-                ) : null}
-                <p className="hana-chat-poke-hint">{worldEvoHint(mon, myPlace)}</p>
+              <div className="hana-chat-poke-status-tabs" role="tablist" aria-label="ポケモンの様子">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={statusFocus === 'mine'}
+                  className={statusFocus === 'mine' ? 'is-on' : ''}
+                  onClick={() => setStatusFocus('mine')}
+                >
+                  {myName}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={statusFocus === 'theirs'}
+                  className={statusFocus === 'theirs' ? 'is-on' : ''}
+                  onClick={() => setStatusFocus('theirs')}
+                >
+                  {theirName}
+                </button>
               </div>
+
+              {statusFocus === 'mine' ? (
+                <MonStatusBlock
+                  mon={mon}
+                  displayName={displayName}
+                  placeLabel={place.label}
+                  asleep={asleep}
+                  sleepKindLabel={sleepKindLabel}
+                  evoHint={worldEvoHint(mon, myPlace)}
+                  coins={trainer.coins}
+                />
+              ) : (
+                <MonStatusBlock
+                  mon={theirMon}
+                  displayName={theirMon?.nickname || pokeNameJa(theirMon?.speciesId) || theirName}
+                  placeLabel={worldPlace(theirPlace).label}
+                  asleep={theirAsleep}
+                  sleepKindLabel={
+                    theirMon?.sleepKind === 'early' ? '早寝'
+                      : theirMon?.sleepKind === 'late' ? '夜ふかし'
+                        : theirMon?.sleepKind === 'day' ? 'ひるね' : ''
+                  }
+                  evoHint={worldEvoHint(theirMon, theirPlace)}
+                  coins={worldTrainer(world, them).coins}
+                />
+              )}
 
               {mon.log?.length ? (
                 <ol className="hana-chat-poke-log">
