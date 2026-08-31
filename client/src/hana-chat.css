@@ -308,6 +308,15 @@
   box-shadow: 0 0 0 2px rgba(255, 214, 120, 0.88);
 }
 
+.hana-chat-msg-row.is-jump-focus .hana-chat-bubble {
+  animation: hana-chat-jump-focus 2s ease-out;
+}
+
+@keyframes hana-chat-jump-focus {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232, 154, 170, 0); }
+  12%, 42% { box-shadow: 0 0 0 3px rgba(232, 154, 170, 0.9); }
+}
+
 /* Open chat: keep header pinned at the top of the frame (desktop floating panel). */
 .hana-chat.is-open .hana-chat-header {
   position: sticky;
@@ -2379,13 +2388,31 @@ body.hana-chat-scroll-lock #root {
 }
 
 .hana-chat-quote {
+  display: block;
+  width: 100%;
   margin: 0 0 8px;
   padding: 6px 8px;
+  border: 0;
   border-left: 2px solid rgba(232, 154, 170, 0.55);
   border-radius: 6px;
   background: rgba(255, 248, 240, 0.06);
+  font: inherit;
+  color: inherit;
+  text-align: left;
   font-size: 0.78rem;
   line-height: 1.4;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.hana-chat-quote:disabled {
+  cursor: default;
+}
+
+.hana-chat-quote:not(:disabled):hover,
+.hana-chat-quote:not(:disabled):focus-visible {
+  background: rgba(232, 154, 170, 0.14);
+  outline: none;
 }
 
 .hana-chat-quote strong {
@@ -2416,13 +2443,42 @@ body.hana-chat-scroll-lock #root {
   border-bottom: 0;
 }
 
+.hana-chat-composer-context.is-jumpable {
+  padding-right: 6px;
+}
+
+.hana-chat-composer-context-copy,
+.hana-chat-composer-context-jump {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.hana-chat-composer-context-jump {
+  cursor: pointer;
+  border-radius: 8px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.hana-chat-composer-context-jump:hover,
+.hana-chat-composer-context-jump:focus-visible {
+  background: rgba(232, 154, 170, 0.16);
+  outline: none;
+}
+
 .hana-chat-composer-context strong {
   display: block;
   font-size: 0.72rem;
   color: rgba(255, 248, 240, 0.88);
 }
 
-.hana-chat-composer-context span {
+.hana-chat-composer-context-copy span,
+.hana-chat-composer-context-jump span {
   display: block;
   margin-top: 2px;
   font-size: 0.75rem;

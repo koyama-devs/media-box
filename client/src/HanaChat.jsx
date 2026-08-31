@@ -784,6 +784,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const messageSearchInputRef = useRef(null)
   const messageSearchOpenRef = useRef(false)
   messageSearchOpenRef.current = messageSearchOpen
+  const [focusMessageId, setFocusMessageId] = useState('')
+  const focusMessageTimerRef = useRef(null)
   const listRef = useRef(null)
   const listInnerRef = useRef(null)
   /** Keep the open chat stuck on the newest bubble unless the user scrolls away. */
@@ -2918,11 +2920,27 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     setMessageSearchOpen(true)
   }, [])
 
-  const jumpToSearchHit = useCallback((id) => {
-    if (!id) return
-    const node = listRef.current?.querySelector(`[data-chat-msg="${String(id).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`)
-    node?.scrollIntoView({ block: 'center', inline: 'nearest' })
+  const jumpToChatMessage = useCallback((id) => {
+    const msgId = String(id || '').trim()
+    if (!msgId) return false
+    const node = listRef.current?.querySelector(
+      `[data-chat-msg="${msgId.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`,
+    )
+    if (!node) {
+      setError('返信先のメッセージが見つかりません（古い会話の可能性があります）')
+      window.setTimeout(() => setError(''), 2800)
+      return false
+    }
+    node.scrollIntoView({ block: 'center', inline: 'nearest' })
+    setFocusMessageId(msgId)
+    window.clearTimeout(focusMessageTimerRef.current)
+    focusMessageTimerRef.current = window.setTimeout(() => setFocusMessageId(''), 2200)
+    return true
   }, [])
+
+  const jumpToSearchHit = useCallback((id) => {
+    jumpToChatMessage(id)
+  }, [jumpToChatMessage])
 
   useLayoutEffect(() => {
     if (!messageSearchOpen || !open) {
@@ -5811,6 +5829,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               emptyGuestHint="はなにメッセージを送ると、ここに返信が届きます。"
               highlightQuery={messageSearchOpen ? messageSearchQuery : ''}
               searchActiveId={messageSearchOpen ? messageSearchActiveId : ''}
+              focusMessageId={focusMessageId}
+              onJumpToMessage={jumpToChatMessage}
             />
             </div>
           </div>
@@ -6033,15 +6053,28 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           ) : null}
 
           {replyTo || editingId ? (
-            <div className="hana-chat-composer-context">
-              <div>
-                <strong>{editingId ? 'メッセージを編集' : '返信先'}</strong>
-                <span>
-                  {editingId
-                    ? '内容を直して更新できます'
-                    : `${labelForRole(replyTo?.sender || replyTo?.role)}: ${String(replyTo?.text || '').slice(0, 60)}`}
-                </span>
-              </div>
+            <div className={`hana-chat-composer-context${replyTo?.id && !editingId ? ' is-jumpable' : ''}`}>
+              {replyTo?.id && !editingId ? (
+                <button
+                  type="button"
+                  className="hana-chat-composer-context-jump"
+                  onClick={() => jumpToChatMessage(replyTo.id)}
+                >
+                  <strong>返信先</strong>
+                  <span>
+                    {`${labelForRole(replyTo?.sender || replyTo?.role)}: ${String(replyTo?.text || '').slice(0, 60)}`}
+                  </span>
+                </button>
+              ) : (
+                <div className="hana-chat-composer-context-copy">
+                  <strong>{editingId ? 'メッセージを編集' : '返信先'}</strong>
+                  <span>
+                    {editingId
+                      ? '内容を直して更新できます'
+                      : `${labelForRole(replyTo?.sender || replyTo?.role)}: ${String(replyTo?.text || '').slice(0, 60)}`}
+                  </span>
+                </div>
+              )}
               <button type="button" onClick={clearComposerExtras} aria-label="キャンセル">×</button>
             </div>
           ) : null}

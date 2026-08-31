@@ -185,6 +185,8 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
   onOwnerAssistRetry,
   highlightQuery = '',
   searchActiveId = '',
+  focusMessageId = '',
+  onJumpToMessage,
 }) {
   const timeLabel = formatChatTimestamp(message.createdAt)
   const isSearchHit = Boolean(highlightQuery) && messageMatchesSearch(message, highlightQuery, translation)
@@ -237,7 +239,7 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
 
   return (
     <div
-      className={`hana-chat-msg-row ${sideClass}${isSearchHit ? ' is-search-hit' : ''}${searchActiveId === messageId ? ' is-search-current' : ''}`}
+      className={`hana-chat-msg-row ${sideClass}${isSearchHit ? ' is-search-hit' : ''}${searchActiveId === messageId ? ' is-search-current' : ''}${focusMessageId === messageId ? ' is-jump-focus' : ''}`}
       data-chat-msg={messageId}
     >
       {!isOwn ? (
@@ -287,10 +289,20 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
               className={`hana-chat-bubble ${sideClass} is-${message.role}${message.kind === 'human-switch' || message.kind === 'intro' ? ' is-notice' : ''}${message.deleted ? ' is-deleted' : ''}${showsSticker ? ' is-sticker' : ''}${showsEffect ? ' is-effect' : ''}${showsImage ? ' is-image' : ''}${showsVideo ? ' is-video' : ''}${showsFile ? ' is-file' : ''}${message.uploading ? ' is-uploading' : ''}`}
             >
               {message.replyTo ? (
-                <div className="hana-chat-quote">
+                <button
+                  type="button"
+                  className="hana-chat-quote"
+                  disabled={!message.replyTo.id}
+                  aria-label="返信元のメッセージへ移動"
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    if (message.replyTo?.id) onJumpToMessage?.(message.replyTo.id)
+                  }}
+                >
                   <strong>{quoteLabelFor(message.replyTo.sender || message.replyTo.role)}</strong>
                   <span>{renderMessageWithLinks(message.replyTo.text, highlightQuery)}</span>
-                </div>
+                </button>
               ) : null}
               {showsSticker ? (
                 <HanaSticker id={message.sticker} size={104} title={message.text} />
@@ -385,6 +397,8 @@ const HanaChatMessageList = memo(function HanaChatMessageList({
   emptyGuestHint,
   highlightQuery = '',
   searchActiveId = '',
+  focusMessageId = '',
+  onJumpToMessage,
 }) {
   return (
     <>
@@ -419,6 +433,8 @@ const HanaChatMessageList = memo(function HanaChatMessageList({
             onOwnerAssistRetry={onOwnerAssistRetry}
             highlightQuery={highlightQuery}
             searchActiveId={searchActiveId}
+            focusMessageId={focusMessageId}
+            onJumpToMessage={onJumpToMessage}
           />
         )
       })}
