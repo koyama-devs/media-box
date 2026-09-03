@@ -241,8 +241,59 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
 
   useEffect(() => {
     if (!threadId) return undefined
-    void syncPokeWorld(threadId).catch(() => {})
-  }, [threadId])
+    let cancelled = false
+    const beforeSid = String(mon?.speciesId || '')
+    const beforeLv = Number(mon?.level) || 1
+    void syncPokeWorld(threadId)
+      .then((next) => {
+        if (cancelled || !next?.world) return
+        const restored = worldActiveMon(next.world, me)
+        if (!restored) return
+        if (
+          me === 'hana'
+          && beforeSid === '172'
+          && String(restored.speciesId) === '25'
+        ) {
+          setToast({
+            kind: 'ok',
+            line: 'ピカチュウがもどってきた！',
+            how: `Lv.${restored.level}`,
+            key: Date.now(),
+          })
+          return
+        }
+        if (
+          me === 'guest'
+          && beforeSid === '4'
+          && beforeLv < 4
+          && String(restored.speciesId) === '4'
+          && (Number(restored.level) || 1) >= 4
+        ) {
+          setToast({
+            kind: 'ok',
+            line: 'ヒトカゲのレベルがもどった！',
+            how: `Lv.${restored.level}`,
+            key: Date.now(),
+          })
+          return
+        }
+        if (
+          me === 'guest'
+          && String(restored.speciesId) === '4'
+          && restored.nickname === 'オレンジ'
+          && !String(mon?.nickname || '').trim()
+        ) {
+          setToast({
+            kind: 'ok',
+            line: 'ニックネーム「オレンジ」がもどった！',
+            how: `Lv.${restored.level}`,
+            key: Date.now(),
+          })
+        }
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [threadId, me])
 
   const fail = (err) => onError?.(err?.message || 'うまくいきませんでした。')
 

@@ -54,8 +54,10 @@ import {
     applyPokeWorldSelect,
     applyPokeWorldVisit,
     applyPokeWorldWake,
-    emptyPokeWorld,
+    healResetStarters,
+    pickRicherPokeWorld,
     pickWorldFindId,
+    pokeWorldProgressScore,
     serializePokeWorld,
     tokyoZukanYmd,
     worldDuoCared,
@@ -2299,7 +2301,7 @@ export function serializePokeZukan(raw) {
       giftedSpeciesId: String(expRaw.giftedSpeciesId || '').trim().slice(0, 12),
       giftedBy: String(expRaw.giftedBy || '').trim().slice(0, 12),
     },
-    world: serializePokeWorld(raw?.world || emptyPokeWorld()),
+    world: healResetStarters(serializePokeWorld(raw?.world), entries),
     entries,
   }
 }
@@ -2339,8 +2341,14 @@ async function patchPokeZukan(threadId, mutator) {
   const write = prevWrite.catch(() => {}).then(async () => {
     const ref = doc(db, CHAT_THREADS_COLLECTION, tid)
     const snap = await getDoc(ref)
-    const prev = serializePokeZukan(snap.exists() ? snap.data()?.pokeZukan : null)
+    const raw = snap.exists() ? snap.data()?.pokeZukan : null
+    const prev = serializePokeZukan(raw)
     const next = serializePokeZukan(mutator(prev))
+    const persisted = raw?.world ? serializePokeWorld(raw.world) : null
+    if (persisted) {
+      next.world = pickRicherPokeWorld(next.world, persisted)
+    }
+    next.world = healResetStarters(next.world, next.entries)
     await setDoc(ref, { pokeZukan: next }, { merge: true })
     return next
   })
@@ -2395,7 +2403,67 @@ export async function wakePokeWorld(threadId, { role } = {}) {
 }
 
 export async function syncPokeWorld(threadId) {
-  return patchPokeZukan(threadId, (prev) => prev)
+  const tid = String(threadId || '').trim()
+  if (!tid) return null
+
+  let richestWorld = null
+  let richestScore = -1
+  const mergedEntries = {}
+
+  const consider = (raw) => {
+    if (!raw || typeof raw !== 'object') return
+    const z = serializePokeZukan(raw)
+    Object.assign(mergedEntries, z.entries || {})
+    const score = pokeWorldProgressScore(z.world)
+    if (score > richestScore) {
+      richestScore = score
+      richestWorld = z.world
+    }
+  }
+
+  try {
+    const selfSnap = await getDoc(doc(db, CHAT_THREADS_COLLECTION, tid))
+    if (selfSnap.exists()) consider(selfSnap.data()?.pokeZukan)
+  } catch {
+    /* optional */
+  }
+
+  try {
+    const sibSnap = await getDocs(query(
+      collection(db, CHAT_THREADS_COLLECTION),
+      where('guestKey', '==', 'gabusan'),
+      limit(25),
+    ))
+    for (const sibling of sibSnap.docs) {
+      consider(sibling.data()?.pokeZukan)
+    }
+  } catch {
+    /* optional — may need composite index; still heal local thread */
+  }
+
+  try {
+    const canonSnap = await getDoc(doc(db, CHAT_THREADS_COLLECTION, 'guest-gabusan'))
+    if (canonSnap.exists()) consider(canonSnap.data()?.pokeZukan)
+  } catch {
+    /* optional */
+  }
+
+  return patchPokeZukan(tid, (prev) => {
+    const entries = { ...mergedEntries, ...prev.entries }
+    let world = prev.world
+    if (richestWorld) world = pickRicherPokeWorld(world, richestWorld)
+    world = healResetStarters(world, entries)
+    const hanaSid = String(world?.trainers?.hana?.mons?.mhana?.speciesId || '')
+    if (hanaSid && !entries[hanaSid]) {
+      entries[hanaSid] = {
+        caughtAtIso: new Date().toISOString(),
+        photoUrl: '',
+        foil: false,
+        nickname: '',
+      }
+    }
+    return { ...prev, world, entries }
+  })
 }
 
 export async function selectPokeWorldMon(threadId, { role, monId } = {}) {
@@ -3332,8 +3400,17 @@ export async function migrateLegacyGuestThread({
   ).catch(() => {})
   const canonPoke = serializePokeZukan(canonMeta.pokeZukan)
   const legacyPoke = serializePokeZukan(legacyMeta.pokeZukan)
-  const canonPokeEmpty = !canonMeta.pokeZukan || String(canonPoke?.world?.season || '') === ''
-  if (legacyMeta.pokeZukan && canonPokeEmpty) {
+  const canonScore = pokeWorldProgressScore(canonPoke.world)
+  const legacyScore = pokeWorldProgressScore(legacyPoke.world)
+  if (legacyMeta.pokeZukan && legacyScore > canonScore) {
+    healPatch.pokeZukan = {
+      ...canonPoke,
+      ...legacyPoke,
+      entries: { ...canonPoke.entries, ...legacyPoke.entries },
+      world: pickRicherPokeWorld(canonPoke.world, legacyPoke.world),
+    }
+  } else if (legacyMeta.pokeZukan && (!canonMeta.pokeZukan || canonScore <= 40)) {
+    // Starter-only worlds (wiped) lose to any legacy progress.
     healPatch.pokeZukan = legacyPoke
   }
   if (legacyMeta.jpTripArrivedAtIso && !canonMeta.jpTripArrivedAtIso) {

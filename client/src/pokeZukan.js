@@ -1039,9 +1039,17 @@ function placeOf(value, fallback = 'home') {
   return WORLD_PLACES.some((p) => p.id === loc) ? loc : 'home'
 }
 
+function trainerMonCount(raw) {
+  const mons = raw?.mons && typeof raw.mons === 'object' ? raw.mons : {}
+  return Object.keys(mons).length
+}
+
 export function serializePokeWorld(raw) {
   const src = raw && typeof raw === 'object' ? raw : {}
-  if (String(src.season || '') !== WORLD_SEASON) return emptyPokeWorld()
+  const monCount = trainerMonCount(src.trainers?.hana) + trainerMonCount(src.trainers?.guest)
+  // Missing/other season used to wipe the village back to Pichu/Hitokage.
+  // Only seed starters when there is no party data at all.
+  if (monCount === 0) return emptyPokeWorld()
   const log = serializeWorldLog(src.log)
   const hana = serializeTrainer(src.trainers?.hana)
   const guest = serializeTrainer(src.trainers?.guest)
@@ -1058,6 +1066,142 @@ export function serializePokeWorld(raw) {
     },
     log,
   }
+}
+
+function evoStage(speciesId) {
+  const n = Number(speciesId)
+  if (!Number.isFinite(n) || n < 1) return 0
+  let stage = 0
+  for (const [from, spec] of Object.entries(WORLD_EVO)) {
+    if (Number(spec.into) === n) stage = Math.max(stage, 1 + evoStage(from))
+  }
+  return stage
+}
+
+function minLevelForSpecies(speciesId) {
+  const n = Number(speciesId)
+  for (const spec of Object.values(WORLD_EVO)) {
+    if (Number(spec.into) === n) return Math.max(1, Number(spec.level) || 1)
+  }
+  return 1
+}
+
+export function pokeWorldProgressScore(world) {
+  const w = world && typeof world === 'object' ? world : {}
+  let score = 0
+  for (const role of ['hana', 'guest']) {
+    const mons = w.trainers?.[role]?.mons && typeof w.trainers[role].mons === 'object'
+      ? w.trainers[role].mons
+      : {}
+    for (const mon of Object.values(mons)) {
+      score += (Number(mon?.level) || 1) * 20
+      score += Number(mon?.xp) || 0
+      score += Number(mon?.bond) || 0
+      score += (Array.isArray(mon?.log) ? mon.log.length : 0) * 3
+      score += evoStage(mon?.speciesId) * 80
+    }
+  }
+  score += Array.isArray(w.log) ? w.log.length : 0
+  return score
+}
+
+export function pickRicherPokeWorld(next, prev) {
+  if (pokeWorldProgressScore(prev) > pokeWorldProgressScore(next)) return prev
+  return next
+}
+
+/**
+ * Restore starters wiped by the season/emptyPokeWorld bug.
+ * Hana: Pichu→Pikachu Lv.5+ (confirmed evolved before wipe).
+ * Guest: Hitokage Lv.4+ and nickname オレンジ (confirmed before wipe).
+ */
+export function healResetStarters(world, entries) {
+  const next = serializePokeWorld(world)
+  const srcEntries = entries && typeof entries === 'object' ? entries : {}
+  /** Guest Hitokage nickname lost in the wipe — restore katakana "orange". */
+  const GUEST_HITOKAGE_NICK = 'オレンジ'
+
+  for (const role of ['hana', 'guest']) {
+    const starterSpecies = String(WORLD_STARTER[role] || '')
+    const starterMonId = role === 'hana' ? 'mhana' : 'mgabu'
+    const trainer = next.trainers[role]
+    const mon = trainer?.mons?.[starterMonId]
+    if (!mon) continue
+
+    // Nickname can be missing even after species/level were healed.
+    if (
+      role === 'guest'
+      && (String(mon.speciesId) === '4' || String(mon.speciesId) === starterSpecies)
+      && !String(mon.nickname || '').trim()
+    ) {
+      trainer.mons[starterMonId] = { ...mon, nickname: GUEST_HITOKAGE_NICK }
+    }
+
+    const live = trainer.mons[starterMonId]
+    if (String(live.speciesId) !== starterSpecies && !(role === 'guest' && String(live.speciesId) === '4')) {
+      // Already evolved away from starter base (e.g. Hana Pikachu) — still ok.
+      if (role === 'hana' && String(live.speciesId) === '25') continue
+      if (role === 'guest') {
+        // Ensure nick on Hitokage line forms if empty
+        if (!String(live.nickname || '').trim() && ['4', '5', '6'].includes(String(live.speciesId))) {
+          trainer.mons[starterMonId] = { ...live, nickname: GUEST_HITOKAGE_NICK }
+        }
+        continue
+      }
+    }
+    if (String(live.speciesId) !== starterSpecies) continue
+
+    const fam = evoFamily(starterSpecies)
+    let best = starterSpecies
+    let bestStage = 0
+    for (const id of fam) {
+      if (!srcEntries[id]) continue
+      const stage = evoStage(id)
+      if (stage > bestStage) {
+        best = String(id)
+        bestStage = stage
+      }
+    }
+    // Force Hana: wipe always left Pichu Lv.1 after she already had Pikachu.
+    if (role === 'hana' && bestStage < 1 && (Number(live.level) || 1) < 5) {
+      best = '25'
+      bestStage = 1
+    }
+
+    let minLv = bestStage >= 1 ? minLevelForSpecies(best) : 1
+    // Force Guest: Hitokage was already Lv.4 before the wipe.
+    if (role === 'guest' && String(best) === '4') {
+      minLv = Math.max(minLv, 4)
+    }
+    if (role === 'hana' && String(best) === '25') {
+      minLv = Math.max(minLv, 5)
+    }
+
+    const curLv = Number(live.level) || 1
+    const needNick = role === 'guest' && !String(live.nickname || '').trim()
+    if (String(live.speciesId) === String(best) && curLv >= minLv && !needNick) continue
+    if (bestStage < 1 && role === 'hana') continue
+
+    const nick = String(
+      live.nickname
+      || srcEntries[best]?.nickname
+      || (role === 'guest' ? GUEST_HITOKAGE_NICK : '')
+      || '',
+    ).trim().slice(0, 16)
+
+    trainer.mons[starterMonId] = {
+      ...live,
+      speciesId: String(best),
+      level: Math.max(curLv, minLv),
+      xp: Number(live.xp) || 0,
+      nickname: nick,
+    }
+    trainer.activeId = starterMonId
+    if (!Array.isArray(trainer.partyOrder) || !trainer.partyOrder.includes(starterMonId)) {
+      trainer.partyOrder = [starterMonId, ...(trainer.partyOrder || [])].slice(0, WORLD_PARTY_MAX)
+    }
+  }
+  return next
 }
 
 function seedLegacyMonLog(trainer, worldLog, role) {
