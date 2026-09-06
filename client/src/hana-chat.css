@@ -2377,9 +2377,31 @@ body.hana-chat-scroll-lock #root {
   color: rgba(255, 248, 240, 0.55);
 }
 
+.hana-chat-delivery.is-sending {
+  color: rgba(255, 248, 240, 0.42);
+}
+
 .hana-chat-delivery.is-read {
   color: #e89aaa;
   opacity: 1;
+}
+
+.hana-chat-delivery.is-failed {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: #f0a0a8;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.hana-chat-delivery.is-failed:hover,
+.hana-chat-delivery.is-failed:focus-visible {
+  color: #ffc4c9;
 }
 
 .hana-chat-bubble.is-deleted p {

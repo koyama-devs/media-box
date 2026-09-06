@@ -209,7 +209,7 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
       || (message.effect === 'flower' ? defaultReaction : ''))
     : ''
   const showsEffect = Boolean(effectEmoji)
-  const mutable = isOwn && canMutateOwnMessage(message, {
+  const mutable = isOwn && !message.pending && !message.sendFailed && canMutateOwnMessage(message, {
     unreadByPartner: delivery === 'sent',
     windowMs: editWindowMs,
   })
@@ -255,9 +255,23 @@ const HanaChatMessageRow = memo(function HanaChatMessageRow({
           {isOwn && (timeLabel || !message.deleted || (message.editedAt && !message.deleted)) ? (
             <div className="hana-chat-msg-aside">
               {isOwn && !message.deleted ? (
-                <span className={`hana-chat-delivery is-${delivery || 'sent'}`}>
-                  {delivery ? deliveryStatusLabel(delivery) : '送信済'}
-                </span>
+                delivery === 'failed' ? (
+                  <button
+                    type="button"
+                    className="hana-chat-delivery is-failed"
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      onBubbleAction(messageId, 'retry')
+                    }}
+                  >
+                    未送信 · 再送
+                  </button>
+                ) : (
+                  <span className={`hana-chat-delivery is-${delivery || 'sent'}`}>
+                    {delivery ? deliveryStatusLabel(delivery) : '送信済'}
+                  </span>
+                )
               ) : null}
               {timeLabel ? (
                 <time dateTime={message.createdAt || undefined}>{timeLabel}</time>

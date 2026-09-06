@@ -5,110 +5,116 @@ import hanachanArt from './assets/hanachan.svg'
 import ChatAvatar from './ChatAvatar'
 import { CHAT_CARD_SHARE_EVENT, CHAT_CLOSE_EVENT } from './chatCardShare'
 import {
-  addChatReminder,
-  dueChatReminders,
-  loadAllLocalChatPins,
-  loadChatPins,
-  markChatReminderDone,
-  remindAtFromChoice,
-  toggleChatPin,
-  unpinChatMessageEverywhere
+    addChatReminder,
+    dueChatReminders,
+    loadAllLocalChatPins,
+    loadChatPins,
+    markChatReminderDone,
+    remindAtFromChoice,
+    toggleChatPin,
+    unpinChatMessageEverywhere
 } from './chatExtras'
 import ChatImageLightbox from './ChatImageLightbox'
 import { collectMessageSearchHits, normalizeMessageSearchQuery } from './chatMessageSearch'
 import ChatNatsuFireworks from './ChatNatsuFireworks'
 import { playChatNotifySound, unlockChatNotifySound } from './chatNotifySound'
+import {
+    listChatOutboxForThread,
+    outboxEntryToLocalMessage,
+    removeChatOutbox,
+    upsertChatOutbox,
+} from './chatOutbox'
 import ChatPokeZukan, { PokeZukanChip } from './ChatPokeZukan'
 import {
-  readDefaultReaction,
-  readEnterToSend,
-  readMessageSound,
-  readStickerSet,
-  readVoiceSkin,
-  writeDefaultReaction,
-  writeEnterToSend,
-  writeMessageSound,
-  writeStickerSet,
-  writeVoiceSkin,
+    readDefaultReaction,
+    readEnterToSend,
+    readMessageSound,
+    readStickerSet,
+    readVoiceSkin,
+    writeDefaultReaction,
+    writeEnterToSend,
+    writeMessageSound,
+    writeStickerSet,
+    writeVoiceSkin,
 } from './chatSettings'
 import { canMutateOwnMessage, useIsCoarsePointer } from './ChatSwipeBubble'
 import ChatWeightGarden, { WeightGardenChip } from './ChatWeightGarden'
 import EmotionMomentLayer, { EMOTION_MOMENTS, triggerEmotionMoment } from './EmotionMoment'
 import {
-  analyzeGuestMessageForOwner,
-  applyReactionLocally,
-  broadcastChatEffect,
-  CHAT_PRESENCE_MODES,
-  CHAT_REACTION_EMOJIS,
-  chatWithHanachan,
-  classifyChatAttachment,
-  confirmJpTripArrived,
-  DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
-  deleteChatMessage,
-  ensureChatThread,
-  ensureDefaultChatAccounts,
-  ensureGuestChatId,
-  ensureWeightGardenDefaults,
-  fetchChatThreadMediaItems,
-  formatChatFileSize,
-  formatChatTimestamp,
-  getChatMessageAttachments,
-  getFirebaseErrorMessage,
-  getGuestProfile,
-  getMessageDeliveryStatus,
-  isChatAudioAttachment,
-  listGuestProfiles,
-  markThreadRead,
-  messageEditWindowMsFromMinutes,
-  migrateLegacyGuestThread,
-  migrateLocalPinsToThread,
-  normalizeChatPresenceMode,
-  OWNER_PROFILE,
-  pulseChatPresence,
-  resolveAccountKey,
-  resolveAvatarSrc,
-  resolveChatPresence,
-  resolveGuestDisplayName,
-  resolveGuestThreadWithHistory,
-  resolveSessionProfile,
-  sendChatMessage,
-  setChatPresenceStatus,
-  setChatProfileStatus,
-  setChatTyping,
-  sortChatMessages,
-  subscribeChatAccounts,
-  subscribeChatMessages,
-  subscribeChatProfiles,
-  subscribeChatThreads,
-  subscribeOwnChatThread,
-  subscribeWeightGarden,
-  suggestHanaChat,
-  threadUnreadCount,
-  toggleChatReaction,
-  toggleThreadChatPin,
-  translateChatMessage,
-  unpinThreadChatMessage,
-  updateChatMessage,
-  uploadChatAttachment,
+    analyzeGuestMessageForOwner,
+    applyReactionLocally,
+    broadcastChatEffect,
+    CHAT_PRESENCE_MODES,
+    CHAT_REACTION_EMOJIS,
+    chatWithHanachan,
+    classifyChatAttachment,
+    confirmJpTripArrived,
+    DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
+    deleteChatMessage,
+    ensureChatThread,
+    ensureDefaultChatAccounts,
+    ensureGuestChatId,
+    ensureWeightGardenDefaults,
+    fetchChatThreadMediaItems,
+    formatChatFileSize,
+    formatChatTimestamp,
+    getChatMessageAttachments,
+    getFirebaseErrorMessage,
+    getGuestProfile,
+    getMessageDeliveryStatus,
+    isChatAudioAttachment,
+    listGuestProfiles,
+    markThreadRead,
+    messageEditWindowMsFromMinutes,
+    migrateLegacyGuestThread,
+    migrateLocalPinsToThread,
+    normalizeChatPresenceMode,
+    OWNER_PROFILE,
+    pulseChatPresence,
+    resolveAccountKey,
+    resolveAvatarSrc,
+    resolveChatPresence,
+    resolveGuestDisplayName,
+    resolveGuestThreadWithHistory,
+    resolveSessionProfile,
+    sendChatMessage,
+    setChatPresenceStatus,
+    setChatProfileStatus,
+    setChatTyping,
+    sortChatMessages,
+    subscribeChatAccounts,
+    subscribeChatMessages,
+    subscribeChatProfiles,
+    subscribeChatThreads,
+    subscribeOwnChatThread,
+    subscribeWeightGarden,
+    suggestHanaChat,
+    threadUnreadCount,
+    toggleChatReaction,
+    toggleThreadChatPin,
+    translateChatMessage,
+    unpinThreadChatMessage,
+    updateChatMessage,
+    uploadChatAttachment,
 } from './firebase'
 import FlowerRainLayer, {
-  CHAT_PARTY_REACTION,
-  triggerFlowerRain,
-  triggerPartyBurst,
+    CHAT_PARTY_REACTION,
+    triggerFlowerRain,
+    triggerPartyBurst,
 } from './FlowerRain'
 import './hana-chat.css'
 import HanaCall from './HanaCall'
 import HanaChatMessageList, { EMPTY_CHAT_REACTIONS } from './HanaChatMessageList'
 import HanaSticker, {
-  stickerBurst,
-  stickerSetsForViewer,
-  suggestHanaStickers,
+    stickerBurst,
+    stickerSetsForViewer,
+    suggestHanaStickers,
 } from './HanaStickers'
 import HanaVoicePlayer, { VoiceSkinPicker } from './HanaVoicePlayer'
 import NatsuKingyo from './NatsuKingyo'
 import {
-  collectUnansweredOwnerAssistMessages,
-  ownerAssistShouldCollapse,
+    collectUnansweredOwnerAssistMessages,
+    ownerAssistShouldCollapse,
 } from './OwnerMessageAssist'
 import { POKE_ZUKAN_GUEST, tokyoZukanYmd, worldActiveMon } from './pokeZukan'
 import useComposerVoiceNote, { formatVoiceClock } from './useComposerVoiceNote'
@@ -416,6 +422,8 @@ function useNarrowScreen() {
 
 /** Keep optimistic (pending) bubbles until the matching Firestore message arrives. */
 let chatSendSeq = 0
+const CHAT_SEND_TIMEOUT_MS = 28_000
+const CHAT_UPLOAD_TIMEOUT_MS = 120_000
 
 function nextChatPendingId(kind = 'msg') {
   chatSendSeq += 1
@@ -424,6 +432,21 @@ function nextChatPendingId(kind = 'msg') {
 
 function nextStickerPendingId() {
   return nextChatPendingId('sticker')
+}
+
+/** Reject if Firestore/Storage never settles (common on flaky mobile networks). */
+function withChatTimeout(promise, ms, message = '送信がタイムアウトしました。') {
+  let timer = 0
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = window.setTimeout(() => {
+      const err = new Error(message)
+      err.code = 'chat/timeout'
+      reject(err)
+    }, Math.max(1000, Number(ms) || CHAT_SEND_TIMEOUT_MS))
+  })
+  return Promise.race([Promise.resolve(promise), timeoutPromise]).finally(() => {
+    if (timer) window.clearTimeout(timer)
+  })
 }
 
 /** Resolve caption + big-icon emoji for a standalone effect-bar tap. */
@@ -453,7 +476,10 @@ function describeStandaloneEffect(payload, defaultReaction) {
 }
 
 function mergeServerMessagesWithPending(server, previous) {
-  const pending = (previous || []).filter((message) => message?.pending)
+  // Keep in-flight + failed local bubbles until the matching Firestore doc arrives.
+  const pending = (previous || []).filter((message) => (
+    message?.pending || message?.sendFailed
+  ))
   if (!pending.length) return server
   const usedServerIds = new Set()
   const kept = []
@@ -482,8 +508,12 @@ function mergeServerMessagesWithPending(server, previous) {
       }
       return true
     })
-    if (match) usedServerIds.add(match.id)
-    else kept.push(item)
+    if (match) {
+      usedServerIds.add(match.id)
+      removeChatOutbox(itemClientId || item.id)
+    } else {
+      kept.push(item)
+    }
   }
   return sortChatMessages(kept.length ? [...server, ...kept] : server)
 }
@@ -860,6 +890,30 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const messageCacheRef = useRef(new Map())
   /** Ids removed locally while Firestore delete is in flight (blocks snapshot revive). */
   const deletingIdsRef = useRef(new Set())
+  /** In-flight sendChatMessage promises keyed by clientId (survives UI timeout). */
+  const sendInFlightRef = useRef(new Map())
+  const retryFailedSendRef = useRef(async () => {})
+  /** Never leave composer icons dimmed if a send hangs. */
+  const busyWatchdogRef = useRef(0)
+  const lastSendTapRef = useRef(0)
+
+  const endComposerBusy = useCallback(() => {
+    if (busyWatchdogRef.current) {
+      window.clearTimeout(busyWatchdogRef.current)
+      busyWatchdogRef.current = 0
+    }
+    setBusy(false)
+  }, [])
+
+  const beginComposerBusy = useCallback((maxMs = 8_000) => {
+    setBusy(true)
+    if (busyWatchdogRef.current) window.clearTimeout(busyWatchdogRef.current)
+    busyWatchdogRef.current = window.setTimeout(() => {
+      busyWatchdogRef.current = 0
+      setBusy(false)
+    }, Math.max(1500, Number(maxMs) || 8_000))
+  }, [])
+
   const [editWindowMs, setEditWindowMs] = useState(() => (
     messageEditWindowMsFromMinutes(DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES)
   ))
@@ -1800,6 +1854,51 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       unsub()
     }
   }, [hidden, actingAsOwner, activeThreadId])
+
+  // Restore unsent text/stickers after reload so bubbles do not silently vanish.
+  useEffect(() => {
+    if (hidden) return undefined
+    const threadId = actingAsOwner
+      ? activeThreadId
+      : (guestOnHuman ? guestChatId : '')
+    if (!threadId) return undefined
+    const entries = listChatOutboxForThread(threadId)
+    if (!entries.length) return undefined
+
+    setHanaMessages((prev) => {
+      const existing = new Set(
+        (prev || []).flatMap((m) => [String(m.id || ''), String(m.clientId || '')]),
+      )
+      const extras = []
+      for (const entry of entries) {
+        if (existing.has(String(entry.clientId || ''))) continue
+        const local = outboxEntryToLocalMessage(entry)
+        if (local) extras.push(local)
+      }
+      if (!extras.length) return prev
+      return sortChatMessages([...(prev || []), ...extras])
+    })
+
+    const timer = window.setTimeout(() => {
+      for (const entry of entries) {
+        const id = String(entry.clientId || '')
+        if (!id || sendInFlightRef.current.has(id)) continue
+        void retryFailedSendRef.current(id)
+      }
+    }, 700)
+    return () => window.clearTimeout(timer)
+  }, [hidden, actingAsOwner, activeThreadId, guestChatId, guestOnHuman])
+
+  useEffect(() => {
+    const onOnline = () => {
+      const failed = (hanaMessages || []).filter((m) => m?.sendFailed)
+      for (const message of failed) {
+        void retryFailedSendRef.current(message.clientId || message.id)
+      }
+    }
+    window.addEventListener('online', onOnline)
+    return () => window.removeEventListener('online', onOnline)
+  }, [hanaMessages])
 
   const requestOwnerAssist = useCallback(async (message, { force = false } = {}) => {
     if (!actingAsOwner || !message?.id) return
@@ -2875,6 +2974,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       sender: m.sender || m.role,
       reactions: m.reactions || EMPTY_CHAT_REACTIONS,
       pending: Boolean(m.pending),
+      sendFailed: Boolean(m.sendFailed),
       uploading: Boolean(m.uploading),
       kind: m.kind || '',
       callLog: m.callLog || null,
@@ -3503,7 +3603,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   const sendVoiceNote = useCallback(() => {
     const file = voiceNote.previewFile
-    if (!file || busy || editingId) return
+    if (!file || editingId) return
     if (actingAsOwner && !activeThreadId) {
       setError('返信する相手を選んでください。')
       return
@@ -3521,7 +3621,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     window.requestAnimationFrame(() => {
       composerRef.current?.requestSubmit?.()
     })
-  }, [actingAsOwner, activeThreadId, busy, closeVoiceDock, editingId, voiceNote.previewFile, voiceSkin])
+  }, [actingAsOwner, activeThreadId, closeVoiceDock, editingId, voiceNote.previewFile, voiceSkin])
 
   const toggleStickerTray = useCallback(() => {
     // Fixed dock: icon only toggles soft-keyboard overlay up/down.
@@ -3617,6 +3717,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   const resolveDelivery = useCallback((message) => {
     if (message.deleted) return null
+    if (message.sendFailed) return 'failed'
+    if (message.pending || message.uploading) return 'sending'
     if (actingAsOwner || guestOnHuman) {
       const viewer = actingAsOwner ? 'hana' : 'guest'
       const sender = message.sender || (message.role === 'hana' ? 'hana' : 'guest')
@@ -3977,7 +4079,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
   const handleSendSticker = async (sticker) => {
     const id = String(sticker?.id || '')
     const label = String(sticker?.label || '').trim()
-    if (!id || !label || busy) return
+    if (!id || !label) return
     if (actingAsOwner && !activeThreadId) {
       setError('返信する相手を選んでください。')
       return
@@ -3985,11 +4087,12 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     // Desktop popup closes after send; mobile dock stays open (LINE-style).
     if (!stickerDockMode) setStickerOpen(false)
     setError('')
-    setBusy(true)
     const role = actingAsOwner ? 'hana' : 'guest'
     const pendingId = nextStickerPendingId()
+    const nowIso = new Date().toISOString()
+    let threadId = ''
     try {
-      const threadId = actingAsOwner
+      threadId = actingAsOwner
         ? activeThreadId
         : (guestChatId || ensureGuestChatId(guestKey || 'guest'))
       if (!actingAsOwner) {
@@ -3997,19 +4100,37 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         if (channel !== 'human') switchToHuman(HUMAN_SWITCH_INTENT)
       }
 
+      const guestMeta = actingAsOwner
+        ? {}
+        : {
+            guestLabel: guestThreadLabel,
+            guestKey: guestProfile?.key || guestKey || '',
+          }
+      // Persist before paint so reload never loses the bubble.
+      upsertChatOutbox({
+        clientId: pendingId,
+        threadId,
+        text: label,
+        sender: role,
+        sticker: id,
+        createdAtIso: nowIso,
+        ...guestMeta,
+      })
+
       setHanaMessages((prev) => [
         ...prev,
         {
           id: pendingId,
           clientId: pendingId,
           pending: true,
+          sendFailed: false,
           role,
           sender: role,
           text: label,
           rawText: label,
           sticker: id,
-          createdAt: new Date().toISOString(),
-          createdAtIso: new Date().toISOString(),
+          createdAt: nowIso,
+          createdAtIso: nowIso,
           replyTo: null,
         },
       ])
@@ -4021,30 +4142,94 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         handleLocalEffect(burst)
       }
 
-      const serverId = await sendChatMessage({
+      const writePromise = sendChatMessage({
         threadId,
         text: label,
         sender: role,
         sticker: id,
         clientId: pendingId,
-        ...(actingAsOwner
-          ? {}
-          : {
-              guestLabel: guestThreadLabel,
-              guestKey: guestProfile?.key || guestKey || '',
-            }),
+        ...guestMeta,
       })
+      sendInFlightRef.current.set(pendingId, writePromise)
+
+      let serverId = null
+      try {
+        serverId = await withChatTimeout(writePromise, CHAT_SEND_TIMEOUT_MS)
+      } catch (err) {
+        if (err?.code === 'chat/timeout') {
+          setHanaMessages((prev) => prev.map((m) => (
+            m.id === pendingId
+              ? { ...m, pending: false, sendFailed: true }
+              : m
+          )))
+          setError('送信に時間がかかっています。未送信をタップして再送できます。')
+          writePromise.then((lateId) => {
+            if (!lateId) return
+            removeChatOutbox(pendingId)
+            sendInFlightRef.current.delete(pendingId)
+            setHanaMessages((prev) => prev.map((m) => (
+              m.id === pendingId
+                ? {
+                    ...m,
+                    id: lateId,
+                    serverId: lateId,
+                    pending: false,
+                    sendFailed: false,
+                    clientId: pendingId,
+                  }
+                : m
+            )))
+          }).catch(() => {
+            sendInFlightRef.current.delete(pendingId)
+          })
+          if (!actingAsOwner) setChannel('human')
+          return
+        }
+        throw err
+      }
+
+      removeChatOutbox(pendingId)
+      sendInFlightRef.current.delete(pendingId)
       if (serverId) {
         setHanaMessages((prev) => prev.map((m) => (
-          m.id === pendingId ? { ...m, serverId } : m
+          m.id === pendingId
+            ? {
+                ...m,
+                id: serverId,
+                serverId,
+                pending: false,
+                sendFailed: false,
+                clientId: pendingId,
+              }
+            : m
         )))
       }
       if (!actingAsOwner) setChannel('human')
     } catch (err) {
-      setHanaMessages((prev) => prev.filter((m) => m.id !== pendingId))
+      sendInFlightRef.current.delete(pendingId)
+      setHanaMessages((prev) => prev.map((m) => (
+        m.id === pendingId
+          ? { ...m, pending: false, sendFailed: true }
+          : m
+      )))
+      if (threadId) {
+        upsertChatOutbox({
+          clientId: pendingId,
+          threadId,
+          text: label,
+          sender: role,
+          sticker: id,
+          createdAtIso: nowIso,
+          ...(actingAsOwner
+            ? {}
+            : {
+                guestLabel: guestThreadLabel,
+                guestKey: guestProfile?.key || guestKey || '',
+              }),
+        })
+      }
       setError(getFirebaseErrorMessage(err) || 'スタンプを送れませんでした。')
     } finally {
-      setBusy(false)
       scrollToLatestRef.current()
     }
   }
@@ -4108,7 +4293,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
     setOpen(true)
     setError('')
-    setBusy(true)
     try {
       flushSync(() => {
         setHanaMessages((prev) => [
@@ -4118,6 +4302,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             clientId: pendingId,
             pending: true,
             uploading: true,
+            sendFailed: false,
             role,
             sender: role,
             text: caption,
@@ -4136,7 +4321,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       })
       scrollToLatestRef.current()
 
-      const uploaded = await uploadChatAttachment(threadId, file)
+      const uploaded = await withChatTimeout(
+        uploadChatAttachment(threadId, file),
+        CHAT_UPLOAD_TIMEOUT_MS,
+        'アップロードがタイムアウトしました。',
+      )
       const imageUrl = uploaded.kind === 'image' ? uploaded.url : ''
       setHanaMessages((prev) => prev.map((m) => (
         m.id === pendingId
@@ -4150,7 +4339,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             }
           : m
       )))
-      const serverId = await sendChatMessage({
+      const writePromise = sendChatMessage({
         threadId,
         text: caption,
         sender: role,
@@ -4162,6 +4351,59 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         clientId: pendingId,
         ...guestMeta,
       })
+      sendInFlightRef.current.set(pendingId, writePromise)
+      let serverId = null
+      try {
+        serverId = await withChatTimeout(writePromise, CHAT_SEND_TIMEOUT_MS)
+      } catch (err) {
+        if (err?.code === 'chat/timeout') {
+          setHanaMessages((prev) => prev.map((m) => (
+            m.id === pendingId
+              ? { ...m, pending: false, sendFailed: true, uploading: false }
+              : m
+          )))
+          upsertChatOutbox({
+            clientId: pendingId,
+            threadId,
+            text: caption,
+            sender: role,
+            imageUrl,
+            fileKind: uploaded.kind,
+            fileName: uploaded.fileName,
+            fileMime: uploaded.fileMime,
+            fileSize: uploaded.fileSize,
+            createdAtIso: new Date().toISOString(),
+            ...guestMeta,
+          })
+          writePromise.then((lateId) => {
+            if (!lateId) return
+            removeChatOutbox(pendingId)
+            sendInFlightRef.current.delete(pendingId)
+            setHanaMessages((prev) => prev.map((m) => (
+              m.id === pendingId
+                ? {
+                    ...m,
+                    id: lateId,
+                    serverId: lateId,
+                    imageUrl: imageUrl || m.imageUrl,
+                    pending: false,
+                    sendFailed: false,
+                    uploading: false,
+                    clientId: pendingId,
+                  }
+                : m
+            )))
+          }).catch(() => {
+            sendInFlightRef.current.delete(pendingId)
+          })
+          setError('送信に時間がかかっています。未送信をタップして再送できます。')
+          if (!actingAsOwner) setChannel('human')
+          return
+        }
+        throw err
+      }
+      removeChatOutbox(pendingId)
+      sendInFlightRef.current.delete(pendingId)
       if (imageUrl) {
         await new Promise((resolve) => {
           const img = new Image()
@@ -4175,8 +4417,12 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           ? {
               ...m,
               imageUrl: imageUrl || m.imageUrl,
+              id: serverId || m.id,
               serverId: serverId || m.serverId,
+              pending: false,
+              sendFailed: false,
               uploading: false,
+              clientId: pendingId,
             }
           : m
       )))
@@ -4184,10 +4430,14 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       if (!actingAsOwner) setChannel('human')
     } catch (err) {
       URL.revokeObjectURL(localUrl)
-      setHanaMessages((prev) => prev.filter((m) => m.id !== pendingId))
+      sendInFlightRef.current.delete(pendingId)
+      setHanaMessages((prev) => prev.map((m) => (
+        m.id === pendingId
+          ? { ...m, pending: false, sendFailed: true, uploading: false }
+          : m
+      )))
       setError(getFirebaseErrorMessage(err) || err?.message || '曲カードを送れませんでした。')
     } finally {
-      setBusy(false)
       scrollToLatestRef.current()
     }
   }, [
@@ -4266,7 +4516,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     const role = actingAsOwner ? 'hana' : 'guest'
     const pendingId = nextStickerPendingId()
     setError('')
-    setBusy(true)
     try {
       const threadId = actingAsOwner
         ? activeThreadId
@@ -4284,50 +4533,117 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         momentId: payload?.momentId,
       }).catch(() => {})
 
+      const guestMeta = actingAsOwner
+        ? {}
+        : {
+            guestLabel: guestThreadLabel,
+            guestKey: guestProfile?.key || guestKey || '',
+          }
+      const nowIso = new Date().toISOString()
+      upsertChatOutbox({
+        clientId: pendingId,
+        threadId,
+        text: described.text,
+        sender: role,
+        effect: described.effect,
+        effectEmoji: described.effectEmoji,
+        createdAtIso: nowIso,
+        ...guestMeta,
+      })
+
       setHanaMessages((prev) => [
         ...prev,
         {
           id: pendingId,
           clientId: pendingId,
           pending: true,
+          sendFailed: false,
           role,
           sender: role,
           text: described.text,
           rawText: described.text,
           effect: described.effect,
           effectEmoji: described.effectEmoji,
-          createdAt: new Date().toISOString(),
-          createdAtIso: new Date().toISOString(),
+          createdAt: nowIso,
+          createdAtIso: nowIso,
           replyTo: null,
         },
       ])
       scrollToLatestRef.current()
 
-      const serverId = await sendChatMessage({
+      const writePromise = sendChatMessage({
         threadId,
         text: described.text,
         sender: role,
         effect: described.effect,
         effectEmoji: described.effectEmoji,
         clientId: pendingId,
-        ...(actingAsOwner
-          ? {}
-          : {
-              guestLabel: guestThreadLabel,
-              guestKey: guestProfile?.key || guestKey || '',
-            }),
+        ...guestMeta,
       })
+      sendInFlightRef.current.set(pendingId, writePromise)
+
+      let serverId = null
+      try {
+        serverId = await withChatTimeout(writePromise, CHAT_SEND_TIMEOUT_MS)
+      } catch (err) {
+        if (err?.code === 'chat/timeout') {
+          setHanaMessages((prev) => prev.map((m) => (
+            m.id === pendingId
+              ? { ...m, pending: false, sendFailed: true }
+              : m
+          )))
+          setError('送信に時間がかかっています。未送信をタップして再送できます。')
+          writePromise.then((lateId) => {
+            if (!lateId) return
+            removeChatOutbox(pendingId)
+            sendInFlightRef.current.delete(pendingId)
+            setHanaMessages((prev) => prev.map((m) => (
+              m.id === pendingId
+                ? {
+                    ...m,
+                    id: lateId,
+                    serverId: lateId,
+                    pending: false,
+                    sendFailed: false,
+                    clientId: pendingId,
+                  }
+                : m
+            )))
+          }).catch(() => {
+            sendInFlightRef.current.delete(pendingId)
+          })
+          if (!actingAsOwner) setChannel('human')
+          return
+        }
+        throw err
+      }
+
+      removeChatOutbox(pendingId)
+      sendInFlightRef.current.delete(pendingId)
       if (serverId) {
         setHanaMessages((prev) => prev.map((m) => (
-          m.id === pendingId ? { ...m, serverId } : m
+          m.id === pendingId
+            ? {
+                ...m,
+                id: serverId,
+                serverId,
+                pending: false,
+                sendFailed: false,
+                clientId: pendingId,
+              }
+            : m
         )))
       }
       if (!actingAsOwner) setChannel('human')
     } catch (err) {
-      setHanaMessages((prev) => prev.filter((m) => m.id !== pendingId))
+      sendInFlightRef.current.delete(pendingId)
+      setHanaMessages((prev) => prev.map((m) => (
+        m.id === pendingId
+          ? { ...m, pending: false, sendFailed: true }
+          : m
+      )))
       setError(getFirebaseErrorMessage(err) || 'エフェクトを送れませんでした。')
     } finally {
-      setBusy(false)
       scrollToLatestRef.current()
     }
   }
@@ -4544,6 +4860,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       handleLocalEffect(payload)
       return
     }
+    if (action === 'retry') {
+      void retryFailedSendRef.current(messageId)
+      return
+    }
     if (!message) return
     if (action === 'reply') startReply(message)
     else if (action === 'edit') startEdit(message)
@@ -4580,14 +4900,181 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     notifyAction('リマインダーをセットしました')
   }
 
+  const retryFailedSend = useCallback(async (messageId) => {
+    const mid = String(messageId || '').trim()
+    if (!mid) return
+    const local = (hanaMessages || []).find((m) => m.id === mid || m.clientId === mid)
+    if (!local?.sendFailed) return
+    const clientId = String(local.clientId || local.id || '')
+    if (!clientId) return
+
+    const threadId = actingAsOwner
+      ? (activeThreadId || '')
+      : (guestChatId || ensureGuestChatId(guestKey || 'guest'))
+    if (!threadId) {
+      setError('送信先のチャットを選んでください。')
+      return
+    }
+    if (!actingAsOwner && !guestChatId) setGuestChatId(threadId)
+
+    const sender = local.sender === 'hana' || local.role === 'hana' ? 'hana' : 'guest'
+    const text = String(local.rawText || local.text || '').trim()
+    if (!text) return
+
+    setError('')
+    setHanaMessages((prev) => prev.map((m) => (
+      (m.id === mid || m.clientId === clientId)
+        ? { ...m, pending: true, sendFailed: false, uploading: false }
+        : m
+    )))
+
+    const applySuccess = (serverId) => {
+      if (!serverId) return
+      removeChatOutbox(clientId)
+      sendInFlightRef.current.delete(clientId)
+      setHanaMessages((prev) => prev.map((m) => (
+        (m.id === mid || m.clientId === clientId)
+          ? {
+              ...m,
+              id: serverId,
+              serverId,
+              pending: false,
+              sendFailed: false,
+              uploading: false,
+              clientId,
+            }
+          : m
+      )))
+    }
+
+    const existing = sendInFlightRef.current.get(clientId)
+    if (existing) {
+      try {
+        const result = await withChatTimeout(existing, CHAT_SEND_TIMEOUT_MS)
+        const serverId = typeof result === 'string' ? result : result?.serverId
+        applySuccess(serverId)
+        setError('')
+      } catch (err) {
+        setHanaMessages((prev) => prev.map((m) => (
+          (m.id === mid || m.clientId === clientId)
+            ? { ...m, pending: false, sendFailed: true, uploading: false }
+            : m
+        )))
+        setError(
+          err?.code === 'chat/timeout'
+            ? '送信に時間がかかっています。未送信をタップして再送できます。'
+            : (getFirebaseErrorMessage(err) || '再送に失敗しました。'),
+        )
+      }
+      return
+    }
+
+    const guestMeta = sender === 'guest'
+      ? {
+          guestLabel: guestThreadLabel,
+          guestKey: guestProfile?.key || guestKey || '',
+        }
+      : {
+          guestLabel: ownerActiveGuestLabel,
+          guestKey: ownerActiveGuestKey || '',
+        }
+
+    const mediaPayload = {
+      ...(local.imageUrl && !String(local.imageUrl).startsWith('blob:')
+        ? { imageUrl: local.imageUrl }
+        : {}),
+      ...(local.fileUrl && !String(local.fileUrl).startsWith('blob:')
+        ? { fileUrl: local.fileUrl }
+        : {}),
+      ...(local.fileKind ? { fileKind: local.fileKind } : {}),
+      ...(local.fileName ? { fileName: local.fileName } : {}),
+      ...(local.fileMime ? { fileMime: local.fileMime } : {}),
+      ...(local.fileSize ? { fileSize: local.fileSize } : {}),
+      ...(Array.isArray(local.attachments) && local.attachments.length
+        && local.attachments.every((item) => item?.url && !String(item.url).startsWith('blob:'))
+        ? { attachments: local.attachments }
+        : {}),
+    }
+
+    upsertChatOutbox({
+      clientId,
+      threadId,
+      text,
+      sender,
+      sticker: local.sticker || '',
+      effect: local.effect || '',
+      effectEmoji: local.effectEmoji || '',
+      replyTo: local.replyTo || null,
+      createdAtIso: local.createdAtIso || local.createdAt || new Date().toISOString(),
+      ...guestMeta,
+      ...mediaPayload,
+    })
+
+    const writePromise = sendChatMessage({
+      threadId,
+      text,
+      sender,
+      clientId,
+      sticker: local.sticker || undefined,
+      effect: local.effect || undefined,
+      effectEmoji: local.effectEmoji || undefined,
+      replyTo: local.replyTo || null,
+      ...guestMeta,
+      ...mediaPayload,
+    })
+    sendInFlightRef.current.set(clientId, writePromise)
+
+    try {
+      const serverId = await withChatTimeout(writePromise, CHAT_SEND_TIMEOUT_MS)
+      applySuccess(serverId)
+      setError('')
+    } catch (err) {
+      if (err?.code === 'chat/timeout') {
+        setHanaMessages((prev) => prev.map((m) => (
+          (m.id === mid || m.clientId === clientId)
+            ? { ...m, pending: false, sendFailed: true, uploading: false }
+            : m
+        )))
+        setError('送信に時間がかかっています。未送信をタップして再送できます。')
+        writePromise.then(applySuccess).catch(() => {
+          sendInFlightRef.current.delete(clientId)
+        })
+        return
+      }
+      sendInFlightRef.current.delete(clientId)
+      setHanaMessages((prev) => prev.map((m) => (
+        (m.id === mid || m.clientId === clientId)
+          ? { ...m, pending: false, sendFailed: true, uploading: false }
+          : m
+      )))
+      setError(getFirebaseErrorMessage(err) || '再送に失敗しました。')
+    }
+  }, [
+    actingAsOwner,
+    activeThreadId,
+    guestChatId,
+    guestKey,
+    guestProfile?.key,
+    guestThreadLabel,
+    hanaMessages,
+    ownerActiveGuestKey,
+    ownerActiveGuestLabel,
+  ])
+  retryFailedSendRef.current = retryFailedSend
+
   const handleSend = async (event) => {
     event.preventDefault()
     voiceNote.close()
     const queued = editingId ? [] : composerAttachRef.current.slice()
     const text = draft.trim()
     if (editingId) {
-      if (!text || busy) return
-    } else if ((!text && !queued.length) || busy) return
+      if (!text) return
+    } else if (!text && !queued.length) return
+    // Prevent accidental double-tap; never block on global busy (that froze send forever).
+    const tapAt = Date.now()
+    if (!editingId && tapAt - lastSendTapRef.current < 280) return
+    lastSendTapRef.current = tapAt
+
     const sendText = text || defaultComposerCaption(queued)
     setDraft('')
     draftRef.current = ''
@@ -4597,7 +5084,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       setComposerAttach([])
     }
     setError('')
-    setBusy(true)
     setSpeaking(true)
     // Keep the soft keyboard only if it was already open. After 完了, do not reopen it.
     const keepKeyboard = document.activeElement === inputRef.current || keyboardPinnedRef.current
@@ -4622,6 +5108,12 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     const pendingReply = replyTo
     const pendingEditId = editingId
     let pendingSendId = ''
+    // Only lock chrome for edit / AI reply — never for human Firestore sends.
+    const willUseAi = !pendingEditId && !actingAsOwner
+      && !queued.length
+      && channel === 'ai'
+      && !wantsHumanHana(text)
+    if (pendingEditId || willUseAi) beginComposerBusy(willUseAi ? 45_000 : 12_000)
     clearComposerExtras()
 
     try {
@@ -4667,12 +5159,30 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         const pendingId = nextChatPendingId('msg')
         pendingSendId = pendingId
         const localMedia = localMediaFieldsFromQueue(queued)
+        const replySnapshot = pendingReply
+          ? {
+              id: pendingReply.id,
+              text: pendingReply.text,
+              sender: pendingReply.sender || pendingReply.role,
+            }
+          : null
+        upsertChatOutbox({
+          clientId: pendingId,
+          threadId,
+          text: sendText,
+          sender: 'hana',
+          guestKey: ownerActiveGuestKey || '',
+          guestLabel: ownerActiveGuestLabel,
+          replyTo: replySnapshot,
+          createdAtIso: nowIso,
+        })
         setHanaMessages((prev) => [
           ...prev,
           {
             id: pendingId,
             clientId: pendingId,
             pending: true,
+            sendFailed: false,
             role: 'hana',
             sender: 'hana',
             text: sendText,
@@ -4680,43 +5190,59 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             createdAt: nowIso,
             createdAtIso: nowIso,
             ...localMedia,
-            replyTo: pendingReply
-              ? {
-                  id: pendingReply.id,
-                  text: pendingReply.text,
-                  sender: pendingReply.sender || pendingReply.role,
-                }
-              : null,
+            replyTo: replySnapshot,
           },
         ])
         scrollToLatestRef.current()
-        const uploadedList = queued.length ? await (async () => {
-          const out = []
-          for (const item of queued) {
-            const uploaded = await uploadChatAttachment(threadId, item.file)
-            out.push({
-              url: uploaded.url,
-              kind: uploaded.kind,
-              fileName: uploaded.fileName,
-              fileMime: uploaded.fileMime,
-              fileSize: uploaded.fileSize,
-              voiceSkin: item.voiceSkin || '',
+
+        const writePromise = (async () => {
+          const uploadedList = queued.length ? await (async () => {
+            const out = []
+            for (const item of queued) {
+              const uploaded = await uploadChatAttachment(threadId, item.file)
+              out.push({
+                url: uploaded.url,
+                kind: uploaded.kind,
+                fileName: uploaded.fileName,
+                fileMime: uploaded.fileMime,
+                fileSize: uploaded.fileSize,
+                voiceSkin: item.voiceSkin || '',
+              })
+            }
+            return out
+          })() : []
+          const mediaFields = uploadedMediaFields(uploadedList)
+          if (Object.keys(mediaFields).length) {
+            upsertChatOutbox({
+              clientId: pendingId,
+              threadId,
+              text: sendText,
+              sender: 'hana',
+              guestKey: ownerActiveGuestKey || '',
+              guestLabel: ownerActiveGuestLabel,
+              replyTo: replySnapshot,
+              createdAtIso: nowIso,
+              ...mediaFields,
             })
           }
-          return out
-        })() : []
-        const mediaFields = uploadedMediaFields(uploadedList)
-        const serverId = await sendChatMessage({
-          threadId,
-          text: sendText,
-          sender: 'hana',
-          clientId: pendingId,
-          replyTo: pendingReply,
-          guestKey: ownerActiveGuestKey || '',
-          guestLabel: ownerActiveGuestLabel,
-          ...mediaFields,
-        })
-        if (serverId) {
+          const serverId = await sendChatMessage({
+            threadId,
+            text: sendText,
+            sender: 'hana',
+            clientId: pendingId,
+            replyTo: pendingReply,
+            guestKey: ownerActiveGuestKey || '',
+            guestLabel: ownerActiveGuestLabel,
+            ...mediaFields,
+          })
+          return { serverId, mediaFields }
+        })()
+        sendInFlightRef.current.set(pendingId, writePromise)
+
+        const applyOwnerSuccess = ({ serverId, mediaFields }) => {
+          if (!serverId) return
+          removeChatOutbox(pendingId)
+          sendInFlightRef.current.delete(pendingId)
           setHanaMessages((prev) => prev.map((m) => (
             m.id === pendingId
               ? {
@@ -4725,6 +5251,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   id: serverId,
                   serverId,
                   pending: false,
+                  sendFailed: false,
                   uploading: false,
                   clientId: pendingId,
                 }
@@ -4744,16 +5271,34 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               createdAt: nowIso,
               createdAtIso: nowIso,
               pending: false,
+              sendFailed: false,
               ...mediaFields,
-              replyTo: pendingReply
-                ? {
-                    id: pendingReply.id,
-                    text: pendingReply.text,
-                    sender: pendingReply.sender || pendingReply.role,
-                  }
-                : null,
+              replyTo: replySnapshot,
             },
           ])
+        }
+
+        try {
+          const result = await withChatTimeout(
+            writePromise,
+            queued.length ? CHAT_UPLOAD_TIMEOUT_MS : CHAT_SEND_TIMEOUT_MS,
+          )
+          applyOwnerSuccess(result)
+        } catch (err) {
+          if (err?.code === 'chat/timeout') {
+            setHanaMessages((prev) => prev.map((m) => (
+              m.id === pendingId
+                ? { ...m, pending: false, sendFailed: true, uploading: false }
+                : m
+            )))
+            setError('送信に時間がかかっています。未送信をタップして再送できます。')
+            writePromise.then(applyOwnerSuccess).catch(() => {
+              sendInFlightRef.current.delete(pendingId)
+            })
+            pendingSendId = ''
+          } else {
+            throw err
+          }
         }
         for (const item of queued) {
           if (item.previewUrl) URL.revokeObjectURL(item.previewUrl)
@@ -4768,12 +5313,30 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         const pendingId = nextChatPendingId('msg')
         pendingSendId = pendingId
         const localMedia = localMediaFieldsFromQueue(queued)
+        const replySnapshot = pendingReply
+          ? {
+              id: pendingReply.id,
+              text: pendingReply.text,
+              sender: pendingReply.sender || pendingReply.role,
+            }
+          : null
+        upsertChatOutbox({
+          clientId: pendingId,
+          threadId,
+          text: sendText,
+          sender: 'guest',
+          guestLabel: guestThreadLabel,
+          guestKey: guestProfile?.key || guestKey || '',
+          replyTo: replySnapshot,
+          createdAtIso: nowIso,
+        })
         setHanaMessages((prev) => [
           ...prev,
           {
             id: pendingId,
             clientId: pendingId,
             pending: true,
+            sendFailed: false,
             role: 'guest',
             sender: 'guest',
             text: sendText,
@@ -4781,43 +5344,59 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             createdAt: nowIso,
             createdAtIso: nowIso,
             ...localMedia,
-            replyTo: pendingReply
-              ? {
-                  id: pendingReply.id,
-                  text: pendingReply.text,
-                  sender: pendingReply.sender || pendingReply.role,
-                }
-              : null,
+            replyTo: replySnapshot,
           },
         ])
         scrollToLatestRef.current()
-        const uploadedList = queued.length ? await (async () => {
-          const out = []
-          for (const item of queued) {
-            const uploaded = await uploadChatAttachment(threadId, item.file)
-            out.push({
-              url: uploaded.url,
-              kind: uploaded.kind,
-              fileName: uploaded.fileName,
-              fileMime: uploaded.fileMime,
-              fileSize: uploaded.fileSize,
-              voiceSkin: item.voiceSkin || '',
+
+        const writePromise = (async () => {
+          const uploadedList = queued.length ? await (async () => {
+            const out = []
+            for (const item of queued) {
+              const uploaded = await uploadChatAttachment(threadId, item.file)
+              out.push({
+                url: uploaded.url,
+                kind: uploaded.kind,
+                fileName: uploaded.fileName,
+                fileMime: uploaded.fileMime,
+                fileSize: uploaded.fileSize,
+                voiceSkin: item.voiceSkin || '',
+              })
+            }
+            return out
+          })() : []
+          const mediaFields = uploadedMediaFields(uploadedList)
+          if (Object.keys(mediaFields).length) {
+            upsertChatOutbox({
+              clientId: pendingId,
+              threadId,
+              text: sendText,
+              sender: 'guest',
+              guestLabel: guestThreadLabel,
+              guestKey: guestProfile?.key || guestKey || '',
+              replyTo: replySnapshot,
+              createdAtIso: nowIso,
+              ...mediaFields,
             })
           }
-          return out
-        })() : []
-        const mediaFields = uploadedMediaFields(uploadedList)
-        const serverId = await sendChatMessage({
-          threadId,
-          text: sendText,
-          sender: 'guest',
-          guestLabel: guestThreadLabel,
-          guestKey: guestProfile?.key || guestKey || '',
-          clientId: pendingId,
-          replyTo: pendingReply,
-          ...mediaFields,
-        })
-        if (serverId) {
+          const serverId = await sendChatMessage({
+            threadId,
+            text: sendText,
+            sender: 'guest',
+            guestLabel: guestThreadLabel,
+            guestKey: guestProfile?.key || guestKey || '',
+            clientId: pendingId,
+            replyTo: pendingReply,
+            ...mediaFields,
+          })
+          return { serverId, mediaFields }
+        })()
+        sendInFlightRef.current.set(pendingId, writePromise)
+
+        const applyGuestSuccess = ({ serverId, mediaFields }) => {
+          if (!serverId) return
+          removeChatOutbox(pendingId)
+          sendInFlightRef.current.delete(pendingId)
           setHanaMessages((prev) => prev.map((m) => (
             m.id === pendingId
               ? {
@@ -4826,11 +5405,35 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   id: serverId,
                   serverId,
                   pending: false,
+                  sendFailed: false,
                   uploading: false,
                   clientId: pendingId,
                 }
               : m
           )))
+        }
+
+        try {
+          const result = await withChatTimeout(
+            writePromise,
+            queued.length ? CHAT_UPLOAD_TIMEOUT_MS : CHAT_SEND_TIMEOUT_MS,
+          )
+          applyGuestSuccess(result)
+        } catch (err) {
+          if (err?.code === 'chat/timeout') {
+            setHanaMessages((prev) => prev.map((m) => (
+              m.id === pendingId
+                ? { ...m, pending: false, sendFailed: true, uploading: false }
+                : m
+            )))
+            setError('送信に時間がかかっています。未送信をタップして再送できます。')
+            writePromise.then(applyGuestSuccess).catch(() => {
+              sendInFlightRef.current.delete(pendingId)
+            })
+            pendingSendId = ''
+          } else {
+            throw err
+          }
         }
         for (const item of queued) {
           if (item.previewUrl) URL.revokeObjectURL(item.previewUrl)
@@ -4898,9 +5501,13 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     } catch (err) {
       console.error(err)
       if (pendingSendId) {
-        setHanaMessages((prev) => prev.filter((m) => m.id !== pendingSendId))
-        setDraft(text)
-        draftRef.current = text
+        setHanaMessages((prev) => prev.map((m) => (
+          m.id === pendingSendId
+            ? { ...m, pending: false, sendFailed: true, uploading: false }
+            : m
+        )))
+        sendInFlightRef.current.delete(pendingSendId)
+        // Keep the bubble — restoring draft would hide the failed send.
       }
       if (queued.length) {
         composerAttachRef.current = queued
@@ -4924,7 +5531,11 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           setError(getFirebaseErrorMessage(sendErr) || '送信に失敗しました。')
         }
       } else {
-        setError(msg || '送信に失敗しました。')
+        setError(
+          err?.code === 'chat/timeout'
+            ? '送信に時間がかかっています。未送信をタップして再送できます。'
+            : (msg || '送信に失敗しました。未送信をタップして再送できます。'),
+        )
         if (!actingAsOwner && channel === 'ai' && !pendingEditId) {
           setAiMessages((prev) => [
             ...prev,
@@ -4938,7 +5549,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         }
       }
     } finally {
-      setBusy(false)
+      endComposerBusy()
       window.setTimeout(() => setSpeaking(false), 600)
       if (keepKeyboard) {
         keyboardPinnedRef.current = true
@@ -6034,7 +6645,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     type="button"
                     role="listitem"
                     title={sticker.label}
-                    disabled={busy}
                     onMouseDown={(event) => event.preventDefault()}
                     onPointerDown={(event) => event.preventDefault()}
                     onClick={() => {
@@ -6130,7 +6740,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   className="hana-chat-composer-attach-btn"
                   title="写真・動画・ファイルを付ける"
                   aria-label="写真・動画・ファイルを付ける"
-                  disabled={busy || (actingAsOwner && !activeThreadId)}
+                  disabled={actingAsOwner && !activeThreadId}
                   onMouseDown={(event) => event.preventDefault()}
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={() => imageInputRef.current?.click()}
@@ -6174,7 +6784,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
                   if (!shouldSend) return
                   event.preventDefault()
-                  if (!busy && (draft.trim() || composerAttach.length)) {
+                  if (draft.trim() || composerAttach.length) {
                     event.currentTarget.form?.requestSubmit?.()
                   }
                 }}
@@ -6261,7 +6871,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     title={showKeyboardIcon ? 'キーボード' : 'スタンプ・エフェクト'}
                     aria-label={showKeyboardIcon ? 'キーボードを表示' : 'スタンプ・エフェクト'}
                     aria-expanded={stickerOpen}
-                    disabled={busy}
                     onMouseDown={(event) => {
                       // Always preventDefault: otherwise the first tap only dismisses the
                       // soft keyboard and never fires click / never opens the sticker dock.
@@ -6373,7 +6982,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                           className="hana-chat-effect-shortcut is-flower"
                           title="花びら"
                           aria-label="花びら"
-                          disabled={busy}
                           onMouseDown={(event) => event.preventDefault()}
                           onPointerDown={(event) => event.preventDefault()}
                           onClick={() => { void playStandaloneEffect({ kind: 'flower', emoji: defaultReaction }) }}
@@ -6385,7 +6993,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                           className="hana-chat-effect-shortcut is-party"
                           title="パーティー"
                           aria-label="パーティー"
-                          disabled={busy}
                           onMouseDown={(event) => event.preventDefault()}
                           onPointerDown={(event) => event.preventDefault()}
                           onClick={() => { void playStandaloneEffect({ kind: 'party', emoji: CHAT_PARTY_REACTION }) }}
@@ -6399,7 +7006,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                             className={`hana-chat-effect-shortcut is-${moment.theme}`}
                             title={moment.label}
                             aria-label={moment.label}
-                            disabled={busy}
                             onMouseDown={(event) => event.preventDefault()}
                             onPointerDown={(event) => event.preventDefault()}
                             onClick={() => { void playStandaloneEffect({ kind: 'moment', momentId: moment.id }) }}
@@ -6437,7 +7043,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                             role="menuitem"
                             className="hana-chat-sticker-item"
                             title={sticker.label}
-                            disabled={busy}
                             onMouseDown={(event) => event.preventDefault()}
                             onPointerDown={(event) => event.preventDefault()}
                             onClick={() => { void handleSendSticker(sticker) }}
@@ -6459,7 +7064,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 title={voiceNote.open ? 'ボイスメッセージを閉じる' : 'ボイスメッセージ'}
                 aria-label={voiceNote.open ? 'ボイスメッセージを閉じる' : 'ボイスメッセージ'}
                 aria-pressed={voiceNote.open}
-                disabled={busy || (actingAsOwner && !activeThreadId)}
+                disabled={actingAsOwner && !activeThreadId}
                 onMouseDown={(event) => event.preventDefault()}
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={() => {
@@ -6501,22 +7106,18 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               <button
                 type="submit"
                 className="hana-chat-composer-action is-send"
-                disabled={busy || (!draft.trim() && !composerAttach.length) || (actingAsOwner && !activeThreadId)}
+                disabled={(!draft.trim() && !composerAttach.length) || (actingAsOwner && !activeThreadId)}
                 title={editingId ? '更新' : '送る'}
-                aria-label={busy ? '送信中' : editingId ? '更新' : '送る'}
+                aria-label={editingId ? '更新' : '送る'}
                 onMouseDown={(event) => event.preventDefault()}
                 onPointerDown={(event) => event.preventDefault()}
               >
-                {busy ? (
-                  <span aria-hidden="true">…</span>
-                ) : (
-                  <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false">
-                    <path
-                      fill="currentColor"
-                      d="M4.2 19.6 20.5 12 4.2 4.4l-.05 5.9L14.8 12l-10.65 1.7.05 5.9Z"
-                    />
-                  </svg>
-                )}
+                <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false">
+                  <path
+                    fill="currentColor"
+                    d="M4.2 19.6 20.5 12 4.2 4.4l-.05 5.9L14.8 12l-10.65 1.7.05 5.9Z"
+                  />
+                </svg>
               </button>
             )}
           </form>
@@ -6567,7 +7168,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   className="hana-chat-effect-shortcut is-flower"
                   title="花びら"
                   aria-label="花びら"
-                  disabled={busy}
                   onMouseDown={(event) => event.preventDefault()}
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={() => { void playStandaloneEffect({ kind: 'flower', emoji: defaultReaction }) }}
@@ -6579,7 +7179,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                   className="hana-chat-effect-shortcut is-party"
                   title="パーティー"
                   aria-label="パーティー"
-                  disabled={busy}
                   onMouseDown={(event) => event.preventDefault()}
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={() => { void playStandaloneEffect({ kind: 'party', emoji: CHAT_PARTY_REACTION }) }}
@@ -6593,7 +7192,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     className={`hana-chat-effect-shortcut is-${moment.theme}`}
                     title={moment.label}
                     aria-label={moment.label}
-                    disabled={busy}
                     onMouseDown={(event) => event.preventDefault()}
                     onPointerDown={(event) => event.preventDefault()}
                     onClick={() => { void playStandaloneEffect({ kind: 'moment', momentId: moment.id }) }}
@@ -6631,7 +7229,6 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     role="menuitem"
                     className="hana-chat-sticker-item"
                     title={sticker.label}
-                    disabled={busy}
                     onMouseDown={(event) => event.preventDefault()}
                     onPointerDown={(event) => event.preventDefault()}
                     onClick={() => { void handleSendSticker(sticker) }}

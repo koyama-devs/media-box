@@ -2917,6 +2917,8 @@ export function getMessageDeliveryStatus(message, thread, viewer) {
 export function deliveryStatusLabel(status) {
   if (status === 'read') return '既読'
   if (status === 'sent') return '送信済'
+  if (status === 'sending') return '送信中'
+  if (status === 'failed') return '未送信'
   return ''
 }
 
