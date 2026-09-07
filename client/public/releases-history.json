@@ -1,6 +1,15 @@
 {
-  "updatedAt": "2026-08-13T03:52:00.867Z",
+  "updatedAt": "2026-09-06T01:39:59.159Z",
   "releases": [
+    {
+      "version": "mtp586j8-x3hqvr",
+      "notes": "Fix stuck send: composer no longer freezes, failed bubbles retry after reload",
+      "builtAt": "2026-09-06T01:38:54.177Z",
+      "previousVersion": "mtljhodl-xrtwsp",
+      "previousHostingVersionId": "055d61f4da7be618",
+      "hostingVersionId": "666a4e6b4d8dfad0",
+      "recordedAt": "2026-09-06T01:38:54.579Z"
+    },
     {
       "version": "msqzeqp3-cq5ros",
       "notes": "Chat song-card 聴く now autoplays the track in-app instead of opening the welcome postcard again.",
