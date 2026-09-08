@@ -959,7 +959,9 @@ function stablePartyOrder(partyOrder, mons) {
   const seen = new Set()
   const out = []
   const fallback = Object.keys(mons || {}).sort()
-  for (const id of [...(Array.isArray(partyOrder) ? partyOrder : []), ...fallback]) {
+  // Starter slots always lead so a later find/adopt can never bury them.
+  const pinned = ['mhana', 'mgabu'].filter((id) => mons?.[id])
+  for (const id of [...pinned, ...(Array.isArray(partyOrder) ? partyOrder : []), ...fallback]) {
     const key = String(id || '').trim()
     if (!mons?.[key] || seen.has(key)) continue
     seen.add(key)
@@ -968,19 +970,21 @@ function stablePartyOrder(partyOrder, mons) {
   return out.slice(0, WORLD_PARTY_MAX)
 }
 
-/** One trainable mon at a time — drop later slots until earlier ones fully evolve. */
+/**
+ * Care order is sequential, but we must NEVER delete party members.
+ * Dropping later slots deleted Pikachu when Zenigame was ordered first.
+ */
 function enforceSequentialParty(mons, partyOrder) {
   const order = stablePartyOrder(partyOrder, mons)
   const kept = {}
-  const out = []
   for (const id of order) {
-    const mon = mons[id]
-    if (!mon) continue
-    out.push(id)
-    kept[id] = mon
-    if (!monIsFullyEvolved(mon)) break
+    if (mons[id]) kept[id] = mons[id]
   }
-  return { mons: kept, partyOrder: out }
+  // Also keep any mon missing from order (should not happen).
+  for (const [id, mon] of Object.entries(mons || {})) {
+    if (!kept[id]) kept[id] = mon
+  }
+  return { mons: kept, partyOrder: stablePartyOrder(order, kept) }
 }
 
 function dedupeTrainerMons(mons, preferId, partyOrder) {
@@ -1171,27 +1175,42 @@ export function pickRicherPokeWorld(next, prev) {
 
 /**
  * Restore wiped starters upward only. Never devolve Pikachu→Pichu or Lizardo→Hitokage.
+ * Starter slots (mhana/mgabu) may ONLY hold their starter evo line — never Zenigame etc.
  */
 export function healResetStarters(world, entries) {
   const next = serializePokeWorld(world)
   const srcEntries = entries && typeof entries === 'object' ? entries : {}
   const GUEST_HITOKAGE_NICK = 'オレンジ'
 
-  const bestSpeciesFromEvidence = (role, live) => {
+  const bestSpeciesFromEvidence = (role, live, partyMons) => {
     const starterSpecies = String(WORLD_STARTER[role] || '')
     const fam = evoFamily(starterSpecies)
-    let best = String(live?.speciesId || starterSpecies)
+    // Never seed "best" from an out-of-family species (e.g. Zenigame on mhana).
+    let best = starterSpecies
     let bestStage = evoStage(best)
-    const consider = (sid) => {
+    const consider = (sid, levelHint = 0) => {
       const id = String(Number(sid) || '').trim()
       if (!id || !fam.has(id)) return
       const stage = evoStage(id)
-      if (stage > bestStage || (stage === bestStage && Number(id) > Number(best))) {
+      if (
+        stage > bestStage
+        || (stage === bestStage && Number(id) > Number(best))
+        || (stage === bestStage && Number(id) === Number(best) && levelHint > 0)
+      ) {
         best = id
         bestStage = stage
       }
     }
-    consider(live?.speciesId)
+    if (fam.has(String(live?.speciesId || ''))) consider(live.speciesId, Number(live.level) || 0)
+    // Recover from other party slots if starter was overwritten/deleted.
+    for (const mon of Object.values(partyMons || {})) {
+      if (fam.has(String(mon?.speciesId || ''))) {
+        consider(mon.speciesId, Number(mon.level) || 0)
+      }
+      for (const row of mon?.log || []) {
+        if (row?.action === 'evolve' && row.note) consider(row.note)
+      }
+    }
     for (const id of fam) {
       if (srcEntries[id]) consider(id)
     }
@@ -1209,11 +1228,11 @@ export function healResetStarters(world, entries) {
 
   for (const role of ['hana', 'guest']) {
     const starterSpecies = String(WORLD_STARTER[role] || '')
+    const fam = evoFamily(starterSpecies)
     const starterMonId = role === 'hana' ? 'mhana' : 'mgabu'
     const trainer = next.trainers[role]
     let mon = trainer?.mons?.[starterMonId]
     if (!mon) {
-      // Starter slot missing after a bad write — reseed then upgrade from evidence.
       const seeded = emptyMon(starterMonId, starterSpecies)
       trainer.mons[starterMonId] = seeded
       mon = seeded
@@ -1224,44 +1243,64 @@ export function healResetStarters(world, entries) {
     }
 
     const live = trainer.mons[starterMonId]
-    const best = bestSpeciesFromEvidence(role, live)
-    const liveStage = evoStage(live.speciesId)
+    const best = bestSpeciesFromEvidence(role, live, trainer.mons)
+    const liveInFam = fam.has(String(live.speciesId || ''))
+    const liveStage = liveInFam ? evoStage(live.speciesId) : -1
     const bestStage = evoStage(best)
-    // Absolute rule: never move to a lower evolution stage.
-    const speciesOut = bestStage >= liveStage ? best : String(live.speciesId)
-    let minLv = minLevelForSpecies(speciesOut)
-    if (role === 'guest' && ['4', '5', '6'].includes(String(speciesOut))) {
-      if (String(speciesOut) === '4') minLv = Math.max(minLv, 4)
+    // Starter slot: always stay inside family. Out-of-family (Zenigame…) is corruption.
+    let speciesOut = best
+    if (liveInFam && liveStage > bestStage) speciesOut = String(live.speciesId)
+    else if (liveInFam && liveStage === bestStage) speciesOut = String(live.speciesId)
+
+    // Pull level/xp/bond from the best same-line mon in the party if starter was replaced.
+    let donor = liveInFam ? live : null
+    for (const row of Object.values(trainer.mons || {})) {
+      if (!fam.has(String(row?.speciesId || ''))) continue
+      if (!donor || monProgressScore(row) > monProgressScore(donor)) donor = row
     }
+    if (!donor) donor = live
+
+    let minLv = minLevelForSpecies(speciesOut)
+    if (role === 'guest' && String(speciesOut) === '4') minLv = Math.max(minLv, 4)
+    if (role === 'guest' && String(speciesOut) === '5') minLv = Math.max(minLv, 5)
+    if (role === 'guest' && String(speciesOut) === '6') minLv = Math.max(minLv, 12)
     if (role === 'hana' && String(speciesOut) === '25') minLv = Math.max(minLv, 5)
     if (role === 'hana' && String(speciesOut) === '26') minLv = Math.max(minLv, 12)
 
-    const curLv = Number(live.level) || 1
+    const curLv = Math.max(Number(donor.level) || 1, Number(live.level) || 1)
     const nick = String(
-      live.nickname
+      (liveInFam ? live.nickname : '')
+      || donor.nickname
       || srcEntries[speciesOut]?.nickname
       || (role === 'guest' && ['4', '5', '6'].includes(String(speciesOut)) ? GUEST_HITOKAGE_NICK : '')
       || '',
     ).trim().slice(0, 16)
 
-    const needUpgrade = (
-      String(live.speciesId) !== String(speciesOut)
+    const needFix = (
+      !liveInFam
+      || String(live.speciesId) !== String(speciesOut)
       || curLv < minLv
       || (role === 'guest' && ['4', '5', '6'].includes(String(speciesOut)) && !String(live.nickname || '').trim())
     )
-    if (!needUpgrade) continue
+    if (!needFix) {
+      trainer.partyOrder = stablePartyOrder(trainer.partyOrder, trainer.mons)
+      continue
+    }
 
     trainer.mons[starterMonId] = {
-      ...live,
+      ...donor,
+      id: starterMonId,
       speciesId: String(speciesOut),
       level: Math.max(curLv, minLv),
-      xp: Number(live.xp) || 0,
-      nickname: nick || live.nickname || '',
+      xp: Math.max(Number(donor.xp) || 0, Number(live.xp) || 0),
+      bond: Math.max(Number(donor.bond) || 0, Number(live.bond) || 0),
+      nickname: nick || donor.nickname || live.nickname || '',
     }
     trainer.activeId = starterMonId
-    if (!Array.isArray(trainer.partyOrder) || !trainer.partyOrder.includes(starterMonId)) {
-      trainer.partyOrder = [starterMonId, ...(trainer.partyOrder || [])].slice(0, WORLD_PARTY_MAX)
-    }
+    trainer.partyOrder = stablePartyOrder(
+      [starterMonId, ...(trainer.partyOrder || [])],
+      trainer.mons,
+    )
   }
   return next
 }
