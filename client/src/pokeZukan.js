@@ -1258,19 +1258,32 @@ export function healResetStarters(world, entries) {
       if (!fam.has(String(row?.speciesId || ''))) continue
       if (!donor || monProgressScore(row) > monProgressScore(donor)) donor = row
     }
-    if (!donor) donor = live
+
+    // Exile turtle/etc. off the starter id so the UI buddy is never Zenigame.
+    if (!liveInFam && String(live.speciesId || '')) {
+      const exileId = `mx${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`
+      if (!trainer.mons[exileId]) {
+        trainer.mons[exileId] = { ...live, id: exileId }
+      }
+    }
 
     let minLv = minLevelForSpecies(speciesOut)
     if (role === 'guest' && String(speciesOut) === '4') minLv = Math.max(minLv, 4)
     if (role === 'guest' && String(speciesOut) === '5') minLv = Math.max(minLv, 5)
     if (role === 'guest' && String(speciesOut) === '6') minLv = Math.max(minLv, 12)
-    if (role === 'hana' && String(speciesOut) === '25') minLv = Math.max(minLv, 5)
+    if (role === 'hana' && String(speciesOut) === '25') minLv = Math.max(minLv, 12)
     if (role === 'hana' && String(speciesOut) === '26') minLv = Math.max(minLv, 12)
+    // Corruption restore: Hana had Pikachu Lv.12 before the turtle wipe.
+    if (role === 'hana' && !liveInFam) minLv = Math.max(minLv, 12)
 
-    const curLv = Math.max(Number(donor.level) || 1, Number(live.level) || 1)
+    const curLv = Math.max(
+      Number(donor?.level) || 0,
+      liveInFam ? (Number(live.level) || 0) : 0,
+      1,
+    )
     const nick = String(
       (liveInFam ? live.nickname : '')
-      || donor.nickname
+      || donor?.nickname
       || srcEntries[speciesOut]?.nickname
       || (role === 'guest' && ['4', '5', '6'].includes(String(speciesOut)) ? GUEST_HITOKAGE_NICK : '')
       || '',
@@ -1282,25 +1295,26 @@ export function healResetStarters(world, entries) {
       || curLv < minLv
       || (role === 'guest' && ['4', '5', '6'].includes(String(speciesOut)) && !String(live.nickname || '').trim())
     )
-    if (!needFix) {
-      trainer.partyOrder = stablePartyOrder(trainer.partyOrder, trainer.mons)
-      continue
-    }
-
-    trainer.mons[starterMonId] = {
-      ...donor,
-      id: starterMonId,
-      speciesId: String(speciesOut),
-      level: Math.max(curLv, minLv),
-      xp: Math.max(Number(donor.xp) || 0, Number(live.xp) || 0),
-      bond: Math.max(Number(donor.bond) || 0, Number(live.bond) || 0),
-      nickname: nick || donor.nickname || live.nickname || '',
-    }
-    trainer.activeId = starterMonId
+    // Always pin starter first even when species already ok.
     trainer.partyOrder = stablePartyOrder(
       [starterMonId, ...(trainer.partyOrder || [])],
       trainer.mons,
     )
+    trainer.activeId = starterMonId
+    if (!needFix) continue
+
+    const base = donor && fam.has(String(donor.speciesId || ''))
+      ? donor
+      : emptyMon(starterMonId, speciesOut)
+    trainer.mons[starterMonId] = {
+      ...base,
+      id: starterMonId,
+      speciesId: String(speciesOut),
+      level: Math.max(curLv, minLv),
+      xp: Math.max(Number(donor?.xp) || 0, liveInFam ? (Number(live.xp) || 0) : 0),
+      bond: Math.max(Number(donor?.bond) || 0, liveInFam ? (Number(live.bond) || 0) : 28, liveInFam ? 0 : 48),
+      nickname: nick || base.nickname || '',
+    }
   }
   return next
 }
@@ -1439,6 +1453,10 @@ export function worldTrainer(world, role) {
 
 export function worldActiveMon(world, role) {
   const trainer = worldTrainer(world, role)
+  const who = worldRole(role)
+  const starterId = who === 'hana' ? 'mhana' : 'mgabu'
+  // Main buddy is always the starter slot — never a found Zenigame.
+  if (trainer?.mons?.[starterId]) return trainer.mons[starterId]
   const { mon } = careMonForTrainer(trainer)
   return mon
 }

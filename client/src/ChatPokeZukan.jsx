@@ -251,6 +251,19 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
         if (!restored) return
         if (
           me === 'hana'
+          && ['7', '8', '9', '172'].includes(beforeSid)
+          && ['25', '26'].includes(String(restored.speciesId))
+        ) {
+          setToast({
+            kind: 'ok',
+            line: 'ピカチュウを復元したよ！',
+            how: `Lv.${restored.level}`,
+            key: Date.now(),
+          })
+          return
+        }
+        if (
+          me === 'hana'
           && (beforeSid === '172' || (beforeSid === '25' && Number(restored.level || 1) > beforeLv))
           && ['25', '26'].includes(String(restored.speciesId))
           && (beforeSid !== String(restored.speciesId) || Number(restored.level || 1) > beforeLv)
