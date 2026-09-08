@@ -105,6 +105,8 @@ const SHARED_CHAT_DOC = 'chat'
 const SHARED_APPEARANCE_DOC = 'site-appearance'
 /** Gabu sakura weigh-ins live here — never on chatThreads (thread setDoc was wiping logs). */
 const SHARED_WEIGHT_GARDEN_DOC = 'weight-garden-gabusan'
+/** Hana↔Gabu poke village — shared so thread wipes cannot devolve Pikachu/Lizardo. */
+const SHARED_POKE_WORLD_DOC = 'poke-world-gabusan'
 /** Default edit/delete window after the partner has read the message. */
 export const DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES = 5
 /** Max minutes an admin can configure for the edit window. */
@@ -2320,6 +2322,44 @@ function pokeRoleKey(role) {
 }
 
 const pokeZukanPatches = new Map()
+const pokeWorldSharedQueue = { current: Promise.resolve() }
+
+function pokeWorldSharedRef() {
+  return doc(db, SHARED_STATE_COLLECTION, SHARED_POKE_WORLD_DOC)
+}
+
+async function readSharedPokeWorld() {
+  try {
+    const snap = await getDoc(pokeWorldSharedRef())
+    if (!snap.exists()) return null
+    const world = snap.data()?.world
+    if (!world || typeof world !== 'object') return null
+    return serializePokeWorld(world)
+  } catch {
+    return null
+  }
+}
+
+async function writeSharedPokeWorld(world) {
+  const run = pokeWorldSharedQueue.current.catch(() => {}).then(async () => {
+    const ref = pokeWorldSharedRef()
+    let prev = null
+    try {
+      const snap = await getDoc(ref)
+      if (snap.exists()) prev = serializePokeWorld(snap.data()?.world)
+    } catch {
+      /* offline — still try write */
+    }
+    const next = pickRicherPokeWorld(world, prev)
+    await setDoc(ref, {
+      world: next,
+      updatedAtIso: new Date().toISOString(),
+    }, { merge: true })
+    return next
+  })
+  pokeWorldSharedQueue.current = run
+  return run
+}
 
 function applyDuoStar(prev, ymd) {
   const hanaDone = prev.hanaDoneYmd === ymd
@@ -2340,15 +2380,23 @@ async function patchPokeZukan(threadId, mutator) {
   const prevWrite = pokeZukanPatches.get(tid) || Promise.resolve()
   const write = prevWrite.catch(() => {}).then(async () => {
     const ref = doc(db, CHAT_THREADS_COLLECTION, tid)
-    const snap = await getDoc(ref)
+    const [snap, sharedWorld] = await Promise.all([
+      getDoc(ref),
+      readSharedPokeWorld(),
+    ])
     const raw = snap.exists() ? snap.data()?.pokeZukan : null
     const prev = serializePokeZukan(raw)
     const next = serializePokeZukan(mutator(prev))
     const persisted = raw?.world ? serializePokeWorld(raw.world) : null
-    if (persisted) {
-      next.world = pickRicherPokeWorld(next.world, persisted)
-    }
+    // Merge thread + shared + mutation result so a wiped starter can never win.
+    next.world = pickRicherPokeWorld(next.world, persisted)
+    next.world = pickRicherPokeWorld(next.world, sharedWorld)
     next.world = healResetStarters(next.world, next.entries)
+    try {
+      next.world = await writeSharedPokeWorld(next.world)
+    } catch {
+      /* thread write still proceeds; shared catch-up on next sync */
+    }
     await setDoc(ref, { pokeZukan: next }, { merge: true })
     return next
   })
@@ -2448,6 +2496,19 @@ export async function syncPokeWorld(threadId) {
     /* optional */
   }
 
+  try {
+    const shared = await readSharedPokeWorld()
+    if (shared) {
+      const score = pokeWorldProgressScore(shared)
+      if (score > richestScore) {
+        richestScore = score
+        richestWorld = shared
+      }
+    }
+  } catch {
+    /* optional */
+  }
+
   return patchPokeZukan(tid, (prev) => {
     const entries = { ...mergedEntries, ...prev.entries }
     let world = prev.world
@@ -2460,6 +2521,15 @@ export async function syncPokeWorld(threadId) {
         photoUrl: '',
         foil: false,
         nickname: '',
+      }
+    }
+    const guestSid = String(world?.trainers?.guest?.mons?.mgabu?.speciesId || '')
+    if (guestSid && !entries[guestSid]) {
+      entries[guestSid] = {
+        caughtAtIso: new Date().toISOString(),
+        photoUrl: '',
+        foil: false,
+        nickname: String(world?.trainers?.guest?.mons?.mgabu?.nickname || '').trim().slice(0, 24),
       }
     }
     return { ...prev, world, entries }

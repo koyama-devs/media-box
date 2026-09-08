@@ -251,13 +251,31 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
         if (!restored) return
         if (
           me === 'hana'
-          && beforeSid === '172'
-          && String(restored.speciesId) === '25'
+          && (beforeSid === '172' || (beforeSid === '25' && Number(restored.level || 1) > beforeLv))
+          && ['25', '26'].includes(String(restored.speciesId))
+          && (beforeSid !== String(restored.speciesId) || Number(restored.level || 1) > beforeLv)
         ) {
           setToast({
             kind: 'ok',
-            line: 'ピカチュウがもどってきた！',
+            line: String(restored.speciesId) === '26' ? 'ライチュウがもどってきた！' : 'ピカチュウがもどってきた！',
             how: `Lv.${restored.level}`,
+            key: Date.now(),
+          })
+          return
+        }
+        if (
+          me === 'guest'
+          && ['4', '5', '6'].includes(beforeSid)
+          && ['5', '6'].includes(String(restored.speciesId))
+          && (
+            Number(restored.speciesId) > Number(beforeSid || 0)
+            || (Number(restored.level) || 1) > beforeLv
+          )
+        ) {
+          setToast({
+            kind: 'ok',
+            line: String(restored.speciesId) === '6' ? 'リザードンがもどってきた！' : 'リザードがもどってきた！',
+            how: `Lv.${restored.level}${restored.nickname ? ` · ${restored.nickname}` : ''}`,
             key: Date.now(),
           })
           return

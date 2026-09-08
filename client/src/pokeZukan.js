@@ -929,19 +929,30 @@ export function trainerOwnsFamily(trainer, speciesId) {
 }
 
 function preferredMon(a, b, preferId) {
+  // Dedupe must KEEP the more progressed form. Preferring unevolved
+  // (old care heuristic) caused Pikachu/Lizardo to collapse back to babies.
+  const sa = monProgressScore(a)
+  const sb = monProgressScore(b)
+  if (sa !== sb) return sa >= sb ? a : b
   if (preferId) {
     if (a.id === preferId) return a
     if (b.id === preferId) return b
   }
-  const aDone = monIsFullyEvolved(a)
-  const bDone = monIsFullyEvolved(b)
-  if (aDone !== bDone) return aDone ? b : a
   const an = Boolean(a?.nickname)
   const bn = Boolean(b?.nickname)
   if (an !== bn) return bn ? b : a
-  if ((a.level || 1) !== (b.level || 1)) return (a.level || 1) >= (b.level || 1) ? a : b
-  if ((a.bond || 0) !== (b.bond || 0)) return (a.bond || 0) >= (b.bond || 0) ? a : b
   return a.id <= b.id ? a : b
+}
+
+function monProgressScore(mon) {
+  if (!mon) return -1
+  return (
+    evoStage(mon.speciesId) * 1000
+    + (Number(mon.level) || 1) * 20
+    + (Number(mon.xp) || 0)
+    + (Number(mon.bond) || 0)
+    + (Array.isArray(mon.log) ? mon.log.length : 0)
+  )
 }
 
 function stablePartyOrder(partyOrder, mons) {
@@ -1094,107 +1105,158 @@ export function pokeWorldProgressScore(world) {
       ? w.trainers[role].mons
       : {}
     for (const mon of Object.values(mons)) {
-      score += (Number(mon?.level) || 1) * 20
-      score += Number(mon?.xp) || 0
-      score += Number(mon?.bond) || 0
-      score += (Array.isArray(mon?.log) ? mon.log.length : 0) * 3
-      score += evoStage(mon?.speciesId) * 80
+      score += monProgressScore(mon)
     }
   }
   score += Array.isArray(w.log) ? w.log.length : 0
   return score
 }
 
+function mergeTrainers(left, right) {
+  const a = left && typeof left === 'object' ? left : {}
+  const b = right && typeof right === 'object' ? right : {}
+  const monsA = a.mons && typeof a.mons === 'object' ? a.mons : {}
+  const monsB = b.mons && typeof b.mons === 'object' ? b.mons : {}
+  const combined = {}
+  for (const id of new Set([...Object.keys(monsA), ...Object.keys(monsB)])) {
+    if (monsA[id] && monsB[id]) {
+      combined[id] = monProgressScore(monsA[id]) >= monProgressScore(monsB[id])
+        ? monsA[id]
+        : monsB[id]
+    } else {
+      combined[id] = monsA[id] || monsB[id]
+    }
+  }
+  const partyOrder = [
+    ...(Array.isArray(a.partyOrder) ? a.partyOrder : []),
+    ...(Array.isArray(b.partyOrder) ? b.partyOrder : []),
+    ...Object.keys(combined),
+  ]
+  const deduped = dedupeTrainerMons(combined, a.activeId || b.activeId || '', partyOrder)
+  return {
+    activeId: deduped.partyOrder.includes(a.activeId)
+      ? a.activeId
+      : (deduped.partyOrder.includes(b.activeId) ? b.activeId : deduped.partyOrder[0] || ''),
+    coins: Math.max(Number(a.coins) || 0, Number(b.coins) || 0, 0),
+    lastActYmd: String(a.lastActYmd || b.lastActYmd || '').trim().slice(0, 12),
+    mons: deduped.mons,
+    partyOrder: deduped.partyOrder,
+    gifts: serializeCafeGifts([
+      ...(Array.isArray(a.gifts) ? a.gifts : []),
+      ...(Array.isArray(b.gifts) ? b.gifts : []),
+    ]),
+  }
+}
+
+/** Keep the richer form of every mon — never let a wiped starter overwrite progress. */
 export function pickRicherPokeWorld(next, prev) {
-  if (pokeWorldProgressScore(prev) > pokeWorldProgressScore(next)) return prev
-  return next
+  if (!prev) return next || emptyPokeWorld()
+  if (!next) return prev
+  const a = serializePokeWorld(next)
+  const b = serializePokeWorld(prev)
+  const log = serializeWorldLog([...(a.log || []), ...(b.log || [])])
+  return serializePokeWorld({
+    ...a,
+    hanaPlace: a.hanaPlace || b.hanaPlace,
+    guestPlace: a.guestPlace || b.guestPlace,
+    hanaPlaceAt: a.hanaPlaceAt || b.hanaPlaceAt,
+    guestPlaceAt: a.guestPlaceAt || b.guestPlaceAt,
+    trainers: {
+      hana: mergeTrainers(a.trainers.hana, b.trainers.hana),
+      guest: mergeTrainers(a.trainers.guest, b.trainers.guest),
+    },
+    log,
+  })
 }
 
 /**
- * Restore starters wiped by the season/emptyPokeWorld bug.
- * Hana: Pichu→Pikachu Lv.5+ (confirmed evolved before wipe).
- * Guest: Hitokage Lv.4+ and nickname オレンジ (confirmed before wipe).
+ * Restore wiped starters upward only. Never devolve Pikachu→Pichu or Lizardo→Hitokage.
  */
 export function healResetStarters(world, entries) {
   const next = serializePokeWorld(world)
   const srcEntries = entries && typeof entries === 'object' ? entries : {}
-  /** Guest Hitokage nickname lost in the wipe — restore katakana "orange". */
   const GUEST_HITOKAGE_NICK = 'オレンジ'
+
+  const bestSpeciesFromEvidence = (role, live) => {
+    const starterSpecies = String(WORLD_STARTER[role] || '')
+    const fam = evoFamily(starterSpecies)
+    let best = String(live?.speciesId || starterSpecies)
+    let bestStage = evoStage(best)
+    const consider = (sid) => {
+      const id = String(Number(sid) || '').trim()
+      if (!id || !fam.has(id)) return
+      const stage = evoStage(id)
+      if (stage > bestStage || (stage === bestStage && Number(id) > Number(best))) {
+        best = id
+        bestStage = stage
+      }
+    }
+    consider(live?.speciesId)
+    for (const id of fam) {
+      if (srcEntries[id]) consider(id)
+    }
+    for (const row of live?.log || []) {
+      if (row?.action === 'evolve' && row.note) consider(row.note)
+    }
+    for (const row of next.log || []) {
+      if (row?.by !== role) continue
+      if (row?.action === 'evolve' && row.note) consider(row.note)
+    }
+    // Known wipe: Hana already had Pikachu before blank Pichu docs.
+    if (role === 'hana' && bestStage < 1) consider('25')
+    return best
+  }
 
   for (const role of ['hana', 'guest']) {
     const starterSpecies = String(WORLD_STARTER[role] || '')
     const starterMonId = role === 'hana' ? 'mhana' : 'mgabu'
     const trainer = next.trainers[role]
-    const mon = trainer?.mons?.[starterMonId]
-    if (!mon) continue
-
-    // Nickname can be missing even after species/level were healed.
-    if (
-      role === 'guest'
-      && (String(mon.speciesId) === '4' || String(mon.speciesId) === starterSpecies)
-      && !String(mon.nickname || '').trim()
-    ) {
-      trainer.mons[starterMonId] = { ...mon, nickname: GUEST_HITOKAGE_NICK }
+    let mon = trainer?.mons?.[starterMonId]
+    if (!mon) {
+      // Starter slot missing after a bad write — reseed then upgrade from evidence.
+      const seeded = emptyMon(starterMonId, starterSpecies)
+      trainer.mons[starterMonId] = seeded
+      mon = seeded
+      if (!Array.isArray(trainer.partyOrder) || !trainer.partyOrder.includes(starterMonId)) {
+        trainer.partyOrder = [starterMonId, ...(trainer.partyOrder || [])].slice(0, WORLD_PARTY_MAX)
+      }
+      trainer.activeId = trainer.activeId || starterMonId
     }
 
     const live = trainer.mons[starterMonId]
-    if (String(live.speciesId) !== starterSpecies && !(role === 'guest' && String(live.speciesId) === '4')) {
-      // Already evolved away from starter base (e.g. Hana Pikachu) — still ok.
-      if (role === 'hana' && String(live.speciesId) === '25') continue
-      if (role === 'guest') {
-        // Ensure nick on Hitokage line forms if empty
-        if (!String(live.nickname || '').trim() && ['4', '5', '6'].includes(String(live.speciesId))) {
-          trainer.mons[starterMonId] = { ...live, nickname: GUEST_HITOKAGE_NICK }
-        }
-        continue
-      }
+    const best = bestSpeciesFromEvidence(role, live)
+    const liveStage = evoStage(live.speciesId)
+    const bestStage = evoStage(best)
+    // Absolute rule: never move to a lower evolution stage.
+    const speciesOut = bestStage >= liveStage ? best : String(live.speciesId)
+    let minLv = minLevelForSpecies(speciesOut)
+    if (role === 'guest' && ['4', '5', '6'].includes(String(speciesOut))) {
+      if (String(speciesOut) === '4') minLv = Math.max(minLv, 4)
     }
-    if (String(live.speciesId) !== starterSpecies) continue
-
-    const fam = evoFamily(starterSpecies)
-    let best = starterSpecies
-    let bestStage = 0
-    for (const id of fam) {
-      if (!srcEntries[id]) continue
-      const stage = evoStage(id)
-      if (stage > bestStage) {
-        best = String(id)
-        bestStage = stage
-      }
-    }
-    // Force Hana: wipe always left Pichu Lv.1 after she already had Pikachu.
-    if (role === 'hana' && bestStage < 1 && (Number(live.level) || 1) < 5) {
-      best = '25'
-      bestStage = 1
-    }
-
-    let minLv = bestStage >= 1 ? minLevelForSpecies(best) : 1
-    // Force Guest: Hitokage was already Lv.4 before the wipe.
-    if (role === 'guest' && String(best) === '4') {
-      minLv = Math.max(minLv, 4)
-    }
-    if (role === 'hana' && String(best) === '25') {
-      minLv = Math.max(minLv, 5)
-    }
+    if (role === 'hana' && String(speciesOut) === '25') minLv = Math.max(minLv, 5)
+    if (role === 'hana' && String(speciesOut) === '26') minLv = Math.max(minLv, 12)
 
     const curLv = Number(live.level) || 1
-    const needNick = role === 'guest' && !String(live.nickname || '').trim()
-    if (String(live.speciesId) === String(best) && curLv >= minLv && !needNick) continue
-    if (bestStage < 1 && role === 'hana') continue
-
     const nick = String(
       live.nickname
-      || srcEntries[best]?.nickname
-      || (role === 'guest' ? GUEST_HITOKAGE_NICK : '')
+      || srcEntries[speciesOut]?.nickname
+      || (role === 'guest' && ['4', '5', '6'].includes(String(speciesOut)) ? GUEST_HITOKAGE_NICK : '')
       || '',
     ).trim().slice(0, 16)
 
+    const needUpgrade = (
+      String(live.speciesId) !== String(speciesOut)
+      || curLv < minLv
+      || (role === 'guest' && ['4', '5', '6'].includes(String(speciesOut)) && !String(live.nickname || '').trim())
+    )
+    if (!needUpgrade) continue
+
     trainer.mons[starterMonId] = {
       ...live,
-      speciesId: String(best),
+      speciesId: String(speciesOut),
       level: Math.max(curLv, minLv),
       xp: Number(live.xp) || 0,
-      nickname: nick,
+      nickname: nick || live.nickname || '',
     }
     trainer.activeId = starterMonId
     if (!Array.isArray(trainer.partyOrder) || !trainer.partyOrder.includes(starterMonId)) {
@@ -1312,14 +1374,20 @@ function evoFor(mon, place) {
 }
 
 function maybeEvolveMon(mon, place) {
-  const evo = evoFor(mon, place)
-  if (!evo || mon.level < evo.level) return { mon, evolvedTo: '' }
-  if (evo.needBond && mon.bond < evo.needBond) return { mon, evolvedTo: '' }
-  const into = String(evo.into)
-  return {
-    mon: { ...mon, speciesId: into, mood: Math.max(mon.mood, 90) },
-    evolvedTo: into,
+  let current = mon
+  let evolvedTo = ''
+  // Chain: Hitokage Lv.12 → Lizardo → Lizardon in one care action when eligible.
+  for (let hop = 0; hop < 4; hop += 1) {
+    const evo = evoFor(current, place)
+    if (!evo || current.level < evo.level) break
+    if (evo.needBond && current.bond < evo.needBond) break
+    const into = String(evo.into)
+    // Never allow a "evolution" that lowers stage (defensive).
+    if (evoStage(into) < evoStage(current.speciesId)) break
+    evolvedTo = into
+    current = { ...current, speciesId: into, mood: Math.max(current.mood, 90) }
   }
+  return { mon: current, evolvedTo }
 }
 
 export function worldRole(role) {
