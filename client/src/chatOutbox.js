@@ -85,8 +85,8 @@ export function outboxEntryToLocalMessage(entry) {
   return {
     id: entry.clientId,
     clientId: entry.clientId,
-    pending: false,
-    sendFailed: true,
+    pending: true,
+    sendFailed: false,
     role: sender,
     sender,
     text: entry.text,

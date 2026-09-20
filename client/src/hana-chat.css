@@ -6061,7 +6061,13 @@ body.hana-chat-scroll-lock #root {
   border: 1px solid rgba(255, 248, 240, 0.16);
   background: rgba(255, 248, 240, 0.06);
   user-select: none;
-  pointer-events: none;
+  cursor: pointer;
+}
+
+button.hana-chat-poke-party-slot {
+  appearance: none;
+  font: inherit;
+  color: inherit;
 }
 
 .hana-chat-poke-party-slot.is-on {
@@ -6071,9 +6077,13 @@ body.hana-chat-scroll-lock #root {
 }
 
 .hana-chat-poke-party-slot.is-done {
-  opacity: 0.72;
+  opacity: 0.85;
   border-color: rgba(255, 220, 120, 0.45);
   background: rgba(255, 220, 120, 0.1);
+}
+
+.hana-chat-poke-party-slot.is-done.is-on {
+  opacity: 1;
 }
 
 .hana-chat-poke-party button {

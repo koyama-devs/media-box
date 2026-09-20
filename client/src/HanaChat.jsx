@@ -1891,8 +1891,14 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
 
   useEffect(() => {
     const onOnline = () => {
-      const failed = (hanaMessages || []).filter((m) => m?.sendFailed)
-      for (const message of failed) {
+      const retryQueue = (hanaMessages || []).filter((m) => {
+        if (!m) return false
+        const clientId = String(m.clientId || m.id || '')
+        if (!clientId) return false
+        if (sendInFlightRef.current.has(clientId)) return false
+        return Boolean(m.sendFailed || (m.pending && !m.serverId))
+      })
+      for (const message of retryQueue) {
         void retryFailedSendRef.current(message.clientId || message.id)
       }
     }
@@ -4912,7 +4918,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     const mid = String(messageId || '').trim()
     if (!mid) return
     const local = (hanaMessages || []).find((m) => m.id === mid || m.clientId === mid)
-    if (!local?.sendFailed) return
+    const shouldRetry = Boolean(local?.sendFailed || (local?.pending && !local?.serverId))
+    if (!shouldRetry) return
     const clientId = String(local.clientId || local.id || '')
     if (!clientId) return
 

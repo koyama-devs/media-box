@@ -3,8 +3,8 @@ import { createRoot } from 'react-dom/client'
 import AdminApp from './AdminApp.jsx'
 import App from './App.jsx'
 import { prepareAppLaunch } from './appUpdate.js'
-import { bootstrapSiteTheme } from './siteTheme.js'
 import './index.css'
+import { bootstrapSiteTheme } from './siteTheme.js'
 
 function isAdminPath() {
   const path = window.location.pathname.replace(/\/+$/, '') || '/'
@@ -13,13 +13,18 @@ function isAdminPath() {
 
 async function boot() {
   const rootEl = document.getElementById('root')
-  if (rootEl && !rootEl.dataset.booting) {
+  if (rootEl) {
     rootEl.dataset.booting = '1'
-    rootEl.textContent = '更新を確認中…'
+    rootEl.textContent = ''
+    rootEl.style.visibility = 'hidden'
   }
 
   bootstrapSiteTheme()
   await prepareAppLaunch()
+
+  if (rootEl) {
+    rootEl.style.visibility = ''
+  }
 
   createRoot(rootEl).render(
     <StrictMode>

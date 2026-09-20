@@ -475,6 +475,10 @@ export function binderProgress(entries) {
 /** Village world: each trainer has their own party. */
 export const WORLD_VER = 2
 export const WORLD_SEASON = 'hana-gabu-1'
+/**
+ * Max party size. Fully evolved partners are NEVER removed or replaced —
+ * adopting appends a new mon beside them (up to this cap).
+ */
 export const WORLD_PARTY_MAX = 3
 
 export function monIsFullyEvolved(mon) {
@@ -482,23 +486,32 @@ export function monIsFullyEvolved(mon) {
   return !WORLD_EVO[String(mon.speciesId)]
 }
 
+/**
+ * A trainer can append another partner whenever there is room in the party.
+ * Maxed or fully evolved mons stay in the roster and keep leveling normally,
+ * they do not block later adoptions.
+ */
 export function trainerCanAdopt(trainer) {
   const mons = Object.values(trainer?.mons || {})
-  if (mons.length === 0) return true
   if (mons.length >= WORLD_PARTY_MAX) return false
-  return mons.every((m) => monIsFullyEvolved(m))
+  return true
 }
 
-/** First party slot that is not at final evolution — only this mon can be raised. */
+/**
+ * Mon currently being raised: the selected party member (loyalty — final evo still levels),
+ * else the first mid-evolution mon, else the first party slot.
+ */
 export function trainerTrainableMonId(trainer) {
   const order = Array.isArray(trainer?.partyOrder) && trainer.partyOrder.length
     ? trainer.partyOrder
     : Object.keys(trainer?.mons || {})
+  const activeId = String(trainer?.activeId || '').trim()
+  if (activeId && trainer?.mons?.[activeId]) return activeId
   for (const id of order) {
     const mon = trainer?.mons?.[id]
     if (mon && !monIsFullyEvolved(mon)) return id
   }
-  return order[order.length - 1] || String(trainer?.activeId || '').trim()
+  return order[0] || ''
 }
 
 function careMonForTrainer(trainer) {
@@ -863,9 +876,10 @@ function serializeMon(raw, id) {
   const src = raw && typeof raw === 'object' ? raw : {}
   const mid = String(id || src.id || '').trim().slice(0, 20)
   const kind = String(src.sleepKind || '').trim()
+  const speciesId = String(Number(src.speciesId) || '').trim()
   return {
     id: mid,
-    speciesId: String(Number(src.speciesId) || '').trim(),
+    speciesId,
     nickname: String(src.nickname || '').trim().slice(0, 16),
     hunger: clampStat(src.hunger, 78),
     mood: clampStat(src.mood, 80),
@@ -883,8 +897,26 @@ function serializeMon(raw, id) {
     careXpYmd: String(src.careXpYmd || '').trim().slice(0, 12),
     careXpActs: serializeCareXpActs(src.careXpActs),
     careXpEarned: Math.max(0, Math.min(999, Math.round(Number(src.careXpEarned) || 0))),
-    log: serializeWorldLog(src.log),
+    log: filterOwnMonLog(mid, speciesId, src.log),
   }
+}
+
+/** Keep only this mon's diary — drop another partner's evolve/care rows that leaked in. */
+function filterOwnMonLog(monId, speciesId, rawLog) {
+  const fam = evoFamily(speciesId)
+  return serializeWorldLog(rawLog).filter((row) => {
+    const mid = String(row.monId || '').trim()
+    if (mid && mid !== monId) return false
+    if (row.action === 'evolve' && row.note) {
+      const into = String(Number(row.note) || '').trim()
+      if (into && fam.size > 0 && !fam.has(into)) return false
+    }
+    if (row.action === 'adopt' && row.note) {
+      const sid = String(Number(row.note) || '').trim()
+      if (sid && fam.size > 0 && !fam.has(sid)) return false
+    }
+    return true
+  })
 }
 
 function serializeCareXpActs(raw) {
@@ -971,8 +1003,8 @@ function stablePartyOrder(partyOrder, mons) {
 }
 
 /**
- * Care order is sequential, but we must NEVER delete party members.
- * Dropping later slots deleted Pikachu when Zenigame was ordered first.
+ * Keep every party member forever. Never delete because another is mid-evo
+ * or because a new partner was adopted — adopt is append-only.
  */
 function enforceSequentialParty(mons, partyOrder) {
   const order = stablePartyOrder(partyOrder, mons)
@@ -987,18 +1019,23 @@ function enforceSequentialParty(mons, partyOrder) {
   return { mons: kept, partyOrder: stablePartyOrder(order, kept) }
 }
 
+/**
+ * Keep each valid party member distinct. The same evolution line may still be in the party
+ * as separate companions (starter + evolved form + later adopt), so dedupe by species family
+ * would incorrectly erase the older pet and block any new picks.
+ */
 function dedupeTrainerMons(mons, preferId, partyOrder) {
   const all = Object.values(mons || {})
   const kept = {}
-  const winnerByFam = new Map()
+  const winnerBySpecies = new Map()
   for (const mon of all) {
-    const fam = evoFamily(mon.speciesId)
-    const key = fam.size > 0 ? [...fam].sort().join('-') : mon.id
-    const prev = winnerByFam.get(key)
+    const sid = String(mon?.speciesId || '').trim()
+    if (!sid) continue
+    const prev = winnerBySpecies.get(sid)
     const win = prev ? preferredMon(prev, mon, preferId) : mon
-    winnerByFam.set(key, win)
+    winnerBySpecies.set(sid, win)
   }
-  for (const mon of winnerByFam.values()) kept[mon.id] = mon
+  for (const mon of winnerBySpecies.values()) kept[mon.id] = mon
   const order = stablePartyOrder(partyOrder, kept)
   const ordered = {}
   for (const id of order) ordered[id] = kept[id]
@@ -1023,8 +1060,13 @@ function normalizeTrainer(raw) {
     partyOrder: sequential.partyOrder,
     activeId: preCareId,
   })
+  // Keep selected party member for viewing fully-evo pals; else focus the one still raising.
+  const preferred = String(src.activeId || '').trim()
+  const activeId = (preferred && sequential.mons[preferred])
+    ? preferred
+    : (careId || sequential.partyOrder[0] || '')
   return {
-    activeId: careId || sequential.partyOrder[0] || '',
+    activeId,
     mons: sequential.mons,
     partyOrder: sequential.partyOrder,
   }
@@ -1320,13 +1362,14 @@ export function healResetStarters(world, entries) {
 }
 
 function seedLegacyMonLog(trainer, worldLog, role) {
-  const mine = (worldLog || []).filter((row) => !row.by || row.by === role)
+  // Only this trainer's tagged rows — never broadcast untagged world events onto every mon.
+  const mine = (worldLog || []).filter((row) => row.by === role && String(row.monId || '').trim())
   if (!mine.length) return trainer
   const any = Object.values(trainer.mons || {}).some((mon) => mon.log?.length)
   if (any) return trainer
   const byMon = {}
   for (const row of mine) {
-    const id = row.monId || trainer.activeId
+    const id = String(row.monId || '').trim()
     if (!trainer.mons[id]) continue
     if (!byMon[id]) byMon[id] = []
     byMon[id].push({ ...row, monId: id })
@@ -1334,7 +1377,10 @@ function seedLegacyMonLog(trainer, worldLog, role) {
   if (!Object.keys(byMon).length) return trainer
   const mons = { ...trainer.mons }
   for (const [id, rows] of Object.entries(byMon)) {
-    mons[id] = { ...mons[id], log: serializeWorldLog(rows) }
+    mons[id] = {
+      ...mons[id],
+      log: filterOwnMonLog(id, mons[id].speciesId, rows),
+    }
   }
   return { ...trainer, mons }
 }
@@ -1451,14 +1497,19 @@ export function worldTrainer(world, role) {
   return serializePokeWorld(world).trainers[worldRole(role)]
 }
 
+/**
+ * Stage mon: selected party member, else the one still being raised.
+ * Fully evolved partners stay forever — tap a slot to view; adopt only appends.
+ */
 export function worldActiveMon(world, role) {
   const trainer = worldTrainer(world, role)
-  const who = worldRole(role)
-  const starterId = who === 'hana' ? 'mhana' : 'mgabu'
-  // Main buddy is always the starter slot — never a found Zenigame.
-  if (trainer?.mons?.[starterId]) return trainer.mons[starterId]
+  if (!trainer?.mons) return null
+  const activeId = String(trainer.activeId || '').trim()
+  if (activeId && trainer.mons[activeId]) return trainer.mons[activeId]
   const { mon } = careMonForTrainer(trainer)
-  return mon
+  if (mon) return mon
+  const firstId = String(trainer.partyOrder?.[0] || '').trim()
+  return (firstId && trainer.mons[firstId]) || null
 }
 
 export function worldPartyList(world, role) {
@@ -1611,7 +1662,7 @@ export function worldEvoHint(mon, place) {
   const evo = evoFor(mon, place)
   const prog = worldXpProgress(mon)
   const xpBit = `けいけん ${prog.xp}/${prog.need}`
-  if (!evo) return `これ以上はしんかしない・${xpBit}`
+  if (!evo) return `さいしゅうしんかでもレベルは上がる・${xpBit}`
   if (Number(mon.speciesId) === 133) {
     return `Lv.${evo.level}・今の場所だと${pokeNameJa(evo.into)}・${xpBit}`
   }
@@ -1781,17 +1832,19 @@ export function applyPokeWorldAdopt(world, { role, speciesId, now } = {}) {
     throw new Error('なかまは3匹まで。')
   }
   if (!trainerCanAdopt(trainer)) {
-    throw new Error('今のなかまをさいしゅうしんかさせよう。')
+    throw new Error('なかまは3匹まで。')
   }
   if (trainerOwnsFamily(trainer, sid)) {
     throw new Error('同じポケモンはすでにいるよ。')
   }
+  // Append only — never replace or delete existing partners (incl. fully evolved).
   const id = `m${t.getTime().toString(36)}`
   const adoptEntry = { at: t.toISOString(), by: who, action: 'adopt', place: 'home', note: sid }
   const mon = logOnMon({
     ...emptyMon(id, sid),
     lastTickIso: t.toISOString(),
   }, adoptEntry)
+  const keptMons = { ...trainer.mons, [id]: mon }
   return serializePokeWorld({
     ...base,
     trainers: {
@@ -1799,26 +1852,29 @@ export function applyPokeWorldAdopt(world, { role, speciesId, now } = {}) {
       [who]: {
         ...trainer,
         activeId: id,
-        mons: { ...trainer.mons, [id]: mon },
-        partyOrder: [...(trainer.partyOrder || Object.keys(trainer.mons)), id]
-          .filter((monId, i, arr) => arr.indexOf(monId) === i)
-          .slice(0, WORLD_PARTY_MAX),
+        mons: keptMons,
+        partyOrder: stablePartyOrder(
+          [...(trainer.partyOrder || Object.keys(trainer.mons)), id],
+          keptMons,
+        ),
       },
     },
     log: pushWorldLog(base, adoptEntry),
   })
 }
 
+/** Select a party member to view (does not delete or replace anyone). */
 export function applyPokeWorldSelect(world, { role, monId } = {}) {
   const who = worldRole(role)
   const next = serializePokeWorld(world)
   const trainer = next.trainers[who]
-  const careId = trainerTrainableMonId(trainer)
+  const id = String(monId || '').trim()
+  if (!id || !trainer.mons[id]) return next
   return serializePokeWorld({
     ...next,
     trainers: {
       ...next.trainers,
-      [who]: { ...trainer, activeId: careId },
+      [who]: { ...trainer, activeId: id },
     },
   })
 }
@@ -1827,7 +1883,9 @@ export function applyPokeWorldNickname(world, { role, nickname } = {}) {
   const who = worldRole(role)
   const next = serializePokeWorld(world)
   const trainer = next.trainers[who]
-  const { id: careId, mon } = careMonForTrainer(trainer)
+  const activeId = String(trainer.activeId || '').trim()
+  const mon = (activeId && trainer.mons[activeId])
+    || careMonForTrainer(trainer).mon
   if (!mon) return next
   return serializePokeWorld({
     ...next,
@@ -1835,7 +1893,7 @@ export function applyPokeWorldNickname(world, { role, nickname } = {}) {
       ...next.trainers,
       [who]: {
         ...trainer,
-        activeId: careId,
+        activeId: mon.id,
         mons: {
           ...trainer.mons,
           [mon.id]: { ...mon, nickname: String(nickname || '').trim().slice(0, 16) },

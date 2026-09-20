@@ -1,6 +1,141 @@
 {
-  "updatedAt": "2026-09-06T01:39:59.159Z",
+  "updatedAt": "2026-09-20T11:34:25.407Z",
   "releases": [
+    {
+      "version": "mu9qlzvd-ytg1fj",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-20T11:33:02.261Z",
+      "previousVersion": "mu9p754f-eohwd6",
+      "previousHostingVersionId": "f09308f73f57609a",
+      "hostingVersionId": "0872b8e9ab6d17d4",
+      "recordedAt": "2026-09-20T11:33:03.518Z"
+    },
+    {
+      "version": "mu9p754f-eohwd6",
+      "notes": "チャットヘッダー修正：夏まつりバナーの重なりを解消、オンライン／オフライン文字を削除（アバターの点のみ）。",
+      "builtAt": "2026-09-20T10:53:21.616Z",
+      "previousVersion": "mu9ofgp1-jyelga",
+      "previousHostingVersionId": "cc8ab45e1bfee84b",
+      "hostingVersionId": "f09308f73f57609a",
+      "recordedAt": "2026-09-20T10:53:21.867Z"
+    },
+    {
+      "version": "mu9ofgp1-jyelga",
+      "notes": "チャットヘッダー修正：夏まつりバナーの重なりを解消、オンライン／オフライン文字を削除（アバターの点のみ）。",
+      "builtAt": "2026-09-20T10:31:51.609Z",
+      "previousVersion": "mu9nonzw-sz4sso",
+      "previousHostingVersionId": "af98a67ca11bb03a",
+      "hostingVersionId": "cc8ab45e1bfee84b",
+      "recordedAt": "2026-09-20T10:31:51.931Z"
+    },
+    {
+      "version": "mu9nonzw-sz4sso",
+      "notes": "チャットヘッダー修正：夏まつりバナーの重なりを解消、オンライン／オフライン文字を削除（アバターの点のみ）。",
+      "builtAt": "2026-09-20T10:10:59.546Z",
+      "previousVersion": "mu9n3785-3a10kv",
+      "previousHostingVersionId": "e5d210799fc84d7c",
+      "hostingVersionId": "af98a67ca11bb03a",
+      "recordedAt": "2026-09-20T10:10:59.690Z"
+    },
+    {
+      "version": "mu9n3785-3a10kv",
+      "notes": "チャットヘッダー修正：夏まつりバナーの重なりを解消、オンライン／オフライン文字を削除（アバターの点のみ）。",
+      "builtAt": "2026-09-20T09:54:21.827Z",
+      "previousVersion": "mu9mtyaw-di59u1",
+      "previousHostingVersionId": "fe99b8f19b006a31",
+      "hostingVersionId": "e5d210799fc84d7c",
+      "recordedAt": "2026-09-20T09:54:22.206Z"
+    },
+    {
+      "version": "mu9mtyaw-di59u1",
+      "notes": "チャットヘッダー修正：夏まつりバナーの重なりを解消、オンライン／オフライン文字を削除（アバターの点のみ）。",
+      "builtAt": "2026-09-20T09:47:09.250Z",
+      "previousVersion": "mu9mg1lc-yzajyx",
+      "previousHostingVersionId": "a67a4fb8caf5f972",
+      "hostingVersionId": "fe99b8f19b006a31",
+      "recordedAt": "2026-09-20T09:47:09.871Z"
+    },
+    {
+      "version": "mu9mg1lc-yzajyx",
+      "notes": "チャットヘッダー修正：夏まつりバナーの重なりを解消、オンライン／オフライン文字を削除（アバターの点のみ）。",
+      "builtAt": "2026-09-20T09:36:17.247Z",
+      "previousVersion": "mu9ls2l2-s9e3n5",
+      "previousHostingVersionId": "cd21c19a4140306d",
+      "hostingVersionId": "a67a4fb8caf5f972",
+      "recordedAt": "2026-09-20T09:36:17.422Z"
+    },
+    {
+      "version": "mu9ls2l2-s9e3n5",
+      "notes": "チャットヘッダー修正：夏まつりバナーの重なりを解消、オンライン／オフライン文字を削除（アバターの点のみ）。",
+      "builtAt": "2026-09-20T09:17:42.621Z",
+      "previousVersion": "mu9kvjoh-ixatzz",
+      "previousHostingVersionId": "43834fd0f0990112",
+      "hostingVersionId": "cd21c19a4140306d",
+      "recordedAt": "2026-09-20T09:17:43.288Z"
+    },
+    {
+      "version": "mu9kvjoh-ixatzz",
+      "notes": "チャットヘッダー修正：夏まつりバナーの重なりを解消、オンライン／オフライン文字を削除（アバターの点のみ）。",
+      "builtAt": "2026-09-20T08:52:27.031Z",
+      "previousVersion": "mts0v3ai-r54moc",
+      "previousHostingVersionId": "ca35196fd9a2c609",
+      "hostingVersionId": "43834fd0f0990112",
+      "recordedAt": "2026-09-20T08:52:28.045Z"
+    },
+    {
+      "version": "mts0v3ai-r54moc",
+      "notes": "Per-mon logs only; strip leaked evolve rows; status tab shows that mon diary",
+      "builtAt": "2026-09-08T02:00:42.714Z",
+      "previousVersion": "mts09kj3-v29k2f",
+      "previousHostingVersionId": "d4f8a08677974650",
+      "hostingVersionId": "ca35196fd9a2c609",
+      "recordedAt": "2026-09-08T02:00:48.826Z"
+    },
+    {
+      "version": "mts09kj3-v29k2f",
+      "notes": "Loyalty: fully evolved still gain XP/levels; care follows selected mon",
+      "builtAt": "2026-09-08T01:43:26.164Z",
+      "previousVersion": "mtrzx84a-d77br3",
+      "previousHostingVersionId": "c008aa4a8969ad88",
+      "hostingVersionId": "d4f8a08677974650",
+      "recordedAt": "2026-09-08T01:43:27.651Z"
+    },
+    {
+      "version": "mtrzx84a-d77br3",
+      "notes": "Party forever: fully evolved stay; adopt appends only; tap slot to view",
+      "builtAt": "2026-09-08T01:33:47.236Z",
+      "previousVersion": "mtrzf0d5-oz5j9h",
+      "previousHostingVersionId": "72d6cd6aa45781c0",
+      "hostingVersionId": "c008aa4a8969ad88",
+      "recordedAt": "2026-09-08T01:33:47.871Z"
+    },
+    {
+      "version": "mtrzf0d5-oz5j9h",
+      "notes": "Force restore Pikachu; Zenigame cannot own starter slot",
+      "builtAt": "2026-09-08T01:19:47.730Z",
+      "previousVersion": "mtryz3f1-rl8ia5",
+      "previousHostingVersionId": "8d425c5e3f35c2d2",
+      "hostingVersionId": "72d6cd6aa45781c0",
+      "recordedAt": "2026-09-08T01:19:48.372Z"
+    },
+    {
+      "version": "mtryz3f1-rl8ia5",
+      "notes": "Fix Pikachu wiped by Zenigame party order",
+      "builtAt": "2026-09-08T01:07:13.433Z",
+      "previousVersion": "mtrykbu2-mj9bl8",
+      "previousHostingVersionId": "0d0fae59bbd586ee",
+      "hostingVersionId": "8d425c5e3f35c2d2",
+      "recordedAt": "2026-09-08T01:07:13.800Z"
+    },
+    {
+      "version": "mtrykbu2-mj9bl8",
+      "notes": "Never devolve Pikachu or Lizardo; shared poke world",
+      "builtAt": "2026-09-08T00:55:41.233Z",
+      "previousVersion": "mtp586j8-x3hqvr",
+      "previousHostingVersionId": "666a4e6b4d8dfad0",
+      "hostingVersionId": "0d0fae59bbd586ee",
+      "recordedAt": "2026-09-08T00:55:41.367Z"
+    },
     {
       "version": "mtp586j8-x3hqvr",
       "notes": "Fix stuck send: composer no longer freezes, failed bubbles retry after reload",
@@ -225,51 +360,6 @@
       "previousHostingVersionId": "6a6cadbef9bc1898",
       "hostingVersionId": "9dfc0caf63b8c0be",
       "recordedAt": "2026-08-02T10:51:47.969Z"
-    },
-    {
-      "version": "msbmrzqc-kyi46z",
-      "notes": "チャット bubble のリンク検出を復元。\r\n- URL をタップで開く\r\n- 長押し / 右クリックでリンクをコピー\r\n- HanaChat 側で renderChatTextWithLinks が外れていた不具合を修正",
-      "builtAt": "2026-08-02T10:01:44.917Z",
-      "previousVersion": "msbmm607-fi85w8",
-      "previousHostingVersionId": "61b3163bc2c899b8",
-      "hostingVersionId": "6a6cadbef9bc1898",
-      "recordedAt": "2026-08-02T10:01:45.458Z"
-    },
-    {
-      "version": "msbmm607-fi85w8",
-      "notes": "release-notes.txt",
-      "builtAt": "2026-08-02T09:57:17.040Z",
-      "previousVersion": "msbmhm2c-r14bpt",
-      "previousHostingVersionId": "a3484a6801c89403",
-      "hostingVersionId": "61b3163bc2c899b8",
-      "recordedAt": "2026-08-02T09:57:18.441Z"
-    },
-    {
-      "version": "msbmhm2c-r14bpt",
-      "notes": "release-notes.txt",
-      "builtAt": "2026-08-02T09:53:46.768Z",
-      "previousVersion": "msbm3m82-3p5h6d",
-      "previousHostingVersionId": "acf0b1253f685d28",
-      "hostingVersionId": "e5c265e448af00b1",
-      "recordedAt": "2026-08-02T09:53:49.614Z"
-    },
-    {
-      "version": "msbm3m82-3p5h6d",
-      "notes": "チャット bubble のリンク検出を復元（タップで開く・長押しでコピー）",
-      "builtAt": "2026-08-02T09:42:51.796Z",
-      "previousVersion": "msbkkyj5-l192dq",
-      "previousHostingVersionId": "ceac000249ad213d",
-      "hostingVersionId": "acf0b1253f685d28",
-      "recordedAt": "2026-08-02T09:42:52.647Z"
-    },
-    {
-      "version": "msbch60d-mle4sf",
-      "notes": "ロールバック手順とAdminリリースノート（履歴・直前版への復帰）を追加",
-      "builtAt": "2026-08-02T05:13:37.219Z",
-      "previousVersion": "msbavj9k-rjzd0s",
-      "previousHostingVersionId": null,
-      "hostingVersionId": null,
-      "recordedAt": "2026-08-02T05:13:42.513Z"
     }
   ]
 }

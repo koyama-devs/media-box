@@ -7,6 +7,7 @@ import {
     duoActPokeWorld,
     nicknamePokeWorldPartner,
     orderPokeCafe,
+    selectPokeWorldMon,
     serializePokeZukan,
     syncPokeWorld,
     visitPokeWorldPlace,
@@ -71,6 +72,7 @@ function MonStatusBlock({
   sleepKindLabel,
   evoHint,
   coins = null,
+  logNames = null,
 }) {
   if (!mon) {
     return <p className="hana-chat-poke-hint">まだポケモンがいないよ。</p>
@@ -100,6 +102,16 @@ function MonStatusBlock({
         </p>
       ) : null}
       {evoHint ? <p className="hana-chat-poke-hint">{evoHint}</p> : null}
+      {mon.log?.length ? (
+        <ol className="hana-chat-poke-log" aria-label={`${displayName}のログ`}>
+          {mon.log.slice(0, 12).map((row, i) => (
+            <li key={`${row.at}-${row.action}-${i}`} data-action={row.action}>
+              <span className="poke-log-icon">{WORLD_LOG_ICON[row.action] || '▸'}</span>
+              <span className="poke-log-body">{worldLogLine(row, logNames || undefined)}</span>
+            </li>
+          ))}
+        </ol>
+      ) : null}
     </div>
   )
 }
@@ -531,6 +543,20 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
   }
 
   const trainId = trainerTrainableMonId(trainer)
+  const selectedId = String(mon?.id || trainer?.activeId || '').trim()
+
+  const selectPartyMon = async (monId) => {
+    const id = String(monId || '').trim()
+    if (!id || busy || id === selectedId) return
+    setBusy(true)
+    try {
+      await selectPokeWorldMon(threadId, { role: me, monId: id })
+    } catch (err) {
+      fail(err)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const saveNick = async () => {
     if (busy) return
@@ -673,8 +699,8 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
             {!mon
               ? `${myName}のポケモンを選ぶ。相手とは別々。`
               : trainerCanAdopt(trainer)
-                ? `もう1匹迎える（${party.length}/${WORLD_PARTY_MAX}）`
-                : '今のなかまを最終進化させたら次のなかまを迎えられるよ。'}
+                ? `もう1匹追加する（${party.length}/${WORLD_PARTY_MAX}）。今のなかまを続けて育てながら、別のなかまも迎えられるよ。`
+                : 'なかまは3匹まで。今いるポケモンはそのまま育てながら、別のなかまも順番に迎えられるよ。'}
           </p>
           <ul className="hana-chat-poke-starters">
             {WORLD_STARTERS.map((id) => {
@@ -784,7 +810,7 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
                     <li key={id}>
                       <button
                         type="button"
-                        disabled={Boolean(adopting) || party.length >= WORLD_PARTY_MAX || trainerOwnsFamily(trainer, id)}
+                        disabled={Boolean(adopting) || !trainerCanAdopt(trainer) || trainerOwnsFamily(trainer, id)}
                         onClick={() => { void adopt(id) }}
                       >
                         <PokeSprite id={id} />
@@ -973,21 +999,32 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
               <ul className="hana-chat-poke-party" aria-label="なかま">
                 {party.map((row) => {
                   const isCare = row.id === trainId
+                  const isSelected = row.id === selectedId
                   const done = monIsFullyEvolved(row)
+                  const label = done
+                    ? `${pokeNameJa(row.speciesId)}（完成・タップでそだて）`
+                    : isCare || isSelected
+                      ? `${pokeNameJa(row.speciesId)}（そだて中）`
+                      : pokeNameJa(row.speciesId)
                   return (
                     <li key={row.id}>
-                      <span
-                        className={`hana-chat-poke-party-slot${isCare ? ' is-on' : ''}${done ? ' is-done' : ''}`}
-                        title={done ? `${pokeNameJa(row.speciesId)}（完成）` : pokeNameJa(row.speciesId)}
+                      <button
+                        type="button"
+                        className={`hana-chat-poke-party-slot${isSelected ? ' is-on' : ''}${done ? ' is-done' : ''}`}
+                        title={label}
+                        aria-label={label}
+                        aria-pressed={isSelected}
+                        disabled={busy}
+                        onClick={() => { void selectPartyMon(row.id) }}
                       >
                         <PokeSprite id={row.speciesId} />
-                      </span>
+                      </button>
                     </li>
                   )
                 })}
                 {party.length < WORLD_PARTY_MAX && trainerCanAdopt(trainer) ? (
                   <li>
-                    <button type="button" className="is-add" aria-label="ポケモンを迎える" onClick={() => setView('pick')}>+</button>
+                    <button type="button" className="is-add" aria-label="ポケモンを追加する" onClick={() => setView('pick')}>+</button>
                   </li>
                 ) : null}
               </ul>
@@ -1022,6 +1059,7 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
                   sleepKindLabel={sleepKindLabel}
                   evoHint={worldEvoHint(mon, myPlace)}
                   coins={trainer.coins}
+                  logNames={names}
                 />
               ) : (
                 <MonStatusBlock
@@ -1036,19 +1074,9 @@ const ChatPokeZukan = memo(function ChatPokeZukan({
                   }
                   evoHint={worldEvoHint(theirMon, theirPlace)}
                   coins={worldTrainer(world, them).coins}
+                  logNames={names}
                 />
               )}
-
-              {mon.log?.length ? (
-                <ol className="hana-chat-poke-log">
-                  {mon.log.slice(0, 12).map((row, i) => (
-                    <li key={`${row.at}-${row.action}-${i}`} data-action={row.action}>
-                      <span className="poke-log-icon">{WORLD_LOG_ICON[row.action] || '▸'}</span>
-                      <span className="poke-log-body">{worldLogLine(row, names)}</span>
-                    </li>
-                  ))}
-                </ol>
-              ) : null}
             </>
           )}
         </>

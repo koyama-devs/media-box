@@ -1,67 +1,67 @@
 // Firebase initialization — Firestore + Auth + Storage (large PDFs)
 import { initializeApp } from 'firebase/app'
 import {
-    getAuth,
-    getRedirectResult,
-    GoogleAuthProvider,
-    onAuthStateChanged,
-    signInWithEmailAndPassword,
-    signInWithPopup,
-    signInWithRedirect,
-    signOut,
+  getAuth,
+  getRedirectResult,
+  GoogleAuthProvider,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signInWithRedirect,
+  signOut,
 } from 'firebase/auth'
 import {
-    addDoc,
-    collection,
-    deleteDoc,
-    doc,
-    getDoc,
-    getDocs,
-    getFirestore,
-    increment,
-    initializeFirestore,
-    limit,
-    onSnapshot,
-    orderBy,
-    query,
-    runTransaction,
-    serverTimestamp,
-    setDoc,
-    startAfter,
-    updateDoc,
-    where,
-    writeBatch,
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  getFirestore,
+  increment,
+  initializeFirestore,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  runTransaction,
+  serverTimestamp,
+  setDoc,
+  startAfter,
+  updateDoc,
+  where,
+  writeBatch,
 } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions'
 import {
-    deleteObject,
-    getBlob,
-    getBytes,
-    getDownloadURL,
-    getStorage,
-    ref as storageRef,
-    uploadBytes,
-    uploadBytesResumable,
+  deleteObject,
+  getBlob,
+  getBytes,
+  getDownloadURL,
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  uploadBytesResumable,
 } from 'firebase/storage'
 import { collectAccessLogPayload } from './accessLog'
 import {
-    applyPokeWorldAction,
-    applyPokeWorldAdopt,
-    applyPokeWorldCafeClaim,
-    applyPokeWorldCafeOrder,
-    applyPokeWorldDuoAction,
-    applyPokeWorldNickname,
-    applyPokeWorldSelect,
-    applyPokeWorldVisit,
-    applyPokeWorldWake,
-    healResetStarters,
-    pickRicherPokeWorld,
-    pickWorldFindId,
-    pokeWorldProgressScore,
-    serializePokeWorld,
-    tokyoZukanYmd,
-    worldDuoCared,
-    worldRole
+  applyPokeWorldAction,
+  applyPokeWorldAdopt,
+  applyPokeWorldCafeClaim,
+  applyPokeWorldCafeOrder,
+  applyPokeWorldDuoAction,
+  applyPokeWorldNickname,
+  applyPokeWorldSelect,
+  applyPokeWorldVisit,
+  applyPokeWorldWake,
+  healResetStarters,
+  pickRicherPokeWorld,
+  pickWorldFindId,
+  pokeWorldProgressScore,
+  serializePokeWorld,
+  tokyoZukanYmd,
+  worldDuoCared,
+  worldRole
 } from './pokeZukan'
 
 const firebaseConfig = {
@@ -202,6 +202,17 @@ export function resolveAccountKey(keyOrPass = '') {
   if (live?.key) return live.key
   if (GUEST_PROFILES[needle]?.key) return GUEST_PROFILES[needle].key
   return needle
+}
+
+function getLegacyAvatarProfileKeys(profileId = '') {
+  const candidates = [
+    normalizeAccountKey(profileId),
+    normalizeAccountKey(resolveAccountKey(profileId)),
+    'gabusan',
+    'gabu',
+    'gabriel',
+  ]
+  return [...new Set(candidates.filter(Boolean))]
 }
 
 export function isValidAccountKey(value) {
@@ -519,20 +530,28 @@ function avatarCacheKey(profileId) {
 const AVATAR_PALETTE = ['#c45c4a', '#d97706', '#059669', '#2563eb', '#7c3aed', '#db2777']
 
 export function getCachedAvatarUrl(profileId) {
-  try {
-    return window.localStorage.getItem(avatarCacheKey(profileId)) || ''
-  } catch {
-    return ''
+  const keys = getLegacyAvatarProfileKeys(profileId)
+  for (const key of keys) {
+    try {
+      const value = window.localStorage.getItem(avatarCacheKey(key)) || ''
+      if (value) return value
+    } catch {
+      // ignore storage failures and continue checking aliases
+    }
   }
+  return ''
 }
 
 export function setCachedAvatarUrl(profileId, url) {
+  const keys = getLegacyAvatarProfileKeys(profileId)
   try {
-    if (!url) {
-      window.localStorage.removeItem(avatarCacheKey(profileId))
-      return
+    for (const key of keys) {
+      if (!url) {
+        window.localStorage.removeItem(avatarCacheKey(key))
+      } else {
+        window.localStorage.setItem(avatarCacheKey(key), String(url))
+      }
     }
-    window.localStorage.setItem(avatarCacheKey(profileId), String(url))
   } catch {
     /* ignore */
   }
@@ -564,11 +583,11 @@ export function getDefaultAvatarDataUrl(profileId, displayName = '') {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
 }
 
-/** Prefer custom URL, else cached, else optional fallback (e.g. Hana art), else initials. */
+/** Prefer custom URL, else cached legacy alias, else optional fallback, else initials. */
 export function resolveAvatarSrc(profileId, displayName, customUrl = '', fallbackUrl = '', presetSrc = '') {
   const id = resolveAccountKey(profileId) || normalizeAccountKey(profileId) || 'guest'
-  const url = String(customUrl || getCachedAvatarUrl(id) || '').trim()
-  if (url && !url.startsWith('preset:')) return url
+  const candidateUrl = String(customUrl || getCachedAvatarUrl(id) || '').trim()
+  if (candidateUrl && !candidateUrl.startsWith('preset:')) return candidateUrl
   const preset = String(presetSrc || '').trim()
   if (preset) return preset
   const fallback = String(fallbackUrl || '').trim()
@@ -920,21 +939,72 @@ export function subscribeChatProfile(profileId, onData, onError) {
     onData?.(null)
     return () => {}
   }
+
+  const canonicalId = resolveAccountKey(profileId) || normalizeAccountKey(profileId)
+  const legacyKeys = getLegacyAvatarProfileKeys(canonicalId).filter((id) => id !== canonicalId)
+
+  const hydrate = (snapId, data) => {
+    const profile = serializeChatProfile(snapId, data || {})
+    if (profile.avatarUrl) {
+      setCachedAvatarUrl(profileId, profile.avatarUrl)
+      if (profile.passKey && profile.passKey !== profileId) {
+        setCachedAvatarUrl(profile.passKey, profile.avatarUrl)
+      }
+      if (canonicalId !== snapId && profile.avatarUrl) {
+        setCachedAvatarUrl(canonicalId, profile.avatarUrl)
+      }
+    }
+    onData?.(profile)
+  }
+
+  let wasFixed = false
+  const fallbackLegacy = async (snap) => {
+    if (wasFixed || snap.exists()) return
+    for (const legacyId of legacyKeys) {
+      try {
+        const legacySnap = await getDoc(doc(db, CHAT_PROFILES_COLLECTION, legacyId))
+        if (!legacySnap.exists()) continue
+        const data = legacySnap.data() || {}
+        const avatarUrl = String(data.avatarUrl || '').trim()
+        const avatarPresetId = String(data.avatarPresetId || '').trim()
+        if (!avatarUrl && !avatarPresetId) continue
+        await setDoc(doc(db, CHAT_PROFILES_COLLECTION, canonicalId), {
+          ...data,
+          role: data.role || 'guest',
+          displayName: data.displayName || GUEST_PROFILES.gabusan?.displayName || 'ガブリエル',
+          addressAs: data.addressAs || GUEST_PROFILES.gabusan?.addressAs || 'ガブさん',
+          avatarUrl,
+          avatarPresetId,
+          updatedAt: serverTimestamp(),
+          updatedAtIso: new Date().toISOString(),
+        }, { merge: true })
+        setCachedAvatarUrl(canonicalId, avatarUrl)
+        setCachedAvatarUrl(legacyId, avatarUrl)
+        wasFixed = true
+        hydrate(canonicalId, {
+          ...data,
+          role: data.role || 'guest',
+          displayName: data.displayName || GUEST_PROFILES.gabusan?.displayName || 'ガブリエル',
+          addressAs: data.addressAs || GUEST_PROFILES.gabusan?.addressAs || 'ガブさん',
+          avatarUrl,
+          avatarPresetId,
+        })
+        return
+      } catch (fallbackError) {
+        console.warn('[avatar] legacy profile lookup failed', legacyId, fallbackError)
+      }
+    }
+    onData?.(null)
+  }
+
   return onSnapshot(
-    doc(db, CHAT_PROFILES_COLLECTION, profileId),
-    (snap) => {
+    doc(db, CHAT_PROFILES_COLLECTION, canonicalId),
+    async (snap) => {
       if (!snap.exists()) {
-        onData?.(null)
+        await fallbackLegacy(snap)
         return
       }
-      const profile = serializeChatProfile(snap.id, snap.data())
-      if (profile.avatarUrl) {
-        setCachedAvatarUrl(profileId, profile.avatarUrl)
-        if (profile.passKey && profile.passKey !== profileId) {
-          setCachedAvatarUrl(profile.passKey, profile.avatarUrl)
-        }
-      }
-      onData?.(profile)
+      hydrate(snap.id, snap.data())
     },
     (error) => onError?.(error),
   )
