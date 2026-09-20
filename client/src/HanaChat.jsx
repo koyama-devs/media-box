@@ -5,116 +5,116 @@ import hanachanArt from './assets/hanachan.svg'
 import ChatAvatar from './ChatAvatar'
 import { CHAT_CARD_SHARE_EVENT, CHAT_CLOSE_EVENT } from './chatCardShare'
 import {
-    addChatReminder,
-    dueChatReminders,
-    loadAllLocalChatPins,
-    loadChatPins,
-    markChatReminderDone,
-    remindAtFromChoice,
-    toggleChatPin,
-    unpinChatMessageEverywhere
+  addChatReminder,
+  dueChatReminders,
+  loadAllLocalChatPins,
+  loadChatPins,
+  markChatReminderDone,
+  remindAtFromChoice,
+  toggleChatPin,
+  unpinChatMessageEverywhere
 } from './chatExtras'
 import ChatImageLightbox from './ChatImageLightbox'
 import { collectMessageSearchHits, normalizeMessageSearchQuery } from './chatMessageSearch'
 import ChatNatsuFireworks from './ChatNatsuFireworks'
 import { playChatNotifySound, unlockChatNotifySound } from './chatNotifySound'
 import {
-    listChatOutboxForThread,
-    outboxEntryToLocalMessage,
-    removeChatOutbox,
-    upsertChatOutbox,
+  listChatOutboxForThread,
+  outboxEntryToLocalMessage,
+  removeChatOutbox,
+  upsertChatOutbox,
 } from './chatOutbox'
 import ChatPokeZukan, { PokeZukanChip } from './ChatPokeZukan'
 import {
-    readDefaultReaction,
-    readEnterToSend,
-    readMessageSound,
-    readStickerSet,
-    readVoiceSkin,
-    writeDefaultReaction,
-    writeEnterToSend,
-    writeMessageSound,
-    writeStickerSet,
-    writeVoiceSkin,
+  readDefaultReaction,
+  readEnterToSend,
+  readMessageSound,
+  readStickerSet,
+  readVoiceSkin,
+  writeDefaultReaction,
+  writeEnterToSend,
+  writeMessageSound,
+  writeStickerSet,
+  writeVoiceSkin,
 } from './chatSettings'
 import { canMutateOwnMessage, useIsCoarsePointer } from './ChatSwipeBubble'
 import ChatWeightGarden, { WeightGardenChip } from './ChatWeightGarden'
 import EmotionMomentLayer, { EMOTION_MOMENTS, triggerEmotionMoment } from './EmotionMoment'
 import {
-    analyzeGuestMessageForOwner,
-    applyReactionLocally,
-    broadcastChatEffect,
-    CHAT_PRESENCE_MODES,
-    CHAT_REACTION_EMOJIS,
-    chatWithHanachan,
-    classifyChatAttachment,
-    confirmJpTripArrived,
-    DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
-    deleteChatMessage,
-    ensureChatThread,
-    ensureDefaultChatAccounts,
-    ensureGuestChatId,
-    ensureWeightGardenDefaults,
-    fetchChatThreadMediaItems,
-    formatChatFileSize,
-    formatChatTimestamp,
-    getChatMessageAttachments,
-    getFirebaseErrorMessage,
-    getGuestProfile,
-    getMessageDeliveryStatus,
-    isChatAudioAttachment,
-    listGuestProfiles,
-    markThreadRead,
-    messageEditWindowMsFromMinutes,
-    migrateLegacyGuestThread,
-    migrateLocalPinsToThread,
-    normalizeChatPresenceMode,
-    OWNER_PROFILE,
-    pulseChatPresence,
-    resolveAccountKey,
-    resolveAvatarSrc,
-    resolveChatPresence,
-    resolveGuestDisplayName,
-    resolveGuestThreadWithHistory,
-    resolveSessionProfile,
-    sendChatMessage,
-    setChatPresenceStatus,
-    setChatProfileStatus,
-    setChatTyping,
-    sortChatMessages,
-    subscribeChatAccounts,
-    subscribeChatMessages,
-    subscribeChatProfiles,
-    subscribeChatThreads,
-    subscribeOwnChatThread,
-    subscribeWeightGarden,
-    suggestHanaChat,
-    threadUnreadCount,
-    toggleChatReaction,
-    toggleThreadChatPin,
-    translateChatMessage,
-    unpinThreadChatMessage,
-    updateChatMessage,
-    uploadChatAttachment,
+  analyzeGuestMessageForOwner,
+  applyReactionLocally,
+  broadcastChatEffect,
+  CHAT_PRESENCE_MODES,
+  CHAT_REACTION_EMOJIS,
+  chatWithHanachan,
+  classifyChatAttachment,
+  confirmJpTripArrived,
+  DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
+  deleteChatMessage,
+  ensureChatThread,
+  ensureDefaultChatAccounts,
+  ensureGuestChatId,
+  ensureWeightGardenDefaults,
+  fetchChatThreadMediaItems,
+  formatChatFileSize,
+  formatChatTimestamp,
+  getChatMessageAttachments,
+  getFirebaseErrorMessage,
+  getGuestProfile,
+  getMessageDeliveryStatus,
+  isChatAudioAttachment,
+  listGuestProfiles,
+  markThreadRead,
+  messageEditWindowMsFromMinutes,
+  migrateLegacyGuestThread,
+  migrateLocalPinsToThread,
+  normalizeChatPresenceMode,
+  OWNER_PROFILE,
+  pulseChatPresence,
+  resolveAccountKey,
+  resolveAvatarSrc,
+  resolveChatPresence,
+  resolveGuestDisplayName,
+  resolveGuestThreadWithHistory,
+  resolveSessionProfile,
+  sendChatMessage,
+  setChatPresenceStatus,
+  setChatProfileStatus,
+  setChatTyping,
+  sortChatMessages,
+  subscribeChatAccounts,
+  subscribeChatMessages,
+  subscribeChatProfiles,
+  subscribeChatThreads,
+  subscribeOwnChatThread,
+  subscribeWeightGarden,
+  suggestHanaChat,
+  threadUnreadCount,
+  toggleChatReaction,
+  toggleThreadChatPin,
+  translateChatMessage,
+  unpinThreadChatMessage,
+  updateChatMessage,
+  uploadChatAttachment,
 } from './firebase'
 import FlowerRainLayer, {
-    CHAT_PARTY_REACTION,
-    triggerFlowerRain,
-    triggerPartyBurst,
+  CHAT_PARTY_REACTION,
+  triggerFlowerRain,
+  triggerPartyBurst,
 } from './FlowerRain'
 import './hana-chat.css'
 import HanaCall from './HanaCall'
 import HanaChatMessageList, { EMPTY_CHAT_REACTIONS } from './HanaChatMessageList'
 import HanaSticker, {
-    stickerBurst,
-    stickerSetsForViewer,
-    suggestHanaStickers,
+  stickerBurst,
+  stickerSetsForViewer,
+  suggestHanaStickers,
 } from './HanaStickers'
 import HanaVoicePlayer, { VoiceSkinPicker } from './HanaVoicePlayer'
 import NatsuKingyo from './NatsuKingyo'
 import {
-    collectUnansweredOwnerAssistMessages,
-    ownerAssistShouldCollapse,
+  collectUnansweredOwnerAssistMessages,
+  ownerAssistShouldCollapse,
 } from './OwnerMessageAssist'
 import { POKE_ZUKAN_GUEST, tokyoZukanYmd, worldActiveMon } from './pokeZukan'
 import useComposerVoiceNote, { formatVoiceClock } from './useComposerVoiceNote'
@@ -3391,6 +3391,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         const inTrigger = stickerTriggerRef.current?.contains(event.target)
         const inComposer = composerRef.current?.contains(event.target)
         if (!inPanel && !inVoice && !inTrigger && !inComposer) {
+          retainComposerFocusRef.current = false
+          keyboardPinnedRef.current = false
           skipDockCloseOnNextBlurRef.current = false
           lockedDockChromeRef.current = 0
           stickerDockOpenRef.current = false
@@ -3470,14 +3472,20 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
     syncPanelViewportRef.current({ immediate: true, force: true })
   }, [halfScreenDockPx])
 
+  const resetComposerAutoFocusLock = useCallback(() => {
+    retainComposerFocusRef.current = false
+    keyboardPinnedRef.current = false
+    skipDockCloseOnNextBlurRef.current = false
+  }, [])
+
   const closeStickerTray = useCallback((options = {}) => {
     // Keyboard icon while dock is open → reveal IME overlay, keep dock.
     if (options.focusInput && stickerDockMode) {
       revealComposerKeyboard()
       return
     }
+    resetComposerAutoFocusLock()
     lockedDockChromeRef.current = 0
-    skipDockCloseOnNextBlurRef.current = false
     stickerDockOpenRef.current = false
     voiceNote.close()
     flushSync(() => {
@@ -3486,7 +3494,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       setComposerFocused(false)
     })
     syncPanelViewportRef.current({ immediate: true, force: true })
-  }, [revealComposerKeyboard, stickerDockMode, voiceNote.close])
+  }, [revealComposerKeyboard, resetComposerAutoFocusLock, stickerDockMode, voiceNote.close])
 
   /**
    * Same idea as tapping Send while 未確定: commit composition, then run「完了」
@@ -3506,14 +3514,14 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       setDraft(live)
       try { input.blur() } catch { /* ignore */ }
     }
+    resetComposerAutoFocusLock()
     setComposerFocused(false)
-    keyboardPinnedRef.current = false
     if (stickerDockMode && (stickerDockOpenRef.current || bottomChromePxRef.current > 0)) {
       closeStickerTray()
       return
     }
     syncPanelViewportRef.current({ immediate: true, force: true })
-  }, [closeStickerTray, stickerDockMode])
+  }, [closeStickerTray, resetComposerAutoFocusLock, stickerDockMode])
 
   const openStickerTray = useCallback(() => {
     voiceNote.close()
@@ -4162,7 +4170,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               ? { ...m, pending: false, sendFailed: true }
               : m
           )))
-          setError('送信に時間がかかっています。未送信をタップして再送できます。')
+          setError('送信に時間がかかっています。通信状況を確認して、少し待ってからもう一度お試しください。')
           writePromise.then((lateId) => {
             if (!lateId) return
             removeChatOutbox(pendingId)
@@ -4396,7 +4404,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           }).catch(() => {
             sendInFlightRef.current.delete(pendingId)
           })
-          setError('送信に時間がかかっています。未送信をタップして再送できます。')
+          setError('送信に時間がかかっています。通信状況を確認して、少し待ってからもう一度お試しください。')
           if (!actingAsOwner) setChannel('human')
           return
         }
@@ -4592,7 +4600,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               ? { ...m, pending: false, sendFailed: true }
               : m
           )))
-          setError('送信に時間がかかっています。未送信をタップして再送できます。')
+          setError('送信に時間がかかっています。通信状況を確認して、少し待ってからもう一度お試しください。')
           writePromise.then((lateId) => {
             if (!lateId) return
             removeChatOutbox(pendingId)
@@ -4962,8 +4970,8 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         )))
         setError(
           err?.code === 'chat/timeout'
-            ? '送信に時間がかかっています。未送信をタップして再送できます。'
-            : (getFirebaseErrorMessage(err) || '再送に失敗しました。'),
+            ? '送信に時間がかかっています。通信状況を確認して、少し待ってからもう一度お試しください。'
+            : (getFirebaseErrorMessage(err) || '送信に失敗しました。通信状況を確認して、少し待ってからもう一度お試しください。'),
         )
       }
       return
@@ -5035,7 +5043,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             ? { ...m, pending: false, sendFailed: true, uploading: false }
             : m
         )))
-        setError('送信に時間がかかっています。未送信をタップして再送できます。')
+        setError('送信に時間がかかっています。通信状況を確認して、少し待ってからもう一度お試しください。')
         writePromise.then(applySuccess).catch(() => {
           sendInFlightRef.current.delete(clientId)
         })
@@ -5047,7 +5055,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           ? { ...m, pending: false, sendFailed: true, uploading: false }
           : m
       )))
-      setError(getFirebaseErrorMessage(err) || '再送に失敗しました。')
+      setError(getFirebaseErrorMessage(err) || '送信に失敗しました。通信状況を確認して、少し待ってからもう一度お試しください。')
     }
   }, [
     actingAsOwner,
@@ -5291,7 +5299,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 ? { ...m, pending: false, sendFailed: true, uploading: false }
                 : m
             )))
-            setError('送信に時間がかかっています。未送信をタップして再送できます。')
+            setError('送信に時間がかかっています。通信状況を確認して、少し待ってからもう一度お試しください。')
             writePromise.then(applyOwnerSuccess).catch(() => {
               sendInFlightRef.current.delete(pendingId)
             })
@@ -5426,7 +5434,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 ? { ...m, pending: false, sendFailed: true, uploading: false }
                 : m
             )))
-            setError('送信に時間がかかっています。未送信をタップして再送できます。')
+            setError('送信に時間がかかっています。通信状況を確認して、少し待ってからもう一度お試しください。')
             writePromise.then(applyGuestSuccess).catch(() => {
               sendInFlightRef.current.delete(pendingId)
             })
@@ -5528,13 +5536,13 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             replyTo: pendingReply,
           })
         } catch (sendErr) {
-          setError(getFirebaseErrorMessage(sendErr) || '送信に失敗しました。')
+          setError(getFirebaseErrorMessage(sendErr) || '送信に失敗しました。通信状況を確認して、少し待ってからもう一度お試しください。')
         }
       } else {
         setError(
           err?.code === 'chat/timeout'
-            ? '送信に時間がかかっています。未送信をタップして再送できます。'
-            : (msg || '送信に失敗しました。未送信をタップして再送できます。'),
+            ? '送信に時間がかかっています。通信状況を確認して、少し待ってからもう一度お試しください。'
+            : (msg || '送信に失敗しました。通信状況を確認して、少し待ってからもう一度お試しください。'),
         )
         if (!actingAsOwner && channel === 'ai' && !pendingEditId) {
           setAiMessages((prev) => [
@@ -6819,11 +6827,25 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                       syncPanelViewportRef.current({ immediate: true, force: true })
                       return
                     }
+                    const input = inputRef.current
+                    const focusMovedAway = Boolean(
+                      input
+                      && document.activeElement
+                      && document.activeElement !== input
+                      && !input.contains(document.activeElement),
+                    )
                     if (retainComposerFocusRef.current) {
+                      if (focusMovedAway) {
+                        retainComposerFocusRef.current = false
+                        keyboardPinnedRef.current = false
+                        setComposerFocused(false)
+                        syncPanelViewportRef.current({ immediate: true, force: true })
+                        return
+                      }
                       try {
-                        inputRef.current?.focus({ preventScroll: true })
+                        input?.focus({ preventScroll: true })
                       } catch {
-                        inputRef.current?.focus()
+                        input?.focus()
                       }
                       return
                     }
