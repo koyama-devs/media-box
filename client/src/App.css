@@ -7100,7 +7100,7 @@ body.is-listening-space-open.is-focus-mode-off .upload-card {
 .avatar-picker-overlay {
   position: fixed;
   inset: 0;
-  z-index: 150;
+  z-index: 2147483647;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -7110,6 +7110,8 @@ body.is-listening-space-open.is-focus-mode-off .upload-card {
 }
 
 .avatar-picker-sheet {
+  position: relative;
+  z-index: 1;
   width: min(480px, 100%);
   max-height: min(85dvh, 640px);
   overflow: auto;
@@ -7134,6 +7136,52 @@ body.is-listening-space-open.is-focus-mode-off .upload-card {
   color: #f1e2c4;
 }
 
+.avatar-picker-current {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.avatar-picker-current-frame {
+  width: 54px;
+  height: 54px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid rgba(198, 163, 106, 0.45);
+  background: rgba(15, 23, 42, 0.7);
+}
+
+.avatar-picker-current-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.avatar-picker-current-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.avatar-picker-current-copy span {
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.7);
+}
+
+.avatar-picker-current-copy strong {
+  font-size: 0.9rem;
+  color: #f8f3eb;
+}
+
 .avatar-picker-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -7141,7 +7189,124 @@ body.is-listening-space-open.is-focus-mode-off .upload-card {
   margin-bottom: 14px;
 }
 
+.avatar-picker-grid--history {
+  margin-bottom: 0;
+}
+
+.avatar-picker-history-item {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.avatar-picker-delete {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.18);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 6px 14px rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  pointer-events: auto;
+}
+
+.avatar-picker-delete:hover,
+.avatar-picker-delete:focus-visible {
+  border-color: rgba(255, 255, 255, 0.92);
+  background: rgba(15, 23, 42, 0.28);
+}
+
+.avatar-picker-delete:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.avatar-picker-preview {
+  margin-bottom: 14px;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(198, 163, 106, 0.32);
+  background: rgba(86, 64, 36, 0.16);
+}
+
+.avatar-picker-preview-label,
+.avatar-picker-history-title {
+  margin-bottom: 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #e9d59d;
+}
+
+.avatar-picker-crop-stage {
+  width: 132px;
+  height: 132px;
+  margin: 0 auto 8px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid rgba(198, 163, 106, 0.5);
+  background: rgba(15, 23, 42, 0.7);
+  position: relative;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.avatar-picker-crop-stage:active {
+  cursor: grabbing;
+}
+
+.avatar-picker-crop-stage img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+  transform-origin: center center;
+  transition: transform 0.12s ease-out;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
+.avatar-picker-preview-meta {
+  margin-bottom: 8px;
+  text-align: center;
+  font-size: 0.72rem;
+  color: #e2e8f0;
+  word-break: break-all;
+}
+
+.avatar-picker-reset-btn {
+  min-width: 72px;
+}
+
+.avatar-picker-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
 .avatar-picker-option {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -7160,11 +7325,30 @@ body.is-listening-space-open.is-focus-mode-off .upload-card {
   height: 56px;
   border-radius: 50%;
   object-fit: cover;
+  object-position: center;
 }
 
 .avatar-picker-option.is-active {
   border-color: rgba(198, 163, 106, 0.75);
   box-shadow: 0 0 0 2px rgba(198, 163, 106, 0.25);
+}
+
+.avatar-picker-option-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(198, 163, 106, 0.2);
+  color: #f3dca5;
+  font-size: 0.56rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.avatar-picker-history {
+  margin-bottom: 14px;
 }
 
 .avatar-picker-actions {

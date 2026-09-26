@@ -306,7 +306,7 @@ function hashString(value) {
 export function getDefaultAvatarDataUrl(profileId, displayName = '') {
   const label = String(displayName || profileId || '?').trim()
   const initial = Array.from(label)[0] || '?'
-  const color = AVATAR_PALETTE[hashString(profileId || label) % AVATAR_PALETTE.length]
+  const pair = AVATAR_GRADIENT_PALETTE[hashString(profileId || label) % AVATAR_GRADIENT_PALETTE.length]
   const safe = initial
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

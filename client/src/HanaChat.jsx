@@ -746,7 +746,14 @@ function ChatVoiceNoteDock({
   )
 }
 
-export default function HanaChat({ hidden = false, appRole = 'guest', guestKey = '' }) {
+export default function HanaChat({
+  hidden = false,
+  appRole = 'guest',
+  guestKey = '',
+  currentAvatarSrc = '',
+  currentAvatarLabel = 'アバター',
+  onOpenAvatarPicker = () => {},
+}) {
   const [open, setOpen] = useState(false)
   const openRef = useRef(false)
   openRef.current = open
@@ -4173,10 +4180,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         if (err?.code === 'chat/timeout') {
           setHanaMessages((prev) => prev.map((m) => (
             m.id === pendingId
-              ? { ...m, pending: false, sendFailed: true }
+              ? { ...m, pending: true, sendFailed: false }
               : m
           )))
-          setError('送信に時間がかかっています。通信状況を確認して、少し待ってからもう一度お試しください。')
+          setError('')
           writePromise.then((lateId) => {
             if (!lateId) return
             removeChatOutbox(pendingId)
@@ -4196,6 +4203,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           }).catch(() => {
             sendInFlightRef.current.delete(pendingId)
           })
+          window.setTimeout(() => {
+            void retryFailedSendRef.current?.(pendingId)
+          }, 1200)
           if (!actingAsOwner) setChannel('human')
           return
         }
@@ -4373,7 +4383,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         if (err?.code === 'chat/timeout') {
           setHanaMessages((prev) => prev.map((m) => (
             m.id === pendingId
-              ? { ...m, pending: false, sendFailed: true, uploading: false }
+              ? { ...m, pending: true, sendFailed: false, uploading: false }
               : m
           )))
           upsertChatOutbox({
@@ -4389,6 +4399,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
             createdAtIso: new Date().toISOString(),
             ...guestMeta,
           })
+          setError('')
           writePromise.then((lateId) => {
             if (!lateId) return
             removeChatOutbox(pendingId)
@@ -4410,7 +4421,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           }).catch(() => {
             sendInFlightRef.current.delete(pendingId)
           })
-          setError('送信に時間がかかっています。通信状況を確認して、少し待ってからもう一度お試しください。')
+          window.setTimeout(() => {
+            void retryFailedSendRef.current?.(pendingId)
+          }, 1200)
           if (!actingAsOwner) setChannel('human')
           return
         }
@@ -4603,10 +4616,10 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
         if (err?.code === 'chat/timeout') {
           setHanaMessages((prev) => prev.map((m) => (
             m.id === pendingId
-              ? { ...m, pending: false, sendFailed: true }
+              ? { ...m, pending: true, sendFailed: false }
               : m
           )))
-          setError('送信に時間がかかっています。通信状況を確認して、少し待ってからもう一度お試しください。')
+          setError('')
           writePromise.then((lateId) => {
             if (!lateId) return
             removeChatOutbox(pendingId)
@@ -4626,6 +4639,9 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           }).catch(() => {
             sendInFlightRef.current.delete(pendingId)
           })
+          window.setTimeout(() => {
+            void retryFailedSendRef.current?.(pendingId)
+          }, 1200)
           if (!actingAsOwner) setChannel('human')
           return
         }
@@ -4972,14 +4988,15 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       } catch (err) {
         setHanaMessages((prev) => prev.map((m) => (
           (m.id === mid || m.clientId === clientId)
-            ? { ...m, pending: false, sendFailed: true, uploading: false }
+            ? { ...m, pending: true, sendFailed: false, uploading: false }
             : m
         )))
-        setError(
-          err?.code === 'chat/timeout'
-            ? '送信に時間がかかっています。通信状況を確認して、少し待ってからもう一度お試しください。'
-            : (getFirebaseErrorMessage(err) || '送信に失敗しました。通信状況を確認して、少し待ってからもう一度お試しください。'),
-        )
+        setError('')
+        if (err?.code === 'chat/timeout') {
+          window.setTimeout(() => {
+            void retryFailedSendRef.current?.(clientId)
+          }, 1200)
+        }
       }
       return
     }
@@ -5047,13 +5064,16 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       if (err?.code === 'chat/timeout') {
         setHanaMessages((prev) => prev.map((m) => (
           (m.id === mid || m.clientId === clientId)
-            ? { ...m, pending: false, sendFailed: true, uploading: false }
+            ? { ...m, pending: true, sendFailed: false, uploading: false }
             : m
         )))
-        setError('送信に時間がかかっています。通信状況を確認して、少し待ってからもう一度お試しください。')
+        setError('')
         writePromise.then(applySuccess).catch(() => {
           sendInFlightRef.current.delete(clientId)
         })
+        window.setTimeout(() => {
+          void retryFailedSendRef.current?.(clientId)
+        }, 1200)
         return
       }
       sendInFlightRef.current.delete(clientId)
@@ -5303,13 +5323,16 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           if (err?.code === 'chat/timeout') {
             setHanaMessages((prev) => prev.map((m) => (
               m.id === pendingId
-                ? { ...m, pending: false, sendFailed: true, uploading: false }
+                ? { ...m, pending: true, sendFailed: false, uploading: false }
                 : m
             )))
-            setError('送信に時間がかかっています。通信状況を確認して、少し待ってからもう一度お試しください。')
+            setError('')
             writePromise.then(applyOwnerSuccess).catch(() => {
               sendInFlightRef.current.delete(pendingId)
             })
+            window.setTimeout(() => {
+              void retryFailedSendRef.current?.(pendingId)
+            }, 1200)
             pendingSendId = ''
           } else {
             throw err
@@ -5438,13 +5461,16 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
           if (err?.code === 'chat/timeout') {
             setHanaMessages((prev) => prev.map((m) => (
               m.id === pendingId
-                ? { ...m, pending: false, sendFailed: true, uploading: false }
+                ? { ...m, pending: true, sendFailed: false, uploading: false }
                 : m
             )))
-            setError('送信に時間がかかっています。通信状況を確認して、少し待ってからもう一度お試しください。')
+            setError('')
             writePromise.then(applyGuestSuccess).catch(() => {
               sendInFlightRef.current.delete(pendingId)
             })
+            window.setTimeout(() => {
+              void retryFailedSendRef.current?.(pendingId)
+            }, 1200)
             pendingSendId = ''
           } else {
             throw err
@@ -5548,7 +5574,7 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
       } else {
         setError(
           err?.code === 'chat/timeout'
-            ? '送信に時間がかかっています。通信状況を確認して、少し待ってからもう一度お試しください。'
+            ? ''
             : (msg || '送信に失敗しました。通信状況を確認して、少し待ってからもう一度お試しください。'),
         )
         if (!actingAsOwner && channel === 'ai' && !pendingEditId) {
@@ -5740,9 +5766,18 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
               <button
                 type="button"
                 className={`hana-chat-avatar is-back-ai${speaking ? ' is-speaking' : ''}`}
-                onClick={() => setChannel('ai')}
-                title="はなちゃんに戻る"
-                aria-label="はなちゃんに戻る"
+                onClick={() => {
+                  if (partnerAvatarSrc) {
+                    setPreviewImage({
+                      src: partnerAvatarSrc,
+                      alt: (actingAsOwner ? ownerActiveGuestLabel : OWNER_PROFILE.displayName) || 'アバター',
+                    })
+                    return
+                  }
+                  setChannel('ai')
+                }}
+                title="アバターを拡大表示"
+                aria-label="アバターを拡大表示"
               >
                 <ChatAvatar src={partnerAvatarSrc} profileId={actingAsOwner ? resolveAccountKey(ownerActiveGuestKey || 'guest') : OWNER_PROFILE.key} displayName={actingAsOwner ? ownerActiveGuestLabel : OWNER_PROFILE.displayName} />
                 <span
@@ -5755,7 +5790,29 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                 </span>
               </button>
             ) : (
-              <div className={`hana-chat-avatar${speaking ? ' is-speaking' : ''}`}>
+              <div
+                className={`hana-chat-avatar${speaking ? ' is-speaking' : ''}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  if (!partnerAvatarSrc) return
+                  setPreviewImage({
+                    src: partnerAvatarSrc,
+                    alt: (actingAsOwner ? ownerActiveGuestLabel : OWNER_PROFILE.displayName) || 'アバター',
+                  })
+                }}
+                onKeyDown={(event) => {
+                  if (!partnerAvatarSrc) return
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    setPreviewImage({
+                      src: partnerAvatarSrc,
+                      alt: (actingAsOwner ? ownerActiveGuestLabel : OWNER_PROFILE.displayName) || 'アバター',
+                    })
+                  }
+                }}
+                title="アバターを拡大表示"
+              >
                 <ChatAvatar src={partnerAvatarSrc} profileId={actingAsOwner ? resolveAccountKey(ownerActiveGuestKey || 'guest') : OWNER_PROFILE.key} displayName={actingAsOwner ? ownerActiveGuestLabel : OWNER_PROFILE.displayName} />
                 <span
                   className={`hana-chat-presence ${partnerPresence.className}`}
@@ -6097,6 +6154,23 @@ export default function HanaChat({ hidden = false, appRole = 'guest', guestKey =
                     {menuPage === 'settings' ? (
                       <>
                     <p className="hana-chat-settings-title">設定</p>
+                    <button
+                      type="button"
+                      className="hana-chat-settings-profile"
+                      onClick={() => {
+                        onOpenAvatarPicker()
+                        setSettingsOpen(false)
+                        setMenuPage('home')
+                      }}
+                    >
+                      <span className="hana-chat-settings-profile-avatar" aria-hidden="true">
+                        <img src={currentAvatarSrc || (actingAsOwner ? hanachanArt : guestProfile?.avatarUrl || '')} alt="現在のアバター" />
+                      </span>
+                      <span className="hana-chat-settings-profile-copy">
+                        <strong>{currentAvatarLabel || 'アバター'}</strong>
+                        <span>{actingAsOwner ? '自分のプロフィール画像' : 'プロフィール画像'}</span>
+                      </span>
+                    </button>
                     <div className="hana-chat-settings-section">
                       <p className="hana-chat-settings-label">自分のステータス</p>
                       <p className="hana-chat-settings-hint">今は「{myStatusLabel}」・全員に同じ表示</p>

@@ -1,6 +1,132 @@
 {
-  "updatedAt": "2026-09-20T11:34:25.407Z",
+  "updatedAt": "2026-09-21T03:13:49.591Z",
   "releases": [
+    {
+      "version": "muao6it6-d0cex3",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-21T03:12:42.626Z",
+      "previousVersion": "muakyqlu-ejeb1q",
+      "previousHostingVersionId": "5ddb85d2b0aa9c44",
+      "hostingVersionId": "95443285648a425c",
+      "recordedAt": "2026-09-21T03:12:43.336Z"
+    },
+    {
+      "version": "muakyqlu-ejeb1q",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-21T01:42:52.586Z",
+      "previousVersion": "muaj5ysh-ohab7d",
+      "previousHostingVersionId": "8f8f4f7e47ff97b0",
+      "hostingVersionId": "5ddb85d2b0aa9c44",
+      "recordedAt": "2026-09-21T01:42:54.763Z"
+    },
+    {
+      "version": "muaj5ysh-ohab7d",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-21T00:52:38.815Z",
+      "previousVersion": "muaixc8d-0krpyb",
+      "previousHostingVersionId": "55e65d3c258f79fb",
+      "hostingVersionId": "8f8f4f7e47ff97b0",
+      "recordedAt": "2026-09-21T00:52:39.753Z"
+    },
+    {
+      "version": "muaixc8d-0krpyb",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-21T00:45:32.454Z",
+      "previousVersion": "mu9y2pjr-ibnavt",
+      "previousHostingVersionId": "95e9b7ab9b881e05",
+      "hostingVersionId": "55e65d3c258f79fb",
+      "recordedAt": "2026-09-21T00:45:32.709Z"
+    },
+    {
+      "version": "mu9y2pjr-ibnavt",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-20T15:01:52.462Z",
+      "previousVersion": "mu9xg36g-hu1gnj",
+      "previousHostingVersionId": "a6e8729928d66e1f",
+      "hostingVersionId": "95e9b7ab9b881e05",
+      "recordedAt": "2026-09-20T15:01:52.878Z"
+    },
+    {
+      "version": "mu9xg36g-hu1gnj",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-20T14:44:17.972Z",
+      "previousVersion": "mu9x0nwl-9ico85",
+      "previousHostingVersionId": "b90a828dab60f508",
+      "hostingVersionId": "a6e8729928d66e1f",
+      "recordedAt": "2026-09-20T14:44:18.338Z"
+    },
+    {
+      "version": "mu9x0nwl-9ico85",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-20T14:32:18.783Z",
+      "previousVersion": "mu9vtbpt-4rvc2k",
+      "previousHostingVersionId": "7ce9b34af65b5153",
+      "hostingVersionId": "b90a828dab60f508",
+      "recordedAt": "2026-09-20T14:32:19.262Z"
+    },
+    {
+      "version": "mu9vtbpt-4rvc2k",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-20T13:58:37.779Z",
+      "previousVersion": "mu9vf3wo-pcko5u",
+      "previousHostingVersionId": "2475eea5838c5766",
+      "hostingVersionId": "7ce9b34af65b5153",
+      "recordedAt": "2026-09-20T13:58:38.614Z"
+    },
+    {
+      "version": "mu9vf3wo-pcko5u",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-20T13:47:34.170Z",
+      "previousVersion": "mu9v8mjs-q4xlgr",
+      "previousHostingVersionId": "bf31eff646a322ba",
+      "hostingVersionId": "2475eea5838c5766",
+      "recordedAt": "2026-09-20T13:47:34.883Z"
+    },
+    {
+      "version": "mu9v8mjs-q4xlgr",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-20T13:42:30.912Z",
+      "previousVersion": "mu9uzbhy-dhlgo6",
+      "previousHostingVersionId": "61b6c97f9078c048",
+      "hostingVersionId": "bf31eff646a322ba",
+      "recordedAt": "2026-09-20T13:42:31.415Z"
+    },
+    {
+      "version": "mu9uzbhy-dhlgo6",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-20T13:35:15.247Z",
+      "previousVersion": "mu9up96u-xidw0i",
+      "previousHostingVersionId": "0c9b8a077e16c872",
+      "hostingVersionId": "61b6c97f9078c048",
+      "recordedAt": "2026-09-20T13:35:15.737Z"
+    },
+    {
+      "version": "mu9up96u-xidw0i",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-20T13:27:28.142Z",
+      "previousVersion": "mu9u69jf-3zcs8b",
+      "previousHostingVersionId": "bf9763af6e297f0a",
+      "hostingVersionId": "0c9b8a077e16c872",
+      "recordedAt": "2026-09-20T13:27:28.553Z"
+    },
+    {
+      "version": "mu9u69jf-3zcs8b",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-20T13:12:43.267Z",
+      "previousVersion": "mu9tfnc0-osj5ae",
+      "previousHostingVersionId": "46d9b94b25b435e3",
+      "hostingVersionId": "bf9763af6e297f0a",
+      "recordedAt": "2026-09-20T13:12:43.933Z"
+    },
+    {
+      "version": "mu9tfnc0-osj5ae",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-20T12:52:00.673Z",
+      "previousVersion": "mu9qlzvd-ytg1fj",
+      "previousHostingVersionId": "0872b8e9ab6d17d4",
+      "hostingVersionId": "46d9b94b25b435e3",
+      "recordedAt": "2026-09-20T12:52:01.382Z"
+    },
     {
       "version": "mu9qlzvd-ytg1fj",
       "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
@@ -234,132 +360,6 @@
       "previousHostingVersionId": "7935b80c8a335bbf",
       "hostingVersionId": "17c6117142f6a25b",
       "recordedAt": "2026-08-03T02:18:50.562Z"
-    },
-    {
-      "version": "msckm1yd-2j4gtc",
-      "notes": "夏テーマ強化：花火を菊・柳・牡丹風に、盆灯籠・ほたる・提灯・風鈴・金魚・朝顔をサイト全体に。",
-      "builtAt": "2026-08-03T01:49:08.257Z",
-      "previousVersion": "mscilk6c-8s17f8",
-      "previousHostingVersionId": "d801d786b466d8f4",
-      "hostingVersionId": "7935b80c8a335bbf",
-      "recordedAt": "2026-08-03T01:49:14.041Z"
-    },
-    {
-      "version": "mscilk6c-8s17f8",
-      "notes": "読書・チャット修正を本番反映（ページ撮影翻訳、送信順・新着bubble）。",
-      "builtAt": "2026-08-03T00:52:48.642Z",
-      "previousVersion": "msc1x274-fsteo4",
-      "previousHostingVersionId": "114448809fc46f19",
-      "hostingVersionId": "d801d786b466d8f4",
-      "recordedAt": "2026-08-03T00:53:02.876Z"
-    },
-    {
-      "version": "msc1x274-fsteo4",
-      "notes": "読書：ページを画面キャプチャしてOCR翻訳（ベトナム語＋ひらがな）。スキャンPDFでも動くように変更。",
-      "builtAt": "2026-08-02T17:05:57.059Z",
-      "previousVersion": "msc0b1p6-3su6nh",
-      "previousHostingVersionId": "a8778b02a8938831",
-      "hostingVersionId": "114448809fc46f19",
-      "recordedAt": "2026-08-02T17:06:01.040Z"
-    },
-    {
-      "version": "msc0b1p6-3su6nh",
-      "notes": "チャット：送信順の安定化（createdAtIso / clientId）と、新着メッセージが bubble から消える不具合を修正（最新300件を orderBy で取得）。",
-      "builtAt": "2026-08-02T16:20:30.584Z",
-      "previousVersion": "msbyxa2h-o2m5pt",
-      "previousHostingVersionId": "993822213afd8a87",
-      "hostingVersionId": "a8778b02a8938831",
-      "recordedAt": "2026-08-02T16:20:31.167Z"
-    },
-    {
-      "version": "msbyxa2h-o2m5pt",
-      "notes": "読書室の「この頁を解析」が画面外に隠れて見えない問題を修正しました。\n\n- 解析パネルを本の上に重ねて表示\n- 解析中スピナーを追加\n- ページめくり速度の調整も含む",
-      "builtAt": "2026-08-02T15:41:47.594Z",
-      "previousVersion": "msbx4f69-18gnon",
-      "previousHostingVersionId": "9ec0698eb0655955",
-      "hostingVersionId": "993822213afd8a87",
-      "recordedAt": "2026-08-02T15:41:48.324Z"
-    },
-    {
-      "version": "msbx4f69-18gnon",
-      "notes": "読書室のはな専用頁解析（ベトナム語訳＋ひらがな読み）を再ビルドして配信しました。",
-      "builtAt": "2026-08-02T14:52:17.321Z",
-      "previousVersion": "msbw3049-49ruti",
-      "previousHostingVersionId": "37a1049f62148afe",
-      "hostingVersionId": "9ec0698eb0655955",
-      "recordedAt": "2026-08-02T14:52:25.749Z"
-    },
-    {
-      "version": "msbw3049-49ruti",
-      "notes": "読書室にはな専用の頁解析を追加しました。\n\n- オーナーだけ「この頁を解析」が表示されます\n- ページ本文からベトナム語訳＋ひらがな読みを表示\n- スキャンPDFで文字が取れない場合は案内を表示\n- 同じ頁の結果は端末にキャッシュします",
-      "builtAt": "2026-08-02T14:22:16.351Z",
-      "previousVersion": "msbva3ut-id00fb",
-      "previousHostingVersionId": "21a6b338bce28bb1",
-      "hostingVersionId": "37a1049f62148afe",
-      "recordedAt": "2026-08-02T14:22:16.852Z"
-    },
-    {
-      "version": "msbva3ut-id00fb",
-      "notes": "最新版を再ビルドして配信しました（チャット未読バッジ・プッシュ通知修復を含む）。",
-      "builtAt": "2026-08-02T13:59:46.511Z",
-      "previousVersion": "msbv4tpu-lp6x0u",
-      "previousHostingVersionId": "728db4712684a371",
-      "hostingVersionId": "21a6b338bce28bb1",
-      "recordedAt": "2026-08-02T13:59:46.852Z"
-    },
-    {
-      "version": "msbv4tpu-lp6x0u",
-      "notes": "チャット未読バッジ（FABの赤い数字）を修復しました。\n\n- バッジが丸ボタンに欠けて見えない問題を修正\n- 未読数の集計を安定化\n- ホーム画面バッジが一時的に消えるレースを防止",
-      "builtAt": "2026-08-02T13:55:41.213Z",
-      "previousVersion": "msbul3k3-alv7le",
-      "previousHostingVersionId": "a10bbce44b2dcabe",
-      "hostingVersionId": "728db4712684a371",
-      "recordedAt": "2026-08-02T13:55:41.988Z"
-    },
-    {
-      "version": "msbul3k3-alv7le",
-      "notes": "現行の修正を再ビルドして配信しました。\n\n- チャットヘッダーのオンライン／オフライン文字を削除（アバターの点のみ）\n- プッシュ通知のトークン紐付け・許可・バナープレビュー修復を含む最新版",
-      "builtAt": "2026-08-02T13:40:19.381Z",
-      "previousVersion": "msbu9yzi-hu47m9",
-      "previousHostingVersionId": "de2e668c0ce763a7",
-      "hostingVersionId": "a10bbce44b2dcabe",
-      "recordedAt": "2026-08-02T13:40:19.708Z"
-    },
-    {
-      "version": "msbu9yzi-hu47m9",
-      "notes": "チャットのプッシュ通知を修復しました。\n\n- 通知トークンをアカウントキー（hana / ゲストkey）で保存するよう修正（パスワードと不一致だった）\n- ログイン時に通知許可を再リクエスト\n- チャット設定に「プッシュ通知」トグルを追加\n- バナーにメッセージ本文プレビューを確実に表示\n- 未読バッジ（ホーム画面）を再接続",
-      "builtAt": "2026-08-02T13:31:39.894Z",
-      "previousVersion": "msbs2wyp-jzyhll",
-      "previousHostingVersionId": "0da3a13b3c030d5e",
-      "hostingVersionId": "de2e668c0ce763a7",
-      "recordedAt": "2026-08-02T13:31:40.196Z"
-    },
-    {
-      "version": "msbs2wyp-jzyhll",
-      "notes": "チャットヘッダーのレイアウト崩れを修正しました。\n\n- 「オフライン」が縦書きになっていた問題を解消（nowrap）\n- 「はなちゃんに戻る」をタイトル下へ移し、通話ボタンとの圧迫を解消\n- ヘッダー中央カラムが潰れないようグリッドを調整",
-      "builtAt": "2026-08-02T12:30:19.048Z",
-      "previousVersion": "msbrqbde-rkgcct",
-      "previousHostingVersionId": "8ac43ffd03d2ac30",
-      "hostingVersionId": "0da3a13b3c030d5e",
-      "recordedAt": "2026-08-02T12:30:20.957Z"
-    },
-    {
-      "version": "msbrqbde-rkgcct",
-      "notes": "チャットヘッダーのレイアウト崩れを修正しました。\n\n- 「オフライン」が縦書きになっていた問題を解消（nowrap）\n- 「はなちゃんに戻る」をタイトル下へ移し、通話ボタンとの圧迫を解消\n- ヘッダー中央カラムが潰れないようグリッドを調整",
-      "builtAt": "2026-08-02T12:20:27.251Z",
-      "previousVersion": "msbokad4-zauss3",
-      "previousHostingVersionId": "9dfc0caf63b8c0be",
-      "hostingVersionId": "8ac43ffd03d2ac30",
-      "recordedAt": "2026-08-02T12:20:28.786Z"
-    },
-    {
-      "version": "msbokad4-zauss3",
-      "notes": "夏テーマをサイト全体に拡張。\n- ログイン以外のトップバー／カード／リスト／チャットUIも花火カラーに統一\n- 画面全体に花火バーストと提灯のアニメーション雰囲気を追加\n- 文言テキストは変更しない（UIのみ）",
-      "builtAt": "2026-08-02T10:51:46.613Z",
-      "previousVersion": "msbmrzqc-kyi46z",
-      "previousHostingVersionId": "6a6cadbef9bc1898",
-      "hostingVersionId": "9dfc0caf63b8c0be",
-      "recordedAt": "2026-08-02T10:51:47.969Z"
     }
   ]
 }

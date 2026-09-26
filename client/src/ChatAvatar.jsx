@@ -20,6 +20,8 @@ const ChatAvatar = memo(function ChatAvatar({
   className = '',
   profileId = '',
   displayName = '',
+  onClick,
+  ...rest
 }) {
   const fallback = getDefaultAvatarDataUrl(profileId, displayName)
   const [displaySrc, setDisplaySrc] = useState(() => String(src || '').trim() || fallback)
@@ -66,6 +68,8 @@ const ChatAvatar = memo(function ChatAvatar({
       referrerPolicy="no-referrer"
       decoding="async"
       draggable={false}
+      onClick={onClick}
+      {...rest}
       onError={(event) => {
         const el = event.currentTarget
         if (el.dataset.fallback === '1') return

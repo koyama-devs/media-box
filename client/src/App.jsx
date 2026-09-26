@@ -22,6 +22,7 @@ import {
     DEFAULT_ACCOUNT_IDLE_DAYS,
     deleteMediaComment,
     deleteMediaItem,
+    deleteUploadedAvatarHistory,
     ensureDefaultChatAccounts,
     evaluateAccountLogin,
     findChatAccountByPassKey,
@@ -47,6 +48,7 @@ import {
     saveSharedPlaylists,
     saveSharedSpaces,
     setChatProfileStatus,
+    setUserAvatarFromHistory,
     setUserAvatarPreset,
     sortMediaItems,
     subscribeChatAccounts,
@@ -409,7 +411,24 @@ function App() {
   const [guestKey, setGuestKey] = useState(() => readStoredGuestKey())
   const [sessionAvatarUrl, setSessionAvatarUrl] = useState('')
   const [sessionAvatarPresetId, setSessionAvatarPresetId] = useState('')
+  const [sessionAvatarHistory, setSessionAvatarHistory] = useState([])
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState('')
+  const [avatarPreviewName, setAvatarPreviewName] = useState('')
+  const [pendingAvatarFile, setPendingAvatarFile] = useState(null)
+  const [avatarCrop, setAvatarCrop] = useState({ zoom: 1, x: 0, y: 0 })
+  const avatarCropDragRef = useRef({ active: false, pointerId: null, startX: 0, startY: 0, originX: 0, originY: 0 })
+  const avatarCropPinchRef = useRef({
+    active: false,
+    initialDistance: 0,
+    initialZoom: 1,
+    initialX: 0,
+    initialY: 0,
+    initialCenterX: 0,
+    initialCenterY: 0,
+    pointerIds: [],
+  })
+  const avatarCropPointersRef = useRef(new Map())
   const [sessionStatus, setSessionStatus] = useState('auto')
   const [statusMenuOpen, setStatusMenuOpen] = useState(false)
   const [avatarUploading, setAvatarUploading] = useState(false)
@@ -544,6 +563,11 @@ function App() {
     [authRole, guestKey, chatAccounts],
   )
 
+  useEffect(() => {
+    clearAvatarPreview()
+    setAvatarPickerOpen(false)
+  }, [sessionProfile.id, authRole, guestKey])
+
   const isOwner = authRole === 'owner'
 
   const sessionAccount = useMemo(() => {
@@ -575,7 +599,14 @@ function App() {
     setError(ACCOUNT_INACTIVE_LOGIN_MESSAGE)
   }, [isLoggedIn, guestKey, chatAccounts])
 
-const sessionAvatarSrc = useMemo(
+  const sessionAvatarLabel = useMemo(() => {
+    if (sessionAvatarPresetId) {
+      return AVATAR_PRESETS.find((preset) => preset.id === sessionAvatarPresetId)?.label || 'preset'
+    }
+    if (sessionAvatarUrl) return 'アップロード済み'
+    return 'イニシャル'
+  }, [sessionAvatarPresetId, sessionAvatarUrl])
+  const sessionAvatarSrc = useMemo(
     () => resolveAvatarSrc(
       sessionProfile.id,
       sessionProfile.displayName,
@@ -2081,16 +2112,19 @@ const playPrevious = useCallback(() => {
     if (!isLoggedIn) {
       setSessionAvatarUrl('')
       setSessionAvatarPresetId('')
+      setSessionAvatarHistory([])
       setSessionStatus('auto')
       return undefined
     }
     setSessionAvatarUrl('')
     setSessionAvatarPresetId('')
+    setSessionAvatarHistory([])
     return subscribeChatProfile(
       sessionProfile.id,
       (profile) => {
         setSessionAvatarUrl(profile?.avatarUrl || '')
         setSessionAvatarPresetId(profile?.avatarPresetId || '')
+        setSessionAvatarHistory(Array.isArray(profile?.avatarHistory) ? profile.avatarHistory : [])
         setSessionStatus(normalizeChatPresenceMode(profile?.status))
       },
       () => {},
@@ -2588,19 +2622,223 @@ const playPrevious = useCallback(() => {
     setError('')
   }
 
-  const handleAvatarPick = async (event) => {
+  const clearAvatarPreview = () => {
+    setAvatarPreviewName('')
+    setPendingAvatarFile(null)
+    setAvatarCrop({ zoom: 1, x: 0, y: 0 })
+    setAvatarPreviewUrl((current) => {
+      if (current.startsWith('blob:')) URL.revokeObjectURL(current)
+      return ''
+    })
+  }
+
+  const cropAvatarFile = async (file, crop = { zoom: 1, x: 0, y: 0 }) => {
+    const objectUrl = URL.createObjectURL(file)
+    try {
+      const image = await new Promise((resolve, reject) => {
+        const img = new Image()
+        img.onload = () => resolve(img)
+        img.onerror = () => reject(new Error('画像を読み込めませんでした。'))
+        img.src = objectUrl
+      })
+      const size = 1200
+      const zoom = Number(crop.zoom) || 1
+      const offsetX = Number(crop.x) || 0
+      const offsetY = Number(crop.y) || 0
+      const canvas = document.createElement('canvas')
+      canvas.width = size
+      canvas.height = size
+      const ctx = canvas.getContext('2d')
+      if (!ctx) throw new Error('キャンバスを作成できませんでした。')
+
+      const scale = Math.min(1, size / Math.max(image.width, image.height))
+      const drawWidth = image.width * scale * zoom
+      const drawHeight = image.height * scale * zoom
+      const anchorX = (size - drawWidth) / 2 + offsetX * 2.2
+      const anchorY = (size - drawHeight) / 2 + offsetY * 2.2
+
+      ctx.clearRect(0, 0, size, size)
+      ctx.fillStyle = '#000000'
+      ctx.fillRect(0, 0, size, size)
+      ctx.beginPath()
+      ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2)
+      ctx.clip()
+      ctx.drawImage(image, anchorX, anchorY, drawWidth, drawHeight)
+
+      return await new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (!blob) reject(new Error('クロップした画像を生成できませんでした。'))
+          else resolve(new File([blob], file.name || 'avatar.jpg', { type: 'image/jpeg' }))
+        }, 'image/jpeg', 0.9)
+      })
+    } finally {
+      URL.revokeObjectURL(objectUrl)
+    }
+  }
+
+  const handleAvatarPick = (event) => {
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file || !isLoggedIn) return
+    clearAvatarPreview()
+    const previewUrl = URL.createObjectURL(file)
+    setPendingAvatarFile(file)
+    setAvatarPreviewUrl(previewUrl)
+    setAvatarPreviewName(file.name || 'avatar')
+    setAvatarCrop({ zoom: 1, x: 0, y: 0 })
+    setError('')
+  }
+
+  const clampAvatarCropOffset = (value, min = -80, max = 80) => Math.min(max, Math.max(min, value))
+
+  const handleAvatarCropReset = () => {
+    setAvatarCrop({ zoom: 1, x: 0, y: 0 })
+    avatarCropPinchRef.current = {
+      active: false,
+      initialDistance: 0,
+      initialZoom: 1,
+      initialX: 0,
+      initialY: 0,
+      initialCenterX: 0,
+      initialCenterY: 0,
+      pointerIds: [],
+    }
+    avatarCropDragRef.current = {
+      active: false,
+      pointerId: null,
+      startX: 0,
+      startY: 0,
+      originX: 0,
+      originY: 0,
+    }
+    avatarCropPointersRef.current.clear()
+  }
+
+  const handleAvatarCropDragStart = (event) => {
+    if (!avatarPreviewUrl) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    avatarCropPointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+
+    if (avatarCropPointersRef.current.size === 2) {
+      const points = [...avatarCropPointersRef.current.values()]
+      const dx = points[1].x - points[0].x
+      const dy = points[1].y - points[0].y
+      avatarCropPinchRef.current = {
+        active: true,
+        initialDistance: Math.hypot(dx, dy) || 1,
+        initialZoom: avatarCrop.zoom,
+        initialX: avatarCrop.x,
+        initialY: avatarCrop.y,
+        initialCenterX: (points[0].x + points[1].x) / 2,
+        initialCenterY: (points[0].y + points[1].y) / 2,
+        pointerIds: [...avatarCropPointersRef.current.keys()],
+      }
+      avatarCropDragRef.current.active = false
+      return
+    }
+
+    avatarCropDragRef.current = {
+      active: true,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: avatarCrop.x,
+      originY: avatarCrop.y,
+    }
+    avatarCropPinchRef.current.active = false
+  }
+
+  const handleAvatarCropDragMove = (event) => {
+    if (!avatarPreviewUrl) return
+    if (avatarCropPointersRef.current.has(event.pointerId)) {
+      avatarCropPointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    }
+
+    const pinch = avatarCropPinchRef.current
+    if (pinch.active && avatarCropPointersRef.current.size >= 2) {
+      const points = [...avatarCropPointersRef.current.values()]
+      const nextDistance = Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y) || 1
+      const scale = nextDistance / pinch.initialDistance
+      const nextZoom = Math.min(2.7, Math.max(1, Number((pinch.initialZoom * scale).toFixed(2))))
+      const midX = (points[0].x + points[1].x) / 2
+      const midY = (points[0].y + points[1].y) / 2
+      const dx = (midX - pinch.initialCenterX) / 1.4
+      const dy = (midY - pinch.initialCenterY) / 1.4
+      setAvatarCrop({
+        zoom: nextZoom,
+        x: clampAvatarCropOffset(pinch.initialX + dx),
+        y: clampAvatarCropOffset(pinch.initialY + dy),
+      })
+      return
+    }
+
+    const drag = avatarCropDragRef.current
+    if (!drag.active || event.pointerId !== drag.pointerId) return
+    const dx = (event.clientX - drag.startX) / 1.5
+    const dy = (event.clientY - drag.startY) / 1.5
+    setAvatarCrop((current) => ({
+      ...current,
+      x: clampAvatarCropOffset(drag.originX + dx),
+      y: clampAvatarCropOffset(drag.originY + dy),
+    }))
+  }
+
+  const handleAvatarCropDragEnd = (event) => {
+    if (event && avatarCropPointersRef.current.has(event.pointerId)) {
+      avatarCropPointersRef.current.delete(event.pointerId)
+    }
+
+    const pinch = avatarCropPinchRef.current
+    if (pinch.active && avatarCropPointersRef.current.size < 2) {
+      pinch.active = false
+      pinch.pointerIds = []
+    }
+
+    const drag = avatarCropDragRef.current
+    if (drag.active && event && event.pointerId === drag.pointerId) {
+      drag.active = false
+      drag.pointerId = null
+      drag.startX = 0
+      drag.startY = 0
+      drag.originX = 0
+      drag.originY = 0
+    }
+
+    if (avatarCropPointersRef.current.size === 0) {
+      avatarCropDragRef.current.active = false
+      avatarCropPinchRef.current.active = false
+    }
+  }
+
+  const handleAvatarCropWheel = (event) => {
+    if (!avatarPreviewUrl) return
+    event.preventDefault()
+    const nextZoom = Number((avatarCrop.zoom + (event.deltaY < 0 ? 0.12 : -0.12)).toFixed(2))
+    setAvatarCrop((current) => ({
+      ...current,
+      zoom: Math.min(2.7, Math.max(1, nextZoom)),
+    }))
+  }
+
+  const handleConfirmAvatarUpload = async () => {
+    if (!pendingAvatarFile || !isLoggedIn) return
     setAvatarUploading(true)
     setError('')
     try {
-      const url = await uploadUserAvatar(sessionProfile.id, file, {
+      const fileToUpload = (avatarCrop.zoom !== 1 || avatarCrop.x !== 0 || avatarCrop.y !== 0)
+        ? await cropAvatarFile(pendingAvatarFile, avatarCrop)
+        : pendingAvatarFile
+
+      const url = await uploadUserAvatar(sessionProfile.id, fileToUpload, {
         displayName: sessionProfile.displayName,
       })
       setSessionAvatarUrl(url)
       setSessionAvatarPresetId('')
-      setAvatarPickerOpen(false)
+      setPendingAvatarFile(null)
+      setAvatarCrop({ zoom: 1, x: 0, y: 0 })
+      clearAvatarPreview()
+      setAvatarPickerOpen(true)
     } catch (avatarError) {
       setError(getFirebaseErrorMessage(avatarError) || avatarError?.message || 'アバターの更新に失敗しました。')
     } finally {
@@ -2624,6 +2862,24 @@ const playPrevious = useCallback(() => {
     }
   }
 
+  const handleSelectAvatarHistory = async (url) => {
+    const nextUrl = String(url || '').trim()
+    if (!nextUrl || !isLoggedIn) return
+    setAvatarUploading(true)
+    setError('')
+    try {
+      await setUserAvatarFromHistory(sessionProfile.id, nextUrl)
+      setSessionAvatarUrl(nextUrl)
+      setSessionAvatarPresetId('')
+      clearAvatarPreview()
+      setAvatarPickerOpen(false)
+    } catch (avatarError) {
+      setError(getFirebaseErrorMessage(avatarError) || avatarError?.message || 'アバターの更新に失敗しました。')
+    } finally {
+      setAvatarUploading(false)
+    }
+  }
+
   const handleClearAvatar = async () => {
     if (!isLoggedIn) return
     setAvatarUploading(true)
@@ -2632,9 +2888,31 @@ const playPrevious = useCallback(() => {
       await clearUserAvatar(sessionProfile.id)
       setSessionAvatarPresetId('')
       setSessionAvatarUrl('')
+      clearAvatarPreview()
       setAvatarPickerOpen(false)
     } catch (avatarError) {
       setError(getFirebaseErrorMessage(avatarError) || avatarError?.message || 'アバターの更新に失敗しました。')
+    } finally {
+      setAvatarUploading(false)
+    }
+  }
+
+  const handleDeleteAvatarHistory = async (url) => {
+    const nextUrl = String(url || '').trim()
+    if (!nextUrl || !isLoggedIn) return
+    setAvatarUploading(true)
+    setError('')
+    try {
+      const nextHistory = await deleteUploadedAvatarHistory(sessionProfile.id, nextUrl)
+      setSessionAvatarHistory(nextHistory)
+      if (sessionAvatarUrl === nextUrl) {
+        setSessionAvatarUrl('')
+      }
+      if (avatarPreviewUrl === nextUrl) {
+        clearAvatarPreview()
+      }
+    } catch (avatarError) {
+      setError(getFirebaseErrorMessage(avatarError) || avatarError?.message || 'アップロード済みアバターの削除に失敗しました。')
     } finally {
       setAvatarUploading(false)
     }
@@ -5133,66 +5411,166 @@ const playPrevious = useCallback(() => {
             document.body,
           )
         : null}
-      {avatarPickerOpen ? (
-        <div
-          className="avatar-picker-overlay"
-          role="presentation"
-          onClick={() => setAvatarPickerOpen(false)}
-        >
-          <div
-            className="avatar-picker-sheet"
-            role="dialog"
-            aria-modal="true"
-            aria-label="アバターを選ぶ"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="avatar-picker-head">
-              <h3>アバターを選ぶ</h3>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="閉じる"
-                onClick={() => setAvatarPickerOpen(false)}
+      {avatarPickerOpen
+        ? createPortal(
+            <div
+              className="avatar-picker-overlay"
+              role="presentation"
+              onClick={() => setAvatarPickerOpen(false)}
+            >
+              <div
+                className="avatar-picker-sheet"
+                role="dialog"
+                aria-modal="true"
+                aria-label="アバターを選ぶ"
+                onClick={(event) => event.stopPropagation()}
               >
-                ×
-              </button>
-            </div>
-            <div className="avatar-picker-grid">
-              {AVATAR_PRESETS.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  className={`avatar-picker-option${sessionAvatarPresetId === preset.id ? ' is-active' : ''}`}
-                  onClick={() => void handleSelectAvatarPreset(preset.id)}
-                  disabled={avatarUploading}
-                  title={preset.label}
-                >
-                  <img src={preset.src} alt={preset.label} />
-                  <span>{preset.label}</span>
-                </button>
-              ))}
-            </div>
-            <div className="avatar-picker-actions">
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={avatarUploading}
-                onClick={() => avatarInputRef.current?.click()}
-              >
-                写真をアップロード
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={avatarUploading}
-                onClick={() => void handleClearAvatar()}
-              >
-                イニシャルに戻す
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+                <div className="avatar-picker-head">
+                  <h3>アバターを選ぶ</h3>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label="閉じる"
+                    onClick={() => setAvatarPickerOpen(false)}
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="avatar-picker-current">
+                  <div className="avatar-picker-current-frame">
+                    <img src={sessionAvatarSrc} alt="現在のアバター" />
+                  </div>
+                  <div className="avatar-picker-current-copy">
+                    <span>現在のアバター</span>
+                    <strong>{sessionAvatarLabel}</strong>
+                  </div>
+                </div>
+                {avatarPreviewUrl ? (
+                  <div className="avatar-picker-preview">
+                    <div className="avatar-picker-preview-label">プレビュー</div>
+                    <div
+                      className="avatar-picker-crop-stage"
+                      onPointerDown={handleAvatarCropDragStart}
+                      onPointerMove={handleAvatarCropDragMove}
+                      onPointerUp={handleAvatarCropDragEnd}
+                      onPointerLeave={handleAvatarCropDragEnd}
+                      onPointerCancel={handleAvatarCropDragEnd}
+                      onWheel={handleAvatarCropWheel}
+                    >
+                      <img
+                        src={avatarPreviewUrl}
+                        alt={avatarPreviewName || 'avatar preview'}
+                        style={{
+                          transform: `translate(${avatarCrop.x}px, ${avatarCrop.y}px) scale(${avatarCrop.zoom})`,
+                        }}
+                      />
+                    </div>
+                    <div className="avatar-picker-preview-meta">{avatarPreviewName || '新しい画像'}</div>
+                    <div className="avatar-picker-preview-actions">
+                      <button
+                        type="button"
+                        className="secondary-button avatar-picker-reset-btn"
+                        disabled={avatarUploading || (avatarCrop.zoom === 1 && avatarCrop.x === 0 && avatarCrop.y === 0)}
+                        onClick={handleAvatarCropReset}
+                      >
+                        Reset
+                      </button>
+                      <button
+                        type="button"
+                        className="primary-button"
+                        disabled={avatarUploading}
+                        onClick={() => void handleConfirmAvatarUpload()}
+                      >
+                        この画像を保存
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={avatarUploading}
+                        onClick={() => {
+                          handleAvatarCropReset()
+                          clearAvatarPreview()
+                        }}
+                      >
+                        キャンセル
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+                <div className="avatar-picker-grid">
+                  {AVATAR_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      className={`avatar-picker-option${sessionAvatarPresetId === preset.id ? ' is-active' : ''}`}
+                      onClick={() => void handleSelectAvatarPreset(preset.id)}
+                      disabled={avatarUploading}
+                      title={preset.label}
+                    >
+                      <img src={preset.src} alt={preset.label} />
+                      <span>{preset.label}</span>
+                      {sessionAvatarPresetId === preset.id ? <span className="avatar-picker-option-badge">選択中</span> : null}
+                    </button>
+                  ))}
+                </div>
+                {sessionAvatarHistory.length ? (
+                  <div className="avatar-picker-history">
+                    <div className="avatar-picker-history-title">アップロード済み</div>
+                    <div className="avatar-picker-grid avatar-picker-grid--history">
+                      {sessionAvatarHistory.map((url) => (
+                        <div key={url} className="avatar-picker-history-item">
+                          <button
+                            type="button"
+                            className={`avatar-picker-option${sessionAvatarUrl === url ? ' is-active' : ''}`}
+                            title="前にアップロードした画像を使う"
+                            disabled={avatarUploading}
+                            onClick={() => void handleSelectAvatarHistory(url)}
+                          >
+                            <img src={url} alt="過去のアバター" />
+                            <span>履歴</span>
+                            {sessionAvatarUrl === url ? <span className="avatar-picker-option-badge">選択中</span> : null}
+                          </button>
+                          <button
+                            type="button"
+                            className="avatar-picker-delete"
+                            title="この画像を削除"
+                            aria-label={`このアバターを削除: ${url}`}
+                            disabled={avatarUploading}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              void handleDeleteAvatarHistory(url)
+                            }}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                <div className="avatar-picker-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={avatarUploading}
+                    onClick={() => avatarInputRef.current?.click()}
+                  >
+                    写真をアップロード
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={avatarUploading}
+                    onClick={() => void handleClearAvatar()}
+                  >
+                    イニシャルに戻す
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
       {assignAlbumImageId && albumMenuPos
         ? createPortal(
@@ -5244,7 +5622,15 @@ const playPrevious = useCallback(() => {
           )
         : null}
 
-      {isLoggedIn ? <HanaChat appRole={authRole} guestKey={guestKey} /> : null}
+      {isLoggedIn ? (
+        <HanaChat
+          appRole={authRole}
+          guestKey={guestKey}
+          currentAvatarSrc={sessionAvatarSrc}
+          currentAvatarLabel={sessionAvatarLabel}
+          onOpenAvatarPicker={() => setAvatarPickerOpen(true)}
+        />
+      ) : null}
     </div>
   )
 }

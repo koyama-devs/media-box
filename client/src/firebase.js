@@ -205,14 +205,29 @@ export function resolveAccountKey(keyOrPass = '') {
 }
 
 function getLegacyAvatarProfileKeys(profileId = '') {
-  const candidates = [
-    normalizeAccountKey(profileId),
-    normalizeAccountKey(resolveAccountKey(profileId)),
-    'gabusan',
-    'gabu',
-    'gabriel',
-  ]
-  return [...new Set(candidates.filter(Boolean))]
+  const base = normalizeAccountKey(profileId || resolveAccountKey(profileId))
+  const canonical = normalizeAccountKey(resolveAccountKey(base || profileId))
+  const aliases = new Set([base, canonical].filter(Boolean))
+
+  if (canonical === 'gabusan' || base === 'gabusan' || canonical === 'gabu' || base === 'gabu' || canonical === 'gabriel' || base === 'gabriel') {
+    aliases.add('gabusan')
+    aliases.add('gabu')
+    aliases.add('gabriel')
+  }
+
+  if (canonical === 'hana' || base === 'hana') {
+    aliases.add('hana')
+  }
+
+  if (canonical === 'hiro' || base === 'hiro') {
+    aliases.add('hiro')
+  }
+
+  if (canonical === 'zen' || base === 'zen') {
+    aliases.add('zen')
+  }
+
+  return [...aliases]
 }
 
 export function isValidAccountKey(value) {
@@ -387,6 +402,7 @@ function serializeChatAccount(id, data = {}) {
       || (role === 'owner' ? 'オーナー' : 'ゲスト'),
     avatarUrl: String(data?.avatarUrl || ''),
     avatarPresetId: String(data?.avatarPresetId || '').trim(),
+    avatarHistory: normalizeAvatarHistory(data?.avatarHistory),
     allowedPlaylistIds: data?.role === 'owner'
       ? null
       : normalizeAllowedPlaylistIds(
@@ -566,19 +582,35 @@ function hashString(value) {
   return hash
 }
 
+const AVATAR_GRADIENT_PALETTE = [
+  ['#c45c4a', '#8a3324'],
+  ['#d97706', '#92400e'],
+  ['#059669', '#064e3b'],
+  ['#2563eb', '#1e3a8a'],
+  ['#7c3aed', '#4c1d95'],
+  ['#db2777', '#831843'],
+]
+
 /** Initials SVG data URL used when no custom avatar is set. */
 export function getDefaultAvatarDataUrl(profileId, displayName = '') {
   const label = String(displayName || profileId || '?').trim()
   const initial = Array.from(label)[0] || '?'
-  const color = AVATAR_PALETTE[hashString(profileId || label) % AVATAR_PALETTE.length]
+  const pair = AVATAR_GRADIENT_PALETTE[hashString(profileId || label) % AVATAR_GRADIENT_PALETTE.length]
   const safe = initial
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <circle cx="64" cy="64" r="64" fill="${color}"/>
-  <text x="64" y="64" text-anchor="middle" dominant-baseline="central" font-size="58" font-family="system-ui,-apple-system,'Segoe UI','Hiragino Sans','Noto Sans JP',sans-serif" font-weight="600" fill="#fff8f0">${safe}</text>
+  <defs>
+    <linearGradient id="def-init-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="${pair[0]}"/>
+      <stop offset="100%" stop-color="${pair[1]}"/>
+    </linearGradient>
+  </defs>
+  <circle cx="64" cy="64" r="64" fill="url(#def-init-grad)"/>
+  <circle cx="64" cy="64" r="62.5" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="1.5"/>
+  <text x="64" y="65" text-anchor="middle" dominant-baseline="central" font-size="54" font-family="system-ui,-apple-system,'Segoe UI','Hiragino Sans','Noto Sans JP',sans-serif" font-weight="700" fill="#ffffff">${safe}</text>
 </svg>`
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
 }
@@ -595,6 +627,34 @@ export function resolveAvatarSrc(profileId, displayName, customUrl = '', fallbac
   return getDefaultAvatarDataUrl(id, displayName)
 }
 
+export function normalizeAvatarHistory(raw = []) {
+  const seen = new Set()
+  const out = []
+  const source = Array.isArray(raw) ? raw : [raw]
+  for (const item of source) {
+    const value = String(item || '').trim()
+    if (!value) continue
+    if (!value.startsWith('data:') && !value.startsWith('blob:') && !/^https?:\/\//i.test(value)) continue
+    if (seen.has(value)) continue
+    seen.add(value)
+    out.push(value)
+    if (out.length >= 12) break
+  }
+  return out
+}
+
+export function normalizeAvatarStorageMap(raw = {}) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out = {}
+  Object.entries(raw).forEach(([key, value]) => {
+    const url = String(key || '').trim()
+    const path = String(value || '').trim()
+    if (!url || !path) return
+    out[url] = path
+  })
+  return out
+}
+
 function serializeChatProfile(id, data) {
   const account = serializeChatAccount(id, data)
   return {
@@ -607,6 +667,7 @@ function serializeChatProfile(id, data) {
     roleLabel: account.roleLabel,
     avatarUrl: account.avatarUrl,
     avatarPresetId: account.avatarPresetId,
+    avatarHistory: account.avatarHistory,
     status: normalizeChatPresenceMode(data?.status),
     updatedAt: account.updatedAt,
   }
@@ -1034,7 +1095,7 @@ export function subscribeChatProfiles(profileIds, onData, onError) {
   return () => unsubs.forEach((unsub) => unsub())
 }
 
-async function resizeImageToJpegBlob(file, maxSize = 256) {
+async function resizeImageToJpegBlob(file, maxSize = 1600) {
   const objectUrl = URL.createObjectURL(file)
   try {
     const image = await new Promise((resolve, reject) => {
@@ -1053,7 +1114,7 @@ async function resizeImageToJpegBlob(file, maxSize = 256) {
     if (!ctx) throw new Error('画像の変換に失敗しました。')
     ctx.drawImage(image, 0, 0, width, height)
     const blob = await new Promise((resolve) => {
-      canvas.toBlob((next) => resolve(next), 'image/jpeg', 0.88)
+      canvas.toBlob((next) => resolve(next), 'image/jpeg', 0.92)
     })
     if (!blob) throw new Error('画像の変換に失敗しました。')
     return blob
@@ -1078,16 +1139,28 @@ export async function uploadUserAvatar(profileId, file, meta = {}) {
     throw new Error('画像は8MB以下にしてください。')
   }
 
-  const blob = await resizeImageToJpegBlob(file, 256)
-  const objectRef = storageRef(storage, `avatars/${id}.jpg`)
+  const blob = await resizeImageToJpegBlob(file, 1024)
+  const stamp = Date.now()
+  const randomSuffix = Math.random().toString(36).slice(2, 10)
+  const objectRef = storageRef(storage, `avatars/${id}/${stamp}-${randomSuffix}.jpg`)
   await uploadBytes(objectRef, blob, { contentType: 'image/jpeg' })
   const avatarUrl = await getDownloadURL(objectRef)
   const nowIso = new Date().toISOString()
   const displayName = String(meta.displayName || '').trim()
+  const profileRef = doc(db, CHAT_PROFILES_COLLECTION, id)
+  const existingSnap = await getDoc(profileRef)
+  const existingData = existingSnap.exists() ? existingSnap.data() || {} : {}
+  const existingHistory = normalizeAvatarHistory(existingData.avatarHistory)
+  const existingStorageMap = normalizeAvatarStorageMap(existingData.avatarStorageByUrl)
+  const nextHistory = normalizeAvatarHistory([avatarUrl, ...existingHistory])
+  const nextStorageMap = { ...existingStorageMap }
+  nextStorageMap[avatarUrl] = objectRef.fullPath
   await setDoc(
-    doc(db, CHAT_PROFILES_COLLECTION, id),
+    profileRef,
     {
       avatarUrl,
+      avatarHistory: nextHistory,
+      avatarStorageByUrl: nextStorageMap,
       avatarPresetId: '',
       ...(displayName ? { displayName } : {}),
       updatedAt: serverTimestamp(),
@@ -1097,6 +1170,74 @@ export async function uploadUserAvatar(profileId, file, meta = {}) {
   )
   setCachedAvatarUrl(id, avatarUrl)
   return avatarUrl
+}
+
+export async function setUserAvatarFromHistory(profileId, url) {
+  const id = String(profileId || '').trim().toLowerCase()
+  const nextUrl = String(url || '').trim()
+  if (!id) throw new Error('プロフィールIDがありません。')
+  if (!nextUrl) throw new Error('アバターURLがありません。')
+  const nowIso = new Date().toISOString()
+  const profileRef = doc(db, CHAT_PROFILES_COLLECTION, id)
+  await setDoc(
+    profileRef,
+    {
+      avatarUrl: nextUrl,
+      avatarPresetId: '',
+      updatedAt: serverTimestamp(),
+      updatedAtIso: nowIso,
+    },
+    { merge: true },
+  )
+  setCachedAvatarUrl(id, nextUrl)
+  return nextUrl
+}
+
+export async function deleteUploadedAvatarHistory(profileId, url) {
+  const id = String(profileId || '').trim().toLowerCase()
+  const targetUrl = String(url || '').trim()
+  if (!id) throw new Error('プロフィールIDがありません。')
+  if (!targetUrl) throw new Error('削除するアバターURLがありません。')
+
+  const nowIso = new Date().toISOString()
+  const profileRef = doc(db, CHAT_PROFILES_COLLECTION, id)
+  const profileSnap = await getDoc(profileRef)
+  const data = profileSnap.exists() ? profileSnap.data() || {} : {}
+  const history = normalizeAvatarHistory(data.avatarHistory)
+  const storageMap = normalizeAvatarStorageMap(data.avatarStorageByUrl)
+  const nextHistory = history.filter((item) => item !== targetUrl)
+  const nextStorageMap = { ...storageMap }
+  const pathToDelete = nextStorageMap[targetUrl]
+  delete nextStorageMap[targetUrl]
+
+  const nextAvatarUrl = String(data.avatarUrl || '').trim()
+  const shouldClearCurrent = nextAvatarUrl === targetUrl
+
+  await setDoc(
+    profileRef,
+    {
+      avatarUrl: shouldClearCurrent ? '' : nextAvatarUrl,
+      avatarHistory: nextHistory,
+      avatarStorageByUrl: nextStorageMap,
+      avatarPresetId: shouldClearCurrent ? '' : data.avatarPresetId || '',
+      updatedAt: serverTimestamp(),
+      updatedAtIso: nowIso,
+    },
+    { merge: true },
+  )
+
+  if (pathToDelete) {
+    try {
+      await deleteObject(storageRef(storage, pathToDelete))
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (shouldClearCurrent) {
+    setCachedAvatarUrl(id, '')
+  }
+  return nextHistory
 }
 
 /** Pick a built-in character avatar; clears uploaded avatarUrl. */
