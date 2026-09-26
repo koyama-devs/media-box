@@ -3630,17 +3630,10 @@ export function subscribeChatCallCandidates(threadId, callId, role, onCandidate,
 }
 
 async function collectLegacyMessageDocs(messagesRef) {
-  const byId = new Map()
-  const take = (snap) => {
-    snap?.docs?.forEach((document) => byId.set(document.id, document))
-  }
-  take(await getDocs(query(messagesRef, orderBy('createdAtIso', 'desc'), limit(300))))
-  try {
-    take(await getDocs(query(messagesRef, orderBy('createdAt', 'desc'), limit(300))))
-  } catch {
-    /* createdAt index/query is optional */
-  }
-  return [...byId.values()]
+  // Migration must inspect the complete subcollection. A 300/300 limit can leave
+  // older messages behind and make a repaired thread appear to have lost history.
+  const snap = await getDocs(messagesRef)
+  return snap.docs
 }
 
 /**
@@ -3654,33 +3647,103 @@ export async function migrateLegacyGuestThread({
   guestLabel,
   guestKey,
 }) {
-  if (!canonicalId || !legacyThreadId || canonicalId === legacyThreadId) {
-    return canonicalId || legacyThreadId
+  const canonical = String(canonicalId || '').trim()
+  const legacy = String(legacyThreadId || '').trim()
+  if (!canonical || !legacy || canonical === legacy) return canonical || legacy
+
+  const canonThreadRef = doc(db, CHAT_THREADS_COLLECTION, canonical)
+  const legacyThreadRef = doc(db, CHAT_THREADS_COLLECTION, legacy)
+  const canonMessagesRef = collection(canonThreadRef, 'messages')
+  const legacyMessagesRef = collection(legacyThreadRef, 'messages')
+
+  const [canonThreadSnap, legacyThreadSnap] = await Promise.all([
+    getDoc(canonThreadRef),
+    getDoc(legacyThreadRef),
+  ])
+  const canonMeta = canonThreadSnap.exists() ? canonThreadSnap.data() || {} : {}
+  const legacyMeta = legacyThreadSnap.exists() ? legacyThreadSnap.data() || {} : {}
+
+  // IMPORTANT: never stop just because canonical already has messages.
+  // A legacy UUID can contain newer messages than guest-{key}. Both histories
+  // must be reconciled into the canonical thread before either side reopens it.
+  const [canonDocs, legacyDocs] = await Promise.all([
+    collectLegacyMessageDocs(canonMessagesRef),
+    collectLegacyMessageDocs(legacyMessagesRef),
+  ])
+
+  const canonicalById = new Map(canonDocs.map((d) => [d.id, d]))
+  const canonicalByClientId = new Map()
+  for (const d of canonDocs) {
+    const cid = String(d.data()?.clientId || '').trim()
+    if (cid) canonicalByClientId.set(cid, d.id)
   }
 
-  const canonMessagesRef = collection(db, CHAT_THREADS_COLLECTION, canonicalId, 'messages')
-  const legacyMessagesRef = collection(db, CHAT_THREADS_COLLECTION, legacyThreadId, 'messages')
+  const nowIso = new Date().toISOString()
+  const migratedIds = []
+  const writeQueue = []
 
-  // Only skip message copy when canonical already has queryable newest messages.
-  // Still heal weightGarden / pokeWorld if they were left on the legacy UUID.
-  const canonIsoSnap = await getDocs(query(
-    canonMessagesRef,
-    orderBy('createdAtIso', 'desc'),
-    limit(1),
-  ))
-  const [legacyThreadSnap, canonThreadSnap] = await Promise.all([
-    getDoc(doc(db, CHAT_THREADS_COLLECTION, legacyThreadId)),
-    getDoc(doc(db, CHAT_THREADS_COLLECTION, canonicalId)),
-  ])
-  const legacyMeta = legacyThreadSnap.exists() ? legacyThreadSnap.data() : {}
-  const canonMeta = canonThreadSnap.exists() ? canonThreadSnap.data() : {}
+  for (const legacyDoc of legacyDocs) {
+    const data = legacyDoc.data() || {}
+    const clientId = String(data.clientId || '').trim()
+
+    // Same clientId is the strongest duplicate signal. Same message ID is also
+    // considered duplicate only when its clientId (if present) agrees.
+    const existingById = canonicalById.get(legacyDoc.id)
+    const existingClientId = String(existingById?.data?.()?.clientId || '').trim()
+    if (clientId && canonicalByClientId.has(clientId)) continue
+    if (existingById && (!clientId || !existingClientId || clientId === existingClientId)) continue
+
+    const createdAtIso = data.createdAtIso
+      || data.createdAt?.toDate?.()?.toISOString?.()
+      || nowIso
+
+    // If the same Firestore ID belongs to different content, generate a fresh
+    // ID instead of overwriting the canonical message.
+    const targetRef = existingById
+      ? doc(canonMessagesRef)
+      : doc(canonMessagesRef, legacyDoc.id)
+    const targetId = targetRef.id
+    const migratedData = {
+      ...data,
+      createdAtIso,
+      ...(targetId !== legacyDoc.id ? { migratedFromMessageId: legacyDoc.id } : {}),
+      migratedFromThreadId: legacy,
+    }
+    writeQueue.push({ targetRef, data: migratedData })
+    canonicalById.set(targetId, { id: targetId, data: () => migratedData })
+    if (clientId) canonicalByClientId.set(clientId, targetId)
+    migratedIds.push(targetId)
+  }
+
+  for (let i = 0; i < writeQueue.length; i += 50) {
+    const batch = writeBatch(db)
+    writeQueue.slice(i, i + 50).forEach(({ targetRef, data }) => {
+      batch.set(targetRef, data, { merge: true })
+    })
+    await batch.commit()
+  }
+
+  const dateOf = (data) => {
+    const iso = String(data?.createdAtIso || '').trim()
+    const isoMs = Date.parse(iso)
+    if (Number.isFinite(isoMs)) return isoMs
+    const tsMs = data?.createdAt?.toMillis?.()
+    return Number.isFinite(tsMs) ? tsMs : 0
+  }
+  const allMetaDocs = [
+    ...canonDocs.map((d) => d.data() || {}),
+    ...legacyDocs.map((d) => d.data() || {}),
+    ...writeQueue.map((x) => x.data),
+  ]
+  const latestMessage = allMetaDocs.reduce((best, row) => (
+    dateOf(row) >= dateOf(best) ? row : best
+  ), {})
 
   const healPatch = {}
-  // Move any legacy thread weigh-ins into shared-state (source of truth).
-  // Do NOT write weightGarden back onto chatThreads — that path kept wiping logs.
   void absorbWeightGardenIntoShared(
     pickRicherWeightGarden(canonMeta.weightGarden, legacyMeta.weightGarden),
   ).catch(() => {})
+
   const canonPoke = serializePokeZukan(canonMeta.pokeZukan)
   const legacyPoke = serializePokeZukan(legacyMeta.pokeZukan)
   const canonScore = pokeWorldProgressScore(canonPoke.world)
@@ -3693,64 +3756,94 @@ export async function migrateLegacyGuestThread({
       world: pickRicherPokeWorld(canonPoke.world, legacyPoke.world),
     }
   } else if (legacyMeta.pokeZukan && (!canonMeta.pokeZukan || canonScore <= 40)) {
-    // Starter-only worlds (wiped) lose to any legacy progress.
     healPatch.pokeZukan = legacyPoke
   }
   if (legacyMeta.jpTripArrivedAtIso && !canonMeta.jpTripArrivedAtIso) {
     healPatch.jpTripArrivedAtIso = legacyMeta.jpTripArrivedAtIso
     if (legacyMeta.jpTripArrivedAt) healPatch.jpTripArrivedAt = legacyMeta.jpTripArrivedAt
   }
-  if (Object.keys(healPatch).length) {
-    await setDoc(doc(db, CHAT_THREADS_COLLECTION, canonicalId), healPatch, { merge: true })
-  }
 
-  if (!canonIsoSnap.empty) return canonicalId
+  const latestText = String(latestMessage.text || '').trim()
+  const legacyLast = String(legacyMeta.lastText || '').trim()
+  const canonLast = String(canonMeta.lastText || '').trim()
+  const lastText = latestText || legacyLast || canonLast
+  const latestIso = String(latestMessage.createdAtIso || '').trim()
 
-  const legacyDocs = await collectLegacyMessageDocs(legacyMessagesRef)
-
-  // Empty canonical must not steal the live UUID thread.
-  if (!legacyDocs.length) return legacyThreadId
-
-  const nowIso = new Date().toISOString()
   const patch = {
-    guestLabel: guestLabel || legacyMeta.guestLabel || guestLabelFromUid(canonicalId),
-    guestKey: guestKey || legacyMeta.guestKey || String(canonicalId).replace(/^guest-/, ''),
-    lastText: legacyMeta.lastText || '',
+    guestLabel: guestLabel || canonMeta.guestLabel || legacyMeta.guestLabel || guestLabelFromUid(canonical),
+    guestKey: guestKey || canonMeta.guestKey || legacyMeta.guestKey || String(canonical).replace(/^guest-/, ''),
+    ...(lastText ? { lastText: lastText.slice(0, 160) } : {}),
     updatedAt: serverTimestamp(),
-    updatedAtIso: legacyMeta.updatedAtIso || nowIso,
-    unreadByHana: Boolean(legacyMeta.unreadByHana),
-    unreadByGuest: Boolean(legacyMeta.unreadByGuest),
-    unreadCountHana: Math.max(0, Number(legacyMeta.unreadCountHana) || 0),
-    unreadCountGuest: Math.max(0, Number(legacyMeta.unreadCountGuest) || 0),
-    guestLastReadAt: legacyMeta.guestLastReadAt || null,
-    hanaLastReadAt: legacyMeta.hanaLastReadAt || null,
-    migratedFrom: legacyThreadId,
+    updatedAtIso: latestIso || legacyMeta.updatedAtIso || canonMeta.updatedAtIso || nowIso,
+    unreadByHana: Boolean(canonMeta.unreadByHana || legacyMeta.unreadByHana),
+    unreadByGuest: Boolean(canonMeta.unreadByGuest || legacyMeta.unreadByGuest),
+    unreadCountHana: Math.max(
+      Number(canonMeta.unreadCountHana) || 0,
+      Number(legacyMeta.unreadCountHana) || 0,
+    ),
+    unreadCountGuest: Math.max(
+      Number(canonMeta.unreadCountGuest) || 0,
+      Number(legacyMeta.unreadCountGuest) || 0,
+    ),
+    guestLastReadAt: canonMeta.guestLastReadAt || legacyMeta.guestLastReadAt || null,
+    hanaLastReadAt: canonMeta.hanaLastReadAt || legacyMeta.hanaLastReadAt || null,
+    ...(legacyDocs.length ? { migratedFrom: legacy } : {}),
+    ...(migratedIds.length ? { migratedMessageCount: migratedIds.length } : {}),
     ...healPatch,
   }
 
-  await setDoc(
-    doc(db, CHAT_THREADS_COLLECTION, canonicalId),
-    patch,
-    { merge: true },
-  )
+  await setDoc(canonThreadRef, patch, { merge: true })
+  return canonical
+}
 
-  for (let i = 0; i < legacyDocs.length; i += 50) {
-    const batch = writeBatch(db)
-    legacyDocs.slice(i, i + 50).forEach((messageDoc) => {
-      const data = messageDoc.data() || {}
-      const createdAtIso = data.createdAtIso
-        || data.createdAt?.toDate?.()?.toISOString?.()
-        || nowIso
-      batch.set(
-        doc(canonMessagesRef, messageDoc.id),
-        { ...data, createdAtIso },
-        { merge: true },
-      )
-    })
-    await batch.commit()
+/**
+ * Consolidate every known thread for a guest into guest-{key}.
+ * This is intentionally idempotent and safe to call on every chat open.
+ */
+export async function consolidateGuestThreads({
+  guestKey = '',
+  canonicalId = '',
+  guestLabel = '',
+  preferredId = '',
+} = {}) {
+  const key = normalizeAccountKey(guestKey || String(canonicalId || '').replace(/^guest-/, ''))
+  const canonical = canonicalId || (key ? `guest-${key}` : '')
+  if (!canonical) return preferredId || ''
+  const label = String(guestLabel || '').trim()
+  const ids = new Set([canonical])
+  if (preferredId) ids.add(String(preferredId).trim())
+
+  const queries = []
+  if (key) {
+    queries.push(getDocs(query(
+      collection(db, CHAT_THREADS_COLLECTION),
+      where('guestKey', '==', key),
+      limit(50),
+    )))
+  }
+  if (label) {
+    queries.push(getDocs(query(
+      collection(db, CHAT_THREADS_COLLECTION),
+      where('guestLabel', '==', label),
+      limit(50),
+    )))
+  }
+  const snaps = await Promise.all(queries.map((p) => p.catch(() => null)))
+  for (const snap of snaps) {
+    snap?.docs?.forEach((d) => ids.add(d.id))
   }
 
-  return canonicalId
+  // Also inspect the preferred/canonical docs even if their metadata is stale.
+  const candidates = [...ids].filter((id) => id && id !== canonical)
+  for (const id of candidates) {
+    await migrateLegacyGuestThread({
+      canonicalId: canonical,
+      legacyThreadId: id,
+      guestLabel: label,
+      guestKey: key,
+    })
+  }
+  return canonical
 }
 
 /** Guest: watch own thread metadata (unread badge). */

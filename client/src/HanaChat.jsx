@@ -49,6 +49,7 @@ import {
   chatWithHanachan,
   classifyChatAttachment,
   confirmJpTripArrived,
+  consolidateGuestThreads,
   DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
   deleteChatMessage,
   ensureChatThread,
@@ -66,7 +67,6 @@ import {
   listGuestProfiles,
   markThreadRead,
   messageEditWindowMsFromMinutes,
-  migrateLegacyGuestThread,
   migrateLocalPinsToThread,
   normalizeChatPresenceMode,
   OWNER_PROFILE,
@@ -95,7 +95,7 @@ import {
   translateChatMessage,
   unpinThreadChatMessage,
   updateChatMessage,
-  uploadChatAttachment,
+  uploadChatAttachment
 } from './firebase'
 import FlowerRainLayer, {
   CHAT_PARTY_REACTION,
@@ -1793,43 +1793,39 @@ export default function HanaChat({
     let cancelled = false
     void (async () => {
       try {
-        const resolved = await resolveGuestThreadWithHistory({
+        const canonical = await consolidateGuestThreads({
           guestKey: profile.key,
           canonicalId: canon,
           guestLabel: profile.displayName,
-          preferredId: guestChatId || canon,
+          preferredId: guestChatId,
         })
-        if (cancelled || !resolved) return
-        let openId = resolved
-        if (resolved !== canon) {
-          const checkKey = `${canon}←${resolved}`
-          if (!migrationCheckedRef.current.has(checkKey)) {
-            migrationCheckedRef.current.add(checkKey)
-            const migrated = await migrateLegacyGuestThread({
-              canonicalId: canon,
-              legacyThreadId: resolved,
-              guestLabel: profile.displayName,
-              guestKey: profile.key,
-            })
-            if (migrated) openId = migrated
-          }
-        }
-        if (cancelled || !openId || openId === guestChatId) return
-        const cached = messageCacheRef.current.get(openId)
-          || messageCacheRef.current.get(resolved)
-          || messageCacheRef.current.get(canon)
+        if (cancelled || !canonical) return
+        const cached = messageCacheRef.current.get(canonical)
+          || messageCacheRef.current.get(guestChatId)
         if (Array.isArray(cached) && cached.length) {
-          messageCacheRef.current.set(openId, cached)
+          messageCacheRef.current.set(canonical, cached)
           setHanaMessages(cached)
         }
-        setGuestChatId(openId)
+        if (canonical !== guestChatId) setGuestChatId(canonical)
       } catch {
-        /* keep guest-zen; owner resolve still finds the UUID thread */
+        try {
+          const resolved = await resolveGuestThreadWithHistory({
+            guestKey: profile.key,
+            canonicalId: canon,
+            guestLabel: profile.displayName,
+            preferredId: guestChatId,
+          })
+          if (!cancelled && resolved) {
+            const cached = messageCacheRef.current.get(resolved)
+            if (Array.isArray(cached) && cached.length) setHanaMessages(cached)
+            setGuestChatId(resolved)
+          }
+        } catch {
+          /* keep current thread */
+        }
       }
     })()
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [hidden, actingAsOwner, guestKey, guestChatId])
 
   useEffect(() => {
@@ -3909,94 +3905,26 @@ export default function HanaChat({
   const openOwnerThread = (threadId, label, guestKey = '', canonicalId = '') => {
     clearComposerExtras()
     clearComposerAttach()
-    const key = guestKey || (canonicalId || threadId).replace(/^guest-/, '')
+    const key = String(guestKey || (canonicalId || threadId).replace(/^guest-/, '') || '').trim().toLowerCase()
     const canon = canonicalId || (key ? `guest-${key}` : '')
     const localMatches = threadsRef.current.filter((t) => (
-      t.id === threadId
-      || (canon && t.id === canon)
-      || (key && t.guestKey === key)
-      || (label && t.guestLabel === label)
+      t.id === threadId || (canon && t.id === canon) || (key && t.guestKey === key) || (label && t.guestLabel === label)
     ))
     const relatedIds = localMatches.map((t) => t.id).filter(Boolean)
-    const localBest = [...localMatches].sort((a, b) => {
-      const score = (entry) => {
-        const hasText = String(entry.lastText || '').trim() ? 40 : 0
-        const canonHit = canon && entry.id === canon && hasText ? 16 : 0
-        const keyHit = key && entry.guestKey === key ? 1 : 0
-        return hasText + canonHit + keyHit
-      }
-      const diff = score(b) - score(a)
-      if (diff !== 0) return diff
-      return String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
-    })[0]
-    const openId = localBest?.id || threadId || canon
+    const openId = canon || localMatches[0]?.id || threadId
     if (!openId) return
-
     if (openId !== activeThreadId) {
-      showThreadMessages(openId, [...relatedIds, canon, threadId])
+      showThreadMessages(openId, [...relatedIds, threadId, canon].filter(Boolean))
       setMessagesHydrated(false)
       setShowSummerFx(false)
       setActiveThreadId(openId)
     }
-
-    const ensureId = (canon && canon.startsWith('guest-')) ? canon : (openId.startsWith('guest-') ? openId : '')
-    const alreadyExists = Boolean(
-      ensureId && threadsRef.current.some((thread) => thread.id === ensureId),
-    )
-
-    void (async () => {
-      let historyId = openId
-      try {
-        const resolved = await resolveGuestThreadWithHistory({
-          guestKey: key,
-          canonicalId: canon,
-          guestLabel: label,
-          preferredId: openId,
-        })
-        if (resolved) historyId = resolved
-        if (resolved && resolved !== openId) {
-          showThreadMessages(resolved, [...relatedIds, openId, canon, threadId])
-          setMessagesHydrated(false)
-          setShowSummerFx(false)
-          setActiveThreadId(resolved)
-        }
-      } catch {
-        /* ignore */
-      }
-
-      if (canon && historyId && canon !== historyId) {
-        const checkKey = `${canon}←${historyId}`
-        if (!migrationCheckedRef.current.has(checkKey)) {
-          migrationCheckedRef.current.add(checkKey)
-          try {
-            const migrated = await migrateLegacyGuestThread({
-              canonicalId: canon,
-              legacyThreadId: historyId,
-              guestLabel: label,
-              guestKey: key,
-            })
-            if (migrated && migrated !== historyId) {
-              showThreadMessages(migrated, [...relatedIds, historyId, openId, canon])
-              setActiveThreadId(migrated)
-            }
-          } catch {
-            /* ignore */
-          }
-        }
-      }
-
-      if (ensureId && !alreadyExists) {
-        try {
-          await ensureChatThread({
-            threadId: ensureId,
-            guestLabel: label,
-            guestKey: key || ensureId.replace(/^guest-/, ''),
-          })
-        } catch {
-          /* ignore */
-        }
-      }
-    })()
+    void consolidateGuestThreads({
+      guestKey: key,
+      canonicalId: canon,
+      guestLabel: label,
+      preferredId: threadId || openId,
+    }).catch(() => {})
   }
 
   const startReply = (message) => {
@@ -4115,7 +4043,7 @@ export default function HanaChat({
     try {
       threadId = actingAsOwner
         ? activeThreadId
-        : (guestChatId || ensureGuestChatId(guestKey || 'guest'))
+        : (guestProfile?.key ? `guest-${guestProfile.key}` : (guestChatId || ensureGuestChatId(guestKey || 'guest')))
       if (!actingAsOwner) {
         if (!guestChatId) setGuestChatId(threadId)
         if (channel !== 'human') switchToHuman(HUMAN_SWITCH_INTENT)
@@ -4273,7 +4201,7 @@ export default function HanaChat({
     const role = actingAsOwner ? 'hana' : 'guest'
     const threadId = actingAsOwner
       ? activeThreadId
-      : (guestChatId || ensureGuestChatId(guestKey || 'guest'))
+      : (guestProfile?.key ? `guest-${guestProfile.key}` : (guestChatId || ensureGuestChatId(guestKey || 'guest')))
     if (!threadId) {
       setError('送信先のチャットを選んでください。')
       return
@@ -4500,7 +4428,7 @@ export default function HanaChat({
       const target = songShareTargetRef.current
       const threadId = target.actingAsOwner
         ? target.activeThreadId
-        : (target.guestChatId || ensureGuestChatId(target.guestKey || 'guest'))
+        : (target.guestKey ? `guest-${target.guestKey}` : target.guestChatId || ensureGuestChatId('guest'))
       if (!threadId) {
         detail.accepted = false
         detail.reason = '送信先のチャットを選んでください。'
@@ -4546,7 +4474,7 @@ export default function HanaChat({
     try {
       const threadId = actingAsOwner
         ? activeThreadId
-        : (guestChatId || ensureGuestChatId(guestKey || 'guest'))
+        : (guestProfile?.key ? `guest-${guestProfile.key}` : (guestChatId || ensureGuestChatId(guestKey || 'guest')))
       if (!actingAsOwner) {
         if (!guestChatId) setGuestChatId(threadId)
         if (channel !== 'human') switchToHuman(HUMAN_SWITCH_INTENT)
@@ -4941,7 +4869,7 @@ export default function HanaChat({
 
     const threadId = actingAsOwner
       ? (activeThreadId || '')
-      : (guestChatId || ensureGuestChatId(guestKey || 'guest'))
+      : (guestProfile?.key ? `guest-${guestProfile.key}` : (guestChatId || ensureGuestChatId(guestKey || 'guest')))
     if (!threadId) {
       setError('送信先のチャットを選んでください。')
       return
@@ -5179,14 +5107,7 @@ export default function HanaChat({
         }
         // Always prefer canonical guest-{key} when known so reopen finds the send.
         const canonId = ownerActiveGuestKey ? `guest-${ownerActiveGuestKey}` : ''
-        const threadId = (
-          (canonId && (
-            activeThreadId === canonId
-            || threadsRef.current.some((t) => t.id === canonId)
-          ))
-            ? canonId
-            : activeThreadId
-        )
+        const threadId = canonId || activeThreadId
         if (threadId !== activeThreadId) {
           showThreadMessages(threadId, [activeThreadId, canonId].filter(Boolean))
           setActiveThreadId(threadId)
@@ -5346,8 +5267,10 @@ export default function HanaChat({
         if (channel !== 'human') {
           switchToHuman(HUMAN_SWITCH_INTENT)
         }
-        const threadId = guestChatId || ensureGuestChatId(guestKey || 'guest')
-        if (!guestChatId) setGuestChatId(threadId)
+        const threadId = guestProfile?.key
+          ? `guest-${guestProfile.key}`
+          : ensureGuestChatId(guestKey || 'guest')
+        if (guestChatId !== threadId) setGuestChatId(threadId)
         const pendingId = nextChatPendingId('msg')
         pendingSendId = pendingId
         const localMedia = localMediaFieldsFromQueue(queued)
@@ -5514,8 +5437,8 @@ export default function HanaChat({
         })
         if (data?.reason === 'quota') {
           switchToHuman(HUMAN_SWITCH_QUOTA)
-          const threadId = guestChatId || ensureGuestChatId(guestKey || 'guest')
-          if (!guestChatId) setGuestChatId(threadId)
+          const threadId = guestProfile?.key ? `guest-${guestProfile.key}` : (guestChatId || ensureGuestChatId(guestKey || 'guest'))
+          if (guestChatId !== threadId) setGuestChatId(threadId)
           await sendChatMessage({
             threadId,
             text,
@@ -5559,7 +5482,7 @@ export default function HanaChat({
       if (!actingAsOwner && channel === 'ai' && looksQuota && !pendingEditId) {
         switchToHuman(HUMAN_SWITCH_QUOTA)
         try {
-          const threadId = guestChatId || ensureGuestChatId(guestKey || 'guest')
+          const threadId = guestProfile?.key ? `guest-${guestProfile.key}` : (guestChatId || ensureGuestChatId(guestKey || 'guest'))
           await sendChatMessage({
             threadId,
             text,
