@@ -2602,12 +2602,6 @@ export default function HanaChat({
         status: chatProfiles[ownerActiveGuestKey]?.status || activeThreadMeta?.guestStatus,
       }, Date.now())
     }
-    if (channel === 'ai') {
-      return resolveChatPresence({
-        onlineAt: new Date().toISOString(),
-        status: 'auto',
-      }, Date.now())
-    }
     return resolveChatPresence({
       onlineAt: activeThreadMeta?.hanaOnlineAt,
       status: chatProfiles[OWNER_PROFILE.key]?.status || activeThreadMeta?.hanaStatus,
@@ -5784,12 +5778,8 @@ export default function HanaChat({
 
   const modeTitle = actingAsOwner
     ? (activeThreadId ? ownerActiveGuestLabel : 'はな')
-    : channel === 'human'
-      ? 'はな'
-      : 'はなちゃん'
-  const modeSub = actingAsOwner || channel === 'human'
-    ? ''
-    : 'はなちゃんとお話し中'
+    : 'はな'
+  const modeSub = ''
   const presenceLabel = partnerPresence.label
   const myStatusLabel = myPresence.label
 
@@ -7101,9 +7091,7 @@ export default function HanaChat({
                       ? '返信を書く…'
                       : actingAsOwner
                         ? 'ゲストに返信…'
-                        : channel === 'human'
-                          ? 'はなに送る…'
-                          : 'はなちゃんに話しかける…'
+                        : 'はなに送る…'
                 }
                 maxLength={2000}
                 disabled={actingAsOwner && !activeThreadId}

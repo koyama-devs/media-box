@@ -1,6 +1,15 @@
 {
-  "updatedAt": "2026-09-29T17:29:21.216Z",
+  "updatedAt": "2026-09-29T17:38:24.075Z",
   "releases": [
+    {
+      "version": "mumylke3-2mu7et",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T17:37:32.815Z",
+      "previousVersion": "mumy9tyr-z67f0u",
+      "previousHostingVersionId": "ac76aab8cde57e3b",
+      "hostingVersionId": "a46292235030dc12",
+      "recordedAt": "2026-09-29T17:37:33.321Z"
+    },
     {
       "version": "mumy9tyr-z67f0u",
       "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
@@ -351,15 +360,6 @@
       "previousHostingVersionId": "b90a828dab60f508",
       "hostingVersionId": "a6e8729928d66e1f",
       "recordedAt": "2026-09-20T14:44:18.338Z"
-    },
-    {
-      "version": "mu9x0nwl-9ico85",
-      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
-      "builtAt": "2026-09-20T14:32:18.783Z",
-      "previousVersion": "mu9vtbpt-4rvc2k",
-      "previousHostingVersionId": "7ce9b34af65b5153",
-      "hostingVersionId": "b90a828dab60f508",
-      "recordedAt": "2026-09-20T14:32:19.262Z"
     }
   ]
 }
