@@ -5,119 +5,120 @@ import hanachanArt from './assets/hanachan.svg'
 import ChatAvatar from './ChatAvatar'
 import { CHAT_CARD_SHARE_EVENT, CHAT_CLOSE_EVENT } from './chatCardShare'
 import {
-    addChatReminder,
-    dueChatReminders,
-    loadAllLocalChatPins,
-    loadChatPins,
-    markChatReminderDone,
-    remindAtFromChoice,
-    toggleChatPin,
-    unpinChatMessageEverywhere
+  addChatReminder,
+  dueChatReminders,
+  loadAllLocalChatPins,
+  loadChatPins,
+  markChatReminderDone,
+  remindAtFromChoice,
+  toggleChatPin,
+  unpinChatMessageEverywhere
 } from './chatExtras'
 import ChatImageLightbox from './ChatImageLightbox'
 import { collectMessageSearchHits, normalizeMessageSearchQuery } from './chatMessageSearch'
 import ChatNatsuFireworks from './ChatNatsuFireworks'
 import { playChatNotifySound, unlockChatNotifySound } from './chatNotifySound'
 import {
-    listChatOutboxForThread,
-    listChatRecoveryForThread,
-    outboxEntryToLocalMessage,
-    removeChatOutbox,
-    resolveRetryableOutboxEntry,
-    upsertChatOutbox
+  listChatOutboxForThread,
+  listChatRecoveryForThread,
+  outboxEntryToLocalMessage,
+  removeChatOutbox,
+  resolveRetryableOutboxEntry,
+  upsertChatOutbox
 } from './chatOutbox'
 import ChatPokeZukan, { PokeZukanChip } from './ChatPokeZukan'
 import {
-    readDefaultReaction,
-    readEnterToSend,
-    readMessageSound,
-    readStickerSet,
-    readVoiceSkin,
-    writeDefaultReaction,
-    writeEnterToSend,
-    writeMessageSound,
-    writeStickerSet,
-    writeVoiceSkin,
+  readDefaultReaction,
+  readEnterToSend,
+  readMessageSound,
+  readStickerSet,
+  readVoiceSkin,
+  writeDefaultReaction,
+  writeEnterToSend,
+  writeMessageSound,
+  writeStickerSet,
+  writeVoiceSkin,
 } from './chatSettings'
 import { canMutateOwnMessage, useIsCoarsePointer } from './ChatSwipeBubble'
 import ChatWeightGarden, { WeightGardenChip } from './ChatWeightGarden'
 import EmotionMomentLayer, { EMOTION_MOMENTS, triggerEmotionMoment } from './EmotionMoment'
 import {
-    analyzeGuestMessageForOwner,
-    applyReactionLocally,
-    broadcastChatEffect,
-    CHAT_PRESENCE_MODES,
-    CHAT_REACTION_EMOJIS,
-    chatWithHanachan,
-    classifyChatAttachment,
-    confirmJpTripArrived,
-    consolidateGuestThreads,
-    DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
-    deleteChatMessage,
-    ensureChatThread,
-    ensureDefaultChatAccounts,
-    ensureGuestChatId,
-    ensureWeightGardenDefaults,
-    fetchChatMessages,
-    fetchChatThreadMediaItems,
-    formatChatFileSize,
-    formatChatTimestamp,
-    getChatMessageAttachments,
-    getFirebaseErrorMessage,
-    getGuestProfile,
-    getMessageDeliveryStatus,
-    isChatAudioAttachment,
-    listGuestProfiles,
-    markThreadRead,
-    messageEditWindowMsFromMinutes,
-    migrateLocalPinsToThread,
-    normalizeChatPresenceMode,
-    OWNER_PROFILE,
-    pulseChatPresence,
-    resolveAccountKey,
-    resolveAvatarSrc,
-    resolveCanonicalChatThreadId,
-    resolveChatPresence,
-    resolveGuestDisplayName,
-    resolveSessionProfile,
-    sendChatMessage,
-    setChatPresenceStatus,
-    setChatProfileStatus,
-    setChatTyping,
-    sortChatMessages,
-    subscribeChatAccounts,
-    subscribeChatMessages,
-    subscribeChatProfiles,
-    subscribeChatThreads,
-    subscribeOwnChatThread,
-    subscribeWeightGarden,
-    suggestHanaChat,
-    threadUnreadCount,
-    toggleChatReaction,
-    toggleThreadChatPin,
-    translateChatMessage,
-    unpinThreadChatMessage,
-    updateChatMessage,
-    uploadChatAttachment
+  analyzeGuestMessageForOwner,
+  applyReactionLocally,
+  broadcastChatEffect,
+  CHAT_PRESENCE_MODES,
+  CHAT_REACTION_EMOJIS,
+  chatWithHanachan,
+  classifyChatAttachment,
+  confirmJpTripArrived,
+  consolidateGuestThreads,
+  DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
+  deleteChatMessage,
+  ensureChatThread,
+  ensureDefaultChatAccounts,
+  ensureGuestChatId,
+  ensureWeightGardenDefaults,
+  fetchChatMessages,
+  fetchChatThreadMediaItems,
+  formatChatFileSize,
+  formatChatTimestamp,
+  getChatMessageAttachments,
+  getFirebaseErrorMessage,
+  getGuestProfile,
+  getMessageDeliveryStatus,
+  isChatAudioAttachment,
+  listGuestProfiles,
+  markThreadRead,
+  messageEditWindowMsFromMinutes,
+  migrateLocalPinsToThread,
+  normalizeChatPresenceMode,
+  OWNER_PROFILE,
+  pulseChatPresence,
+  resolveAccountKey,
+  resolveAvatarSrc,
+  resolveCanonicalChatThreadId,
+  resolveChatPresence,
+  resolveGuestDisplayName,
+  resolveSessionProfile,
+  sendChatMessage,
+  setChatPresenceStatus,
+  setChatProfileStatus,
+  setChatTyping,
+  sortChatMessages,
+  subscribeChatAccounts,
+  subscribeChatMessages,
+  subscribeChatProfiles,
+  subscribeChatThreads,
+  subscribeOwnChatThread,
+  subscribeWeightGarden,
+  suggestHanaChat,
+  threadUnreadCount,
+  toggleChatReaction,
+  toggleThreadChatPin,
+  translateChatMessage,
+  unpinThreadChatMessage,
+  updateChatMessage,
+  uploadChatAttachment
 } from './firebase'
 import FlowerRainLayer, {
-    CHAT_PARTY_REACTION,
-    triggerFlowerRain,
-    triggerPartyBurst,
+  CHAT_PARTY_REACTION,
+  triggerFlowerRain,
+  triggerPartyBurst,
 } from './FlowerRain'
 import './hana-chat.css'
 import HanaCall from './HanaCall'
 import HanaChatMessageList, { EMPTY_CHAT_REACTIONS } from './HanaChatMessageList'
 import HanaSticker, {
-    stickerBurst,
-    stickerSetsForViewer,
-    suggestHanaStickers,
+  stickerBurst,
+  stickerSetsForViewer,
+  suggestHanaStickers,
 } from './HanaStickers'
 import HanaVoicePlayer, { VoiceSkinPicker } from './HanaVoicePlayer'
+import { createHumanChatController } from './humanChatCore'
 import NatsuKingyo from './NatsuKingyo'
 import {
-    collectUnansweredOwnerAssistMessages,
-    ownerAssistShouldCollapse,
+  collectUnansweredOwnerAssistMessages,
+  ownerAssistShouldCollapse,
 } from './OwnerMessageAssist'
 import { POKE_ZUKAN_GUEST, tokyoZukanYmd, worldActiveMon } from './pokeZukan'
 import useComposerVoiceNote, { formatVoiceClock } from './useComposerVoiceNote'
@@ -830,7 +831,7 @@ export default function HanaChat({
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [channel, setChannel] = useState('ai') // ai | human (guest only)
+  const [channel, setChannel] = useState('human')
   const [aiMessages, setAiMessages] = useState(() => defaultIntroMessages(getGuestProfile(inputGuestKey)))
   const [hanaMessages, setHanaMessages] = useState([])
   /** True after first Firestore snapshot for the open human thread. */
@@ -970,6 +971,17 @@ export default function HanaChat({
   /** In-flight sendChatMessage promises keyed by clientId (survives UI timeout). */
   const sendInFlightRef = useRef(new Map())
   const retryFailedSendRef = useRef(async () => {})
+  const humanChatControllerRef = useRef(null)
+  if (!humanChatControllerRef.current) {
+    humanChatControllerRef.current = createHumanChatController({
+      adapter: {
+        subscribe: (threadId, key, onData, onError) => subscribeChatMessages(threadId, onData, onError, key),
+        send: (payload) => sendChatMessage(payload),
+        saveOutbox: (entries = []) => entries.forEach((entry) => upsertChatOutbox(entry)),
+        removeOutbox: (entry) => removeChatOutbox(entry?.clientId),
+      },
+    })
+  }
   /** Never leave composer icons dimmed if a send hangs. */
   const busyWatchdogRef = useRef(0)
   const lastSendTapRef = useRef(0)
@@ -1595,7 +1607,7 @@ export default function HanaChat({
     const stored = loadAiMessages(id)
     const pendingChat = !actingAsOwner
       && listChatOutboxForThread(id, guestProfile?.key || guestKey || '').length > 0
-    const savedChannel = pendingChat ? 'human' : loadChannel(id)
+    const savedChannel = 'human'
     setGuestChatId(id)
     setAiMessages(stored?.length ? stored : defaultIntroMessages(guestProfile))
     setChannel(savedChannel)
@@ -1823,7 +1835,7 @@ export default function HanaChat({
     )
   }, [hidden, sessionProfile.id, ownerActiveGuestKey, chatAccounts])
 
-  const guestOnHuman = !actingAsOwner && channel === 'human'
+  const guestOnHuman = !actingAsOwner
 
   // Messages first: reset summer FX whenever the open conversation changes.
   useEffect(() => {
@@ -1874,9 +1886,8 @@ export default function HanaChat({
     if (hidden || actingAsOwner || !guestChatId) {
       return undefined
     }
-    const unsub = subscribeChatMessages(
-      guestChatId,
-      (next) => {
+    const controller = humanChatControllerRef.current
+    const unsubscribe = controller.subscribe((next) => {
         const filtered = next.filter((m) => !deletingIdsRef.current.has(m.id))
         const cached = messageCacheRef.current.get(guestChatId)
         if (!filtered.length && cached?.length) return
@@ -1893,11 +1904,12 @@ export default function HanaChat({
         if (openRef.current && document.visibilityState === 'visible') {
           markThreadRead(guestChatId, 'guest', guestKey).catch(() => {})
         }
-      },
-      (err) => setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。'),
-      guestKey,
-    )
-    return unsub
+      })
+    void controller.connect({ nextThreadId: guestChatId, nextGuestKey: guestKey })
+    return () => {
+      unsubscribe()
+      controller.stop()
+    }
   }, [hidden, actingAsOwner, guestOnHuman, guestChatId, guestKey])
 
   // Canonicalize/migrate legacy threads for EVERY guest using the same path.
@@ -1927,9 +1939,8 @@ export default function HanaChat({
       return undefined
     }
     let cancelled = false
-    const unsub = subscribeChatMessages(
-      activeThreadId,
-      (next) => {
+    const controller = humanChatControllerRef.current
+    const unsubscribe = controller.subscribe((next) => {
         if (cancelled) return
         const filtered = next.filter((m) => !deletingIdsRef.current.has(m.id))
         const cached = messageCacheRef.current.get(activeThreadId)
@@ -1942,16 +1953,12 @@ export default function HanaChat({
           markThreadRead(activeThreadId, 'hana', ownerActiveGuestKey).catch(() => {})
         }
         setError('')
-      },
-      (err) => {
-        if (cancelled) return
-        setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。')
-      },
-      ownerActiveGuestKey,
-    )
+      })
+    void controller.connect({ nextThreadId: activeThreadId, nextGuestKey: ownerActiveGuestKey })
     return () => {
       cancelled = true
-      unsub()
+      unsubscribe()
+      controller.stop()
     }
   }, [hidden, actingAsOwner, activeThreadId])
 
@@ -4229,7 +4236,7 @@ export default function HanaChat({
         handleLocalEffect(burst)
       }
 
-      const writePromise = sendChatMessage({
+      const writePromise = humanChatControllerRef.current.send({
         threadId,
         text: label,
         sender: role,
@@ -4295,7 +4302,6 @@ export default function HanaChat({
             : m
         )))
       }
-      if (!actingAsOwner) setChannel('human')
     } catch (err) {
       sendInFlightRef.current.delete(pendingId)
       setHanaMessages((prev) => prev.map((m) => (
@@ -4441,7 +4447,7 @@ export default function HanaChat({
             }
           : m
       )))
-      const writePromise = sendChatMessage({
+      const writePromise = humanChatControllerRef.current.send({
         threadId,
         text: caption,
         sender: role,
@@ -4688,7 +4694,7 @@ export default function HanaChat({
       ])
       scrollToLatestRef.current()
 
-      const writePromise = sendChatMessage({
+      const writePromise = humanChatControllerRef.current.send({
         threadId,
         text: described.text,
         sender: role,
@@ -5156,7 +5162,7 @@ export default function HanaChat({
       ...mediaPayload,
     })
 
-    const writePromise = sendChatMessage({
+    const writePromise = humanChatControllerRef.current.send({
       threadId,
       text,
       sender,
@@ -5306,6 +5312,19 @@ export default function HanaChat({
           setActiveThreadId(sendThreadId)
         }
         const effectiveThreadId = sendThreadId
+        if (!queued.length) {
+          await humanChatControllerRef.current.send({
+            threadId: effectiveThreadId,
+            guestKey: ownerActiveGuestKey || '',
+            text: sendText,
+            sender: 'hana',
+            replyTo: pendingReply,
+            createdAtIso: nowIso,
+          })
+          pendingSendId = ''
+          scrollToLatestRef.current()
+          return
+        }
         const pendingId = nextChatPendingId('msg')
         pendingSendId = pendingId
         const localMedia = localMediaFieldsFromQueue(queued)
@@ -5375,11 +5394,12 @@ export default function HanaChat({
               ...mediaFields,
             })
           }
-          const serverId = await sendChatMessage({
+          const serverId = await humanChatControllerRef.current.send({
             threadId: effectiveThreadId,
             text: sendText,
             sender: 'hana',
             clientId: pendingId,
+            createdAtIso: nowIso,
             replyTo: pendingReply,
             createdAtIso: nowIso,
             guestKey: ownerActiveGuestKey || '',
@@ -5476,6 +5496,18 @@ export default function HanaChat({
         }
         if (guestChatId !== threadId) setGuestChatId(threadId)
         if (!actingAsOwner) saveChannel(threadId, 'human')
+        if (!actingAsOwner && !queued.length) {
+          await humanChatControllerRef.current.send({
+            threadId,
+            guestKey: guestProfile?.key || guestKey || '',
+            text: sendText,
+            sender: 'guest',
+            createdAtIso: nowIso,
+          })
+          pendingSendId = ''
+          scrollToLatestRef.current()
+          return
+        }
         const pendingId = nextChatPendingId('msg')
         pendingSendId = pendingId
         const localMedia = localMediaFieldsFromQueue(queued)
@@ -5545,13 +5577,14 @@ export default function HanaChat({
               ...mediaFields,
             })
           }
-          const serverId = await sendChatMessage({
+          const serverId = await humanChatControllerRef.current.send({
             threadId,
             text: sendText,
             sender: 'guest',
             guestLabel: guestThreadLabel,
             guestKey: guestProfile?.key || guestKey || '',
             clientId: pendingId,
+            createdAtIso: nowIso,
             replyTo: pendingReply,
             createdAtIso: nowIso,
             ...mediaFields,
@@ -5903,7 +5936,6 @@ export default function HanaChat({
                     })
                     return
                   }
-                  setChannel('ai')
                 }}
                 title="アバターを拡大表示"
                 aria-label="アバターを拡大表示"
@@ -6676,17 +6708,6 @@ export default function HanaChat({
             </span>
             <span>{partnerTyping ? partnerTypingLabel : ''}</span>
           </div>
-
-          {!actingAsOwner && channel === 'ai' ? (
-            <div className="hana-chat-suggest">
-              <button
-                type="button"
-                onClick={() => switchToHuman(HUMAN_SWITCH_INTENT)}
-              >
-                本物のはなと話したい
-              </button>
-            </div>
-          ) : null}
 
           {actingAsOwner && activeThreadId && ownerSuggestEnabled ? (
             <div className="hana-chat-suggest hana-chat-suggest--owner" aria-label="返信のヒント">
