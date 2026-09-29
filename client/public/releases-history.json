@@ -1,6 +1,195 @@
 {
-  "updatedAt": "2026-09-21T03:13:49.591Z",
+  "updatedAt": "2026-09-29T14:52:49.301Z",
   "releases": [
+    {
+      "version": "mumsp0bv-ctze5u",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T14:52:14.281Z",
+      "previousVersion": "mumskbpb-xfb59z",
+      "previousHostingVersionId": "0c4a83b87df4517e",
+      "hostingVersionId": "7e99e3bf1b909c75",
+      "recordedAt": "2026-09-29T14:52:14.466Z"
+    },
+    {
+      "version": "mumskbpb-xfb59z",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T14:48:35.203Z",
+      "previousVersion": "mumscw9v-czr07q",
+      "previousHostingVersionId": "b6558e56545bf388",
+      "hostingVersionId": "0c4a83b87df4517e",
+      "recordedAt": "2026-09-29T14:48:35.350Z"
+    },
+    {
+      "version": "mumscw9v-czr07q",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T14:42:49.402Z",
+      "previousVersion": "mums4438-igmnez",
+      "previousHostingVersionId": "6d5777d7d57702e1",
+      "hostingVersionId": "b6558e56545bf388",
+      "recordedAt": "2026-09-29T14:42:49.623Z"
+    },
+    {
+      "version": "mums4438-igmnez",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T14:36:00.145Z",
+      "previousVersion": "mumr73jj-88eh9m",
+      "previousHostingVersionId": "c6505e666adcd578",
+      "hostingVersionId": "6d5777d7d57702e1",
+      "recordedAt": "2026-09-29T14:36:00.406Z"
+    },
+    {
+      "version": "mumr73jj-88eh9m",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T14:10:18.606Z",
+      "previousVersion": "mumqzkjx-5msgcv",
+      "previousHostingVersionId": "e391d1148804f5c6",
+      "hostingVersionId": "c6505e666adcd578",
+      "recordedAt": "2026-09-29T14:10:18.753Z"
+    },
+    {
+      "version": "mumqzkjx-5msgcv",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T14:04:27.062Z",
+      "previousVersion": "mumqpyth-kqdo1e",
+      "previousHostingVersionId": "20fe0b88b5dbf129",
+      "hostingVersionId": "e391d1148804f5c6",
+      "recordedAt": "2026-09-29T14:04:27.197Z"
+    },
+    {
+      "version": "mumqpyth-kqdo1e",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T13:56:59.001Z",
+      "previousVersion": "mumqk09i-6atfyu",
+      "previousHostingVersionId": "7abfc53081ba5aa2",
+      "hostingVersionId": "20fe0b88b5dbf129",
+      "recordedAt": "2026-09-29T13:56:59.121Z"
+    },
+    {
+      "version": "mumqk09i-6atfyu",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T13:52:23.612Z",
+      "previousVersion": "mumqdq4f-nbuel2",
+      "previousHostingVersionId": "a742baf08ac236b7",
+      "hostingVersionId": "7abfc53081ba5aa2",
+      "recordedAt": "2026-09-29T13:52:23.950Z"
+    },
+    {
+      "version": "mumqdq4f-nbuel2",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T13:47:28.713Z",
+      "previousVersion": "mumqauvb-jaz414",
+      "previousHostingVersionId": "a211cadff2d56493",
+      "hostingVersionId": "a742baf08ac236b7",
+      "recordedAt": "2026-09-29T13:47:28.886Z"
+    },
+    {
+      "version": "mumqauvb-jaz414",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T13:45:14.638Z",
+      "previousVersion": "mumq2gh0-lhpx08",
+      "previousHostingVersionId": "faf710e38f6a03b9",
+      "hostingVersionId": "a211cadff2d56493",
+      "recordedAt": "2026-09-29T13:45:14.821Z"
+    },
+    {
+      "version": "mumq2gh0-lhpx08",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T13:38:41.843Z",
+      "previousVersion": "mumpva6s-5w2xtr",
+      "previousHostingVersionId": "e157ac89fccb80a6",
+      "hostingVersionId": "faf710e38f6a03b9",
+      "recordedAt": "2026-09-29T13:38:41.943Z"
+    },
+    {
+      "version": "mumpva6s-5w2xtr",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T13:33:07.035Z",
+      "previousVersion": "mumpr1so-9b8j4e",
+      "previousHostingVersionId": "f9f56e764e06a76f",
+      "hostingVersionId": "e157ac89fccb80a6",
+      "recordedAt": "2026-09-29T13:33:07.133Z"
+    },
+    {
+      "version": "mumpr1so-9b8j4e",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T13:29:51.369Z",
+      "previousVersion": "mumpl4w7-i5kls5",
+      "previousHostingVersionId": "94ea953b111547bd",
+      "hostingVersionId": "f9f56e764e06a76f",
+      "recordedAt": "2026-09-29T13:29:51.601Z"
+    },
+    {
+      "version": "mumpl4w7-i5kls5",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T13:25:13.682Z",
+      "previousVersion": "mumpfaha-3b3e49",
+      "previousHostingVersionId": "0e8c27989a1a91bd",
+      "hostingVersionId": "94ea953b111547bd",
+      "recordedAt": "2026-09-29T13:25:13.801Z"
+    },
+    {
+      "version": "mumpfaha-3b3e49",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T13:20:41.395Z",
+      "previousVersion": "mump6klk-hvv71j",
+      "previousHostingVersionId": "c699822a60d97b64",
+      "hostingVersionId": "0e8c27989a1a91bd",
+      "recordedAt": "2026-09-29T13:20:41.534Z"
+    },
+    {
+      "version": "mump6klk-hvv71j",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T13:13:55.880Z",
+      "previousVersion": "mumoqxrp-op435e",
+      "previousHostingVersionId": "57650cdc1b851e0a",
+      "hostingVersionId": "c699822a60d97b64",
+      "recordedAt": "2026-09-29T13:13:56.167Z"
+    },
+    {
+      "version": "mumoqxrp-op435e",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T13:01:46.893Z",
+      "previousVersion": "mumomfub-dppgd7",
+      "previousHostingVersionId": "42d8361e5ac69c37",
+      "hostingVersionId": "57650cdc1b851e0a",
+      "recordedAt": "2026-09-29T13:01:47.470Z"
+    },
+    {
+      "version": "mumomfub-dppgd7",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T12:58:17.034Z",
+      "previousVersion": "mumodo4a-t8kaav",
+      "previousHostingVersionId": "b2a98cd0ec596dd1",
+      "hostingVersionId": "42d8361e5ac69c37",
+      "recordedAt": "2026-09-29T12:58:17.387Z"
+    },
+    {
+      "version": "mumodo4a-t8kaav",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T12:51:26.241Z",
+      "previousVersion": "mumoa0mn-np14yh",
+      "previousHostingVersionId": "58b16aaeca2f35cc",
+      "hostingVersionId": "b2a98cd0ec596dd1",
+      "recordedAt": "2026-09-29T12:51:26.522Z"
+    },
+    {
+      "version": "mumoa0mn-np14yh",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T12:48:36.341Z",
+      "previousVersion": "mumo2oy1-ygubj1",
+      "previousHostingVersionId": "34300e277d3c2238",
+      "hostingVersionId": "58b16aaeca2f35cc",
+      "recordedAt": "2026-09-29T12:48:36.555Z"
+    },
+    {
+      "version": "mumo2oy1-ygubj1",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T12:42:54.220Z",
+      "previousVersion": "muaqi7jb-xlb5p5",
+      "previousHostingVersionId": "e9bfb44bd75c20aa",
+      "hostingVersionId": "34300e277d3c2238",
+      "recordedAt": "2026-09-29T12:42:54.363Z"
+    },
     {
       "version": "muao6it6-d0cex3",
       "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
@@ -171,195 +360,6 @@
       "previousHostingVersionId": "fe99b8f19b006a31",
       "hostingVersionId": "e5d210799fc84d7c",
       "recordedAt": "2026-09-20T09:54:22.206Z"
-    },
-    {
-      "version": "mu9mtyaw-di59u1",
-      "notes": "チャットヘッダー修正：夏まつりバナーの重なりを解消、オンライン／オフライン文字を削除（アバターの点のみ）。",
-      "builtAt": "2026-09-20T09:47:09.250Z",
-      "previousVersion": "mu9mg1lc-yzajyx",
-      "previousHostingVersionId": "a67a4fb8caf5f972",
-      "hostingVersionId": "fe99b8f19b006a31",
-      "recordedAt": "2026-09-20T09:47:09.871Z"
-    },
-    {
-      "version": "mu9mg1lc-yzajyx",
-      "notes": "チャットヘッダー修正：夏まつりバナーの重なりを解消、オンライン／オフライン文字を削除（アバターの点のみ）。",
-      "builtAt": "2026-09-20T09:36:17.247Z",
-      "previousVersion": "mu9ls2l2-s9e3n5",
-      "previousHostingVersionId": "cd21c19a4140306d",
-      "hostingVersionId": "a67a4fb8caf5f972",
-      "recordedAt": "2026-09-20T09:36:17.422Z"
-    },
-    {
-      "version": "mu9ls2l2-s9e3n5",
-      "notes": "チャットヘッダー修正：夏まつりバナーの重なりを解消、オンライン／オフライン文字を削除（アバターの点のみ）。",
-      "builtAt": "2026-09-20T09:17:42.621Z",
-      "previousVersion": "mu9kvjoh-ixatzz",
-      "previousHostingVersionId": "43834fd0f0990112",
-      "hostingVersionId": "cd21c19a4140306d",
-      "recordedAt": "2026-09-20T09:17:43.288Z"
-    },
-    {
-      "version": "mu9kvjoh-ixatzz",
-      "notes": "チャットヘッダー修正：夏まつりバナーの重なりを解消、オンライン／オフライン文字を削除（アバターの点のみ）。",
-      "builtAt": "2026-09-20T08:52:27.031Z",
-      "previousVersion": "mts0v3ai-r54moc",
-      "previousHostingVersionId": "ca35196fd9a2c609",
-      "hostingVersionId": "43834fd0f0990112",
-      "recordedAt": "2026-09-20T08:52:28.045Z"
-    },
-    {
-      "version": "mts0v3ai-r54moc",
-      "notes": "Per-mon logs only; strip leaked evolve rows; status tab shows that mon diary",
-      "builtAt": "2026-09-08T02:00:42.714Z",
-      "previousVersion": "mts09kj3-v29k2f",
-      "previousHostingVersionId": "d4f8a08677974650",
-      "hostingVersionId": "ca35196fd9a2c609",
-      "recordedAt": "2026-09-08T02:00:48.826Z"
-    },
-    {
-      "version": "mts09kj3-v29k2f",
-      "notes": "Loyalty: fully evolved still gain XP/levels; care follows selected mon",
-      "builtAt": "2026-09-08T01:43:26.164Z",
-      "previousVersion": "mtrzx84a-d77br3",
-      "previousHostingVersionId": "c008aa4a8969ad88",
-      "hostingVersionId": "d4f8a08677974650",
-      "recordedAt": "2026-09-08T01:43:27.651Z"
-    },
-    {
-      "version": "mtrzx84a-d77br3",
-      "notes": "Party forever: fully evolved stay; adopt appends only; tap slot to view",
-      "builtAt": "2026-09-08T01:33:47.236Z",
-      "previousVersion": "mtrzf0d5-oz5j9h",
-      "previousHostingVersionId": "72d6cd6aa45781c0",
-      "hostingVersionId": "c008aa4a8969ad88",
-      "recordedAt": "2026-09-08T01:33:47.871Z"
-    },
-    {
-      "version": "mtrzf0d5-oz5j9h",
-      "notes": "Force restore Pikachu; Zenigame cannot own starter slot",
-      "builtAt": "2026-09-08T01:19:47.730Z",
-      "previousVersion": "mtryz3f1-rl8ia5",
-      "previousHostingVersionId": "8d425c5e3f35c2d2",
-      "hostingVersionId": "72d6cd6aa45781c0",
-      "recordedAt": "2026-09-08T01:19:48.372Z"
-    },
-    {
-      "version": "mtryz3f1-rl8ia5",
-      "notes": "Fix Pikachu wiped by Zenigame party order",
-      "builtAt": "2026-09-08T01:07:13.433Z",
-      "previousVersion": "mtrykbu2-mj9bl8",
-      "previousHostingVersionId": "0d0fae59bbd586ee",
-      "hostingVersionId": "8d425c5e3f35c2d2",
-      "recordedAt": "2026-09-08T01:07:13.800Z"
-    },
-    {
-      "version": "mtrykbu2-mj9bl8",
-      "notes": "Never devolve Pikachu or Lizardo; shared poke world",
-      "builtAt": "2026-09-08T00:55:41.233Z",
-      "previousVersion": "mtp586j8-x3hqvr",
-      "previousHostingVersionId": "666a4e6b4d8dfad0",
-      "hostingVersionId": "0d0fae59bbd586ee",
-      "recordedAt": "2026-09-08T00:55:41.367Z"
-    },
-    {
-      "version": "mtp586j8-x3hqvr",
-      "notes": "Fix stuck send: composer no longer freezes, failed bubbles retry after reload",
-      "builtAt": "2026-09-06T01:38:54.177Z",
-      "previousVersion": "mtljhodl-xrtwsp",
-      "previousHostingVersionId": "055d61f4da7be618",
-      "hostingVersionId": "666a4e6b4d8dfad0",
-      "recordedAt": "2026-09-06T01:38:54.579Z"
-    },
-    {
-      "version": "msqzeqp3-cq5ros",
-      "notes": "Chat song-card 聴く now autoplays the track in-app instead of opening the welcome postcard again.",
-      "builtAt": "2026-08-13T03:52:00.297Z",
-      "previousVersion": "msqyq6t3-iu44id",
-      "previousHostingVersionId": "6f3677f11ee02cda",
-      "hostingVersionId": null,
-      "recordedAt": "2026-08-13T03:52:00.861Z"
-    },
-    {
-      "version": "msqyq6t3-iu44id",
-      "notes": "Wire song-card share into the active Hana chat thread so sharing a track no longer asks to pick a destination when already chatting.",
-      "builtAt": "2026-08-13T03:32:58.245Z",
-      "previousVersion": "msq5498i-2jwbpw",
-      "previousHostingVersionId": "fc1efa99749cfa53",
-      "hostingVersionId": "6f3677f11ee02cda",
-      "recordedAt": "2026-08-13T03:32:58.613Z"
-    },
-    {
-      "version": "msq5498i-2jwbpw",
-      "notes": "Fix empty composer staying multi-line tall by resetting textarea height when draft is blank.",
-      "builtAt": "2026-08-12T13:44:22.471Z",
-      "previousVersion": "mspvn8ex-zzpsu0",
-      "previousHostingVersionId": "0d7c77e057af3151",
-      "hostingVersionId": "fc1efa99749cfa53",
-      "recordedAt": "2026-08-12T13:44:30.871Z"
-    },
-    {
-      "version": "mspvn8ex-zzpsu0",
-      "notes": "Restore chat bubble URL autolink so http/https links are tappable again.",
-      "builtAt": "2026-08-12T09:18:56.616Z",
-      "previousVersion": "mspukf27-7nu8f7",
-      "previousHostingVersionId": "9b0e4831dcf7caf1",
-      "hostingVersionId": "0d7c77e057af3151",
-      "recordedAt": "2026-08-12T09:18:57.618Z"
-    },
-    {
-      "version": "mspukf27-7nu8f7",
-      "notes": "Rebuild and redeploy current chat fixes.",
-      "builtAt": "2026-08-12T08:48:36.632Z",
-      "previousVersion": "msptt8oz-l0jc4d",
-      "previousHostingVersionId": "e03096455e2ae954",
-      "hostingVersionId": "9b0e4831dcf7caf1",
-      "recordedAt": "2026-08-12T08:48:37.661Z"
-    },
-    {
-      "version": "msd2luto-1pwke7",
-      "notes": "チャットヘッダー修正：夏まつりバナーの重なりを解消、オンライン／オフライン文字を削除（アバターの点のみ）。",
-      "builtAt": "2026-08-03T10:13:27.861Z",
-      "previousVersion": "msd1yskm-020kct",
-      "previousHostingVersionId": "f1a1edc10e9c5204",
-      "hostingVersionId": "69b2d098a546b73f",
-      "recordedAt": "2026-08-03T10:13:33.906Z"
-    },
-    {
-      "version": "msd1yskm-020kct",
-      "notes": "チャットヘッダー修正：夏まつりバナーの重なりを解消、オンライン／オフライン文字を削除（アバターの点のみ）。",
-      "builtAt": "2026-08-03T09:55:00.379Z",
-      "previousVersion": "msd14abm-g7ycmw",
-      "previousHostingVersionId": "7cb3b184327137a5",
-      "hostingVersionId": "f1a1edc10e9c5204",
-      "recordedAt": "2026-08-03T09:55:01.440Z"
-    },
-    {
-      "version": "msd14abm-g7ycmw",
-      "notes": "夏テーマ前面表示・HanaChat夏まつり装飾の本番反映。",
-      "builtAt": "2026-08-03T09:31:13.954Z",
-      "previousVersion": "msd08kgf-1texvf",
-      "previousHostingVersionId": "f314351ce749a051",
-      "hostingVersionId": "7cb3b184327137a5",
-      "recordedAt": "2026-08-03T09:31:15.850Z"
-    },
-    {
-      "version": "msd08kgf-1texvf",
-      "notes": "夏テーマ：花火・金魚・灯籠を前面表示（UIの上）。HanaChat内にも盆・提灯・ほたるを追加。",
-      "builtAt": "2026-08-03T09:06:25.046Z",
-      "previousVersion": "msclni2y-2ni606",
-      "previousHostingVersionId": "17c6117142f6a25b",
-      "hostingVersionId": "f314351ce749a051",
-      "recordedAt": "2026-08-03T09:06:27.042Z"
-    },
-    {
-      "version": "msclni2y-2ni606",
-      "notes": "夏テーマ強化：花火を菊・柳・牡丹風に、盆灯籠・ほたる・提灯・風鈴・金魚・朝顔をサイト全体に。",
-      "builtAt": "2026-08-03T02:18:39.476Z",
-      "previousVersion": "msckm1yd-2j4gtc",
-      "previousHostingVersionId": "7935b80c8a335bbf",
-      "hostingVersionId": "17c6117142f6a25b",
-      "recordedAt": "2026-08-03T02:18:50.562Z"
     }
   ]
 }

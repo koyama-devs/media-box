@@ -192,13 +192,13 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
       activeId,
       (next) => {
         setMessages(next)
-        markThreadRead(activeId, 'hana').catch(() => {})
+        markThreadRead(activeId, 'hana', activeGuestKey).catch(() => {})
       },
       (err) => setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。'),
     )
-    markThreadRead(activeId, 'hana').catch(() => {})
+    markThreadRead(activeId, 'hana', activeGuestKey).catch(() => {})
     return unsub
-  }, [activeId])
+  }, [activeId, activeGuestKey])
 
   useEffect(() => {
     if (!activeId) return undefined

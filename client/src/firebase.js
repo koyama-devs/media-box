@@ -1,67 +1,67 @@
 // Firebase initialization — Firestore + Auth + Storage (large PDFs)
 import { initializeApp } from 'firebase/app'
 import {
-  getAuth,
-  getRedirectResult,
-  GoogleAuthProvider,
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  signInWithPopup,
-  signInWithRedirect,
-  signOut,
+    getAuth,
+    getRedirectResult,
+    GoogleAuthProvider,
+    onAuthStateChanged,
+    signInWithEmailAndPassword,
+    signInWithPopup,
+    signInWithRedirect,
+    signOut,
 } from 'firebase/auth'
 import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  getFirestore,
-  increment,
-  initializeFirestore,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  runTransaction,
-  serverTimestamp,
-  setDoc,
-  startAfter,
-  updateDoc,
-  where,
-  writeBatch,
+    addDoc,
+    collection,
+    deleteDoc,
+    doc,
+    getDoc,
+    getDocs,
+    getFirestore,
+    increment,
+    initializeFirestore,
+    limit,
+    onSnapshot,
+    orderBy,
+    query,
+    runTransaction,
+    serverTimestamp,
+    setDoc,
+    startAfter,
+    updateDoc,
+    where,
+    writeBatch,
 } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions'
 import {
-  deleteObject,
-  getBlob,
-  getBytes,
-  getDownloadURL,
-  getStorage,
-  ref as storageRef,
-  uploadBytes,
-  uploadBytesResumable,
+    deleteObject,
+    getBlob,
+    getBytes,
+    getDownloadURL,
+    getStorage,
+    ref as storageRef,
+    uploadBytes,
+    uploadBytesResumable,
 } from 'firebase/storage'
 import { collectAccessLogPayload } from './accessLog'
 import {
-  applyPokeWorldAction,
-  applyPokeWorldAdopt,
-  applyPokeWorldCafeClaim,
-  applyPokeWorldCafeOrder,
-  applyPokeWorldDuoAction,
-  applyPokeWorldNickname,
-  applyPokeWorldSelect,
-  applyPokeWorldVisit,
-  applyPokeWorldWake,
-  healResetStarters,
-  pickRicherPokeWorld,
-  pickWorldFindId,
-  pokeWorldProgressScore,
-  serializePokeWorld,
-  tokyoZukanYmd,
-  worldDuoCared,
-  worldRole
+    applyPokeWorldAction,
+    applyPokeWorldAdopt,
+    applyPokeWorldCafeClaim,
+    applyPokeWorldCafeOrder,
+    applyPokeWorldDuoAction,
+    applyPokeWorldNickname,
+    applyPokeWorldSelect,
+    applyPokeWorldVisit,
+    applyPokeWorldWake,
+    healResetStarters,
+    pickRicherPokeWorld,
+    pickWorldFindId,
+    pokeWorldProgressScore,
+    serializePokeWorld,
+    tokyoZukanYmd,
+    worldDuoCared,
+    worldRole
 } from './pokeZukan'
 
 const firebaseConfig = {
@@ -82,11 +82,18 @@ try {
   // ignore
 }
 
-// Android WebView (Capacitor) often fails Firestore's WebChannel streams,
-// so let the SDK fall back to long-polling when it detects a bad connection.
+// Mobile Safari can fail Firestore's WebChannel streams. Keep the normal fast
+// transport everywhere else and force long-polling only for iPhone/iPad.
+const isAppleMobile = typeof navigator !== 'undefined'
+  && /iPhone|iPad|iPod/i.test(navigator.userAgent || '')
 let db
 try {
-  db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true })
+  db = initializeFirestore(
+    app,
+    isAppleMobile
+      ? { experimentalForceLongPolling: true }
+      : { experimentalAutoDetectLongPolling: true },
+  )
 } catch {
   db = getFirestore(app)
 }
@@ -116,6 +123,7 @@ const CHAT_PROFILES_COLLECTION = 'chatProfiles'
 const PUSH_TOKENS_COLLECTION = 'pushTokens'
 const AVATAR_CACHE_PREFIX = 'hana-chat-avatar-'
 const GUEST_CHAT_ID_KEY = 'hana-chat-guest-id'
+const ACTIVE_GUEST_KEY_STORAGE = 'hana-chat-active-guest-key'
 const GUEST_LABELS = ['桜', '蜜', '月', '風', '霧', '蝶', '鈴', '露', '霞', '羽']
 
 /** Password -> guest identity (display in UI + how Hanachan addresses them). Seed defaults. */
@@ -1352,7 +1360,7 @@ function sanitizeChatUploadFileName(name = 'file') {
  * Images are still JPEG-compressed; video/files are stored as-is under chat-files/.
  */
 export async function uploadChatAttachment(threadId, file) {
-  const tid = String(threadId || '').trim()
+  const tid = await resolveCanonicalChatThreadId(threadId)
   if (!tid) throw new Error('スレッドがありません。')
   if (!file) throw new Error('ファイルを選んでください。')
 
@@ -1555,6 +1563,7 @@ export function ensureGuestChatId(guestKey = 'guest') {
     const id = `guest-${profile.key}`
     try {
       localStorage.setItem(`${GUEST_CHAT_ID_KEY}:${profile.key}`, id)
+      localStorage.setItem(ACTIVE_GUEST_KEY_STORAGE, profile.key)
     } catch {
       /* ignore */
     }
@@ -3121,6 +3130,7 @@ export async function setChatProfileStatus(profileId, status) {
  * }} payload
  */
 export async function broadcastChatEffect({ threadId, kind, by, emoji, momentId } = {}) {
+  threadId = await resolveCanonicalChatThreadId(threadId)
   if (!threadId) return
   const type = kind === 'party' || kind === 'moment' ? kind : 'flower'
   const role = by === 'hana' ? 'hana' : 'guest'
@@ -3184,6 +3194,9 @@ export function getMessageDeliveryStatus(message, thread, viewer) {
   // Partner cleared unread for this thread → treat own bubbles as read.
   // (Avoids cross-device clock skew making lastReadAt look "before" the message.)
   if (unreadFlag === false) return 'read'
+  // Never infer read from a stale timestamp while the current unread flag is
+  // true or has not hydrated yet. The conservative state is still sent.
+  if (unreadFlag !== false) return 'sent'
   if (readAt) {
     const readMs = new Date(readAt).getTime()
     const createdMs = new Date(message.createdAt).getTime()
@@ -3209,48 +3222,123 @@ function rowsFromMessageSnap(snap) {
     .filter((message) => !message.deleted)
 }
 
+/**
+ * Resolve every chat to one canonical thread: guest-{guestKey}.
+ * Legacy UUID/random thread ids are accepted only as input; reads/writes are
+ * redirected to the canonical guest thread so every guest follows the same path.
+ */
+export async function resolveCanonicalChatThreadId(threadId = '', guestKey = '') {
+  const rawId = String(threadId || '').trim()
+  const storedGuestKey = (() => {
+    try {
+      return normalizeAccountKey(String(window.localStorage.getItem(ACTIVE_GUEST_KEY_STORAGE) || ''))
+    } catch {
+      return ''
+    }
+  })()
+  let key = normalizeAccountKey(guestKey) || storedGuestKey
+
+  if (!key && rawId) {
+    const canonicalMatch = rawId.match(/^guest-([a-z0-9_-]+)$/i)
+    if (canonicalMatch) key = normalizeAccountKey(canonicalMatch[1])
+  }
+  if (!key && rawId) {
+    try {
+      const snap = await getDoc(doc(db, CHAT_THREADS_COLLECTION, rawId))
+      if (snap.exists()) {
+        const data = snap.data() || {}
+        key = normalizeAccountKey(data.guestKey || '')
+        if (!key) {
+          const label = String(data.guestLabel || '').trim()
+          const profile = getGuestProfile(label)
+          if (profile?.key) key = normalizeAccountKey(profile.key)
+        }
+      }
+    } catch {
+      /* Keep the supplied id when metadata cannot be read. */
+    }
+  }
+  if (key) return `guest-${key}`
+  if (rawId && rawId.startsWith('guest-')) return rawId
+  if (rawId && storedGuestKey && !rawId.startsWith('guest-')) return `guest-${storedGuestKey}`
+  return rawId
+}
+
 /** Live chat bubbles stay at newest 300 — do not raise this for media/search. */
 export const CHAT_MESSAGE_LIVE_LIMIT = 300
 
 /** @returns {() => void} */
-export function subscribeChatMessages(threadId, onData, onError) {
+export function subscribeChatMessages(threadId, onData, onError, guestKey = '') {
   if (!threadId) {
     onData?.([])
     return () => {}
   }
-  // Must orderBy newest-first. limit(N) alone returns arbitrary/oldest docs,
-  // so new sends never appear in the bubble list (push/preview still work).
-  const messagesRef = collection(db, CHAT_THREADS_COLLECTION, threadId, 'messages')
-  let isoRows = []
-  let createdRows = []
-  const emit = () => {
-    const byId = new Map()
-    createdRows.forEach((row) => byId.set(row.id, row))
-    isoRows.forEach((row) => byId.set(row.id, row))
-    onData?.(sortChatMessages([...byId.values()]))
-  }
-  const unsubIso = onSnapshot(
-    query(messagesRef, orderBy('createdAtIso', 'desc'), limit(CHAT_MESSAGE_LIVE_LIMIT)),
-    (snap) => {
-      isoRows = rowsFromMessageSnap(snap)
-      emit()
-    },
-    (error) => onError?.(error),
-  )
-  // Old docs may lack createdAtIso and miss the main query. Keep that query;
-  // merge a createdAt fallback so history still paints.
-  const unsubCreated = onSnapshot(
-    query(messagesRef, orderBy('createdAt', 'desc'), limit(CHAT_MESSAGE_LIVE_LIMIT)),
-    (snap) => {
-      createdRows = rowsFromMessageSnap(snap)
-      emit()
-    },
-    () => {},
-  )
+  let stopped = false
+  let unsubscribe = () => {}
+  let activeThreadId = ''
+
+  void (async () => {
+    try {
+      activeThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
+      if (stopped || !activeThreadId) return
+      const messagesRef = collection(db, CHAT_THREADS_COLLECTION, activeThreadId, 'messages')
+      let isoRows = []
+      let fullRows = null
+      let fallbackRows = null
+      let unsubIso = () => {}
+      let fallbackUnsub = () => {}
+      let fallbackStarted = false
+      const emit = () => {
+        if (fallbackRows) {
+          onData?.(sortChatMessages(fallbackRows).slice(-CHAT_MESSAGE_LIVE_LIMIT))
+          return
+        }
+        const byId = new Map()
+        fullRows?.forEach((row) => byId.set(row.id, row))
+        isoRows.forEach((row) => byId.set(row.id, row))
+        onData?.(sortChatMessages([...byId.values()]))
+      }
+      const startFallback = () => {
+        if (fallbackStarted) return
+        fallbackStarted = true
+        fallbackUnsub = onSnapshot(
+          messagesRef,
+          (snap) => {
+            fallbackRows = rowsFromMessageSnap(snap)
+            emit()
+          },
+          (error) => onError?.(error),
+        )
+      }
+      unsubIso = onSnapshot(
+        query(messagesRef, orderBy('createdAtIso', 'desc'), limit(CHAT_MESSAGE_LIVE_LIMIT)),
+        (snap) => {
+          isoRows = rowsFromMessageSnap(snap)
+          emit()
+        },
+        () => startFallback(),
+      )
+      unsubscribe = () => {
+        unsubIso()
+        fallbackUnsub()
+      }
+      if (stopped) unsubscribe()
+    } catch (error) {
+      if (!stopped) onError?.(error)
+    }
+  })()
+
   return () => {
-    unsubIso()
-    unsubCreated()
+    stopped = true
+    unsubscribe()
   }
+}
+
+export async function fetchChatMessages(threadId, guestKey = '') {
+  const activeThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
+  if (!activeThreadId) return []
+  const snap = await getDocs(collection(db, CHAT_THREADS_COLLECTION, activeThreadId, 'messages'))
+  return sortChatMessages(rowsFromMessageSnap(snap)).slice(-CHAT_MESSAGE_LIVE_LIMIT)
 }
 
 function mediaItemsFromChatMessage(message) {
@@ -3806,36 +3894,46 @@ export async function consolidateGuestThreads({
   guestLabel = '',
   preferredId = '',
 } = {}) {
-  const key = normalizeAccountKey(guestKey || String(canonicalId || '').replace(/^guest-/, ''))
-  const canonical = canonicalId || (key ? `guest-${key}` : '')
-  if (!canonical) return preferredId || ''
+  let key = normalizeAccountKey(guestKey || String(canonicalId || '').replace(/^guest-/, ''))
+  let preferred = String(preferredId || '').trim()
+  if (!key && preferred) {
+    try {
+      const snap = await getDoc(doc(db, CHAT_THREADS_COLLECTION, preferred))
+      if (snap.exists()) key = normalizeAccountKey(snap.data()?.guestKey || '')
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!key && canonicalId) {
+    const match = String(canonicalId).match(/^guest-([a-z0-9_-]+)$/i)
+    if (match) key = normalizeAccountKey(match[1])
+  }
+  const canonical = key ? `guest-${key}` : String(canonicalId || preferred || '').trim()
+  if (!canonical) return preferred || ''
   const label = String(guestLabel || '').trim()
   const ids = new Set([canonical])
-  if (preferredId) ids.add(String(preferredId).trim())
+  if (preferred) ids.add(preferred)
 
   const queries = []
   if (key) {
     queries.push(getDocs(query(
       collection(db, CHAT_THREADS_COLLECTION),
       where('guestKey', '==', key),
-      limit(50),
+      limit(100),
     )))
   }
   if (label) {
     queries.push(getDocs(query(
       collection(db, CHAT_THREADS_COLLECTION),
       where('guestLabel', '==', label),
-      limit(50),
+      limit(100),
     )))
   }
   const snaps = await Promise.all(queries.map((p) => p.catch(() => null)))
-  for (const snap of snaps) {
-    snap?.docs?.forEach((d) => ids.add(d.id))
-  }
+  for (const snap of snaps) snap?.docs?.forEach((d) => ids.add(d.id))
 
-  // Also inspect the preferred/canonical docs even if their metadata is stale.
-  const candidates = [...ids].filter((id) => id && id !== canonical)
-  for (const id of candidates) {
+  for (const id of [...ids]) {
+    if (!id || id === canonical) continue
     await migrateLegacyGuestThread({
       canonicalId: canonical,
       legacyThreadId: id,
@@ -4079,7 +4177,14 @@ export async function sendChatMessage({
   clientId,
 }) {
   const trimmed = String(text || '').trim()
-  if (!threadId || !trimmed) return null
+  if (!threadId) {
+    const error = new Error('送信先のチャットが未確定です。')
+    error.code = 'chat/invalid-thread'
+    throw error
+  }
+  if (!trimmed && !(imageUrl || fileUrl || sticker || effect || (Array.isArray(attachments) && attachments.length))) {
+    return null
+  }
   if (trimmed.length > 2000) {
     const error = new Error('メッセージが長すぎます。')
     error.code = 'chat/too-long'
@@ -4087,11 +4192,13 @@ export async function sendChatMessage({
   }
 
   const role = sender === 'hana' ? 'hana' : 'guest'
-  const threadRef = doc(db, CHAT_THREADS_COLLECTION, threadId)
+  const canonicalThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
+  if (!canonicalThreadId) return null
+  const threadRef = doc(db, CHAT_THREADS_COLLECTION, canonicalThreadId)
   const messagesRef = collection(threadRef, 'messages')
   const nowIso = new Date().toISOString()
-  const label = guestLabel || guestLabelFromUid(threadId)
-  const key = guestKey || getGuestProfile(String(threadId).replace(/^guest-/, ''))?.key || ''
+  const label = guestLabel || guestLabelFromUid(canonicalThreadId)
+  const key = guestKey || getGuestProfile(String(canonicalThreadId).replace(/^guest-/, ''))?.key || ''
   const safeClientId = String(clientId || '').trim().slice(0, 64)
 
   const stickerId = normalizeChatSticker(sticker)
@@ -4190,6 +4297,7 @@ export async function sendChatMessage({
 }
 
 export async function updateChatMessage({ threadId, messageId, text }) {
+  threadId = await resolveCanonicalChatThreadId(threadId)
   const trimmed = String(text || '').trim()
   if (!threadId || !messageId || !trimmed) return
   if (trimmed.length > 2000) {
@@ -4216,6 +4324,7 @@ export async function updateChatMessage({ threadId, messageId, text }) {
 }
 
 export async function deleteChatMessage({ threadId, messageId }) {
+  threadId = await resolveCanonicalChatThreadId(threadId)
   if (!threadId || !messageId) return
 
   const messageRef = doc(db, CHAT_THREADS_COLLECTION, threadId, 'messages', messageId)
@@ -4329,7 +4438,8 @@ export async function toggleChatReaction(args) {
   return reactToChatMessage({ ...args, mode: args?.mode || 'toggle' })
 }
 
-export async function markThreadRead(threadId, reader) {
+export async function markThreadRead(threadId, reader, guestKey = '') {
+  threadId = await resolveCanonicalChatThreadId(threadId, guestKey)
   if (!threadId) return
   const nowIso = new Date().toISOString()
   const patch = reader === 'hana'

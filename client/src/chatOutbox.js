@@ -1,7 +1,24 @@
 /** Persist unsent chat text/stickers so reload can recover (no File blobs). */
 
 const OUTBOX_KEY = 'hana-chat-outbox-v1'
+const ARCHIVE_KEY = 'hana-chat-archive-v1'
 const OUTBOX_MAX = 40
+const ARCHIVE_MAX = 1000
+
+function normalizeGuestKey(value) {
+  const key = String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '')
+  if (key === 'gabu' || key === 'gabriel') return 'gabusan'
+  return key
+}
+
+function canonicalizeOutboxThreadId(threadId = '', guestKey = '') {
+  const raw = String(threadId || '').trim()
+  const key = normalizeGuestKey(guestKey)
+  if (key) return `guest-${key}`
+  const match = raw.match(/^guest-([a-z0-9_-]+)$/i)
+  if (match) return `guest-${normalizeGuestKey(match[1])}`
+  return raw
+}
 
 function safeParse(raw) {
   try {
@@ -21,23 +38,52 @@ export function listChatOutbox() {
   }
 }
 
-export function listChatOutboxForThread(threadId) {
+function listChatArchive() {
+  if (typeof window === 'undefined') return []
+  try {
+    return safeParse(window.localStorage.getItem(ARCHIVE_KEY))
+  } catch {
+    return []
+  }
+}
+
+export function listChatOutboxForThread(threadId, guestKey = '') {
   const tid = String(threadId || '').trim()
-  if (!tid) return []
-  return listChatOutbox().filter((entry) => String(entry?.threadId || '') === tid)
+  const target = canonicalizeOutboxThreadId(tid, guestKey)
+  if (!tid && !target) return []
+  return listChatOutbox().filter((entry) => {
+    const storedThread = String(entry?.threadId || '').trim()
+    const storedGuestKey = String(entry?.guestKey || '').trim()
+    const storedCanonical = canonicalizeOutboxThreadId(storedThread, storedGuestKey)
+    if (!storedCanonical && !storedThread) return false
+    return storedCanonical === target || storedThread === tid || storedThread === target
+  })
 }
 
 export function upsertChatOutbox(entry) {
   if (typeof window === 'undefined') return
   const clientId = String(entry?.clientId || '').trim()
-  const threadId = String(entry?.threadId || '').trim()
+  const resolvedThreadId = canonicalizeOutboxThreadId(
+    entry?.threadId,
+    entry?.guestKey || entry?.guestLabel || '',
+  )
   const text = String(entry?.text || '').trim()
-  if (!clientId || !threadId || !text) return
+  const hasPayload = Boolean(
+    text
+    || entry?.sticker
+    || entry?.effect
+    || entry?.imageUrl
+    || entry?.fileUrl
+    || entry?.fileKind
+    || (Array.isArray(entry?.attachments) && entry.attachments.length)
+  )
+  if (!clientId || !resolvedThreadId || !hasPayload) return
   try {
     const next = listChatOutbox().filter((row) => String(row?.clientId || '') !== clientId)
     next.push({
       clientId,
-      threadId,
+      threadId: resolvedThreadId,
+      serverId: String(entry.serverId || '').slice(0, 128),
       text: text.slice(0, 2000),
       sender: entry.sender === 'hana' ? 'hana' : 'guest',
       guestKey: String(entry.guestKey || '').slice(0, 64),
@@ -72,11 +118,76 @@ export function removeChatOutbox(clientId) {
   const id = String(clientId || '').trim()
   if (!id) return
   try {
-    const next = listChatOutbox().filter((row) => String(row?.clientId || '') !== id)
+    const rows = listChatOutbox()
+    const removed = rows.find((row) => String(row?.clientId || '') === id)
+    if (removed) {
+      const archive = listChatArchive().filter((row) => String(row?.clientId || '') !== id)
+      archive.push({ ...removed, serverId: removed.serverId || '' })
+      window.localStorage.setItem(ARCHIVE_KEY, JSON.stringify(archive.slice(-ARCHIVE_MAX)))
+    }
+    const next = rows.filter((row) => String(row?.clientId || '') !== id)
     window.localStorage.setItem(OUTBOX_KEY, JSON.stringify(next))
   } catch {
     /* ignore */
   }
+}
+
+export function listChatRecoveryForThread(threadId, guestKey = '') {
+  const pending = listChatOutboxForThread(threadId, guestKey)
+  const archived = listChatArchive().filter((entry) => (
+    listChatOutboxForThread(threadId, guestKey).some((row) => false)
+      || canonicalArchiveThreadMatches(entry, threadId, guestKey)
+  ))
+  const byId = new Map()
+  archived.forEach((entry) => byId.set(String(entry?.clientId || ''), entry))
+  pending.forEach((entry) => byId.set(String(entry?.clientId || ''), entry))
+  return [...byId.values()].filter((entry) => entry.clientId)
+}
+
+function canonicalArchiveThreadMatches(entry, threadId, guestKey) {
+  const target = canonicalizeOutboxThreadId(threadId, guestKey)
+  const stored = String(entry?.threadId || '').trim()
+  return canonicalizeOutboxThreadId(stored, entry?.guestKey || '') === target
+}
+
+export function markChatOutboxSent(clientId, serverId) {
+  if (typeof window === 'undefined') return
+  const id = String(clientId || '').trim()
+  const sid = String(serverId || '').trim()
+  if (!id || !sid) return
+  try {
+    const next = listChatOutbox().map((row) => (
+      String(row?.clientId || '').trim() === id
+        ? { ...row, serverId: sid, sentAtIso: new Date().toISOString() }
+        : row
+    ))
+    window.localStorage.setItem(OUTBOX_KEY, JSON.stringify(next))
+  } catch {
+    /* ignore */
+  }
+}
+
+export function resolveRetryableOutboxEntry({
+  threadId = '',
+  guestKey = '',
+  clientId = '',
+  messageId = '',
+  messages = [],
+} = {}) {
+  const targetId = String(clientId || messageId || '').trim()
+  const stateMatch = Array.isArray(messages)
+    ? messages.find((message) => {
+        const id = String(message?.id || '').trim()
+        const currentClientId = String(message?.clientId || '').trim()
+        return targetId && (id === targetId || currentClientId === targetId)
+      })
+    : null
+  if (stateMatch) return stateMatch
+
+  const outboxRows = listChatOutboxForThread(threadId, guestKey)
+  if (!targetId) return null
+  const entry = outboxRows.find((row) => String(row?.clientId || '').trim() === targetId)
+  return entry ? outboxEntryToLocalMessage(entry) : null
 }
 
 export function outboxEntryToLocalMessage(entry) {
@@ -85,7 +196,8 @@ export function outboxEntryToLocalMessage(entry) {
   return {
     id: entry.clientId,
     clientId: entry.clientId,
-    pending: true,
+    serverId: entry.serverId || undefined,
+    pending: !entry.serverId,
     sendFailed: false,
     role: sender,
     sender,
