@@ -1808,7 +1808,9 @@ function serializeChatMessage(id, data) {
     attachments: deleted ? [] : normalizeChatAttachments(data?.attachments),
     voiceSkin: deleted ? '' : normalizeVoiceSkin(data?.voiceSkin),
     sender: data?.sender === 'hana' ? 'hana' : 'guest',
-    createdAt: data?.createdAt?.toDate?.()?.toISOString?.() || data?.createdAtIso || null,
+    createdAt: data?.createdAtIso
+      ? String(data.createdAtIso)
+      : (data?.createdAt?.toDate?.()?.toISOString?.() || null),
     createdAtIso: data?.createdAtIso ? String(data.createdAtIso) : null,
     clientId: data?.clientId ? String(data.clientId).slice(0, 64) : null,
     editedAt: data?.editedAt?.toDate?.()?.toISOString?.() || data?.editedAtIso || null,
@@ -1837,7 +1839,18 @@ function serializeChatMessage(id, data) {
 
 /** Stable chronological sort for chat bubbles (avoids Firestore auto-id reordering). */
 export function sortChatMessages(rows = []) {
-  return [...rows].sort((a, b) => {
+  const unique = new Map()
+  for (const row of rows) {
+    const timestampKey = String(row?.createdAtIso || row?.createdAt || '').trim()
+    const contentKey = timestampKey
+      ? `content:${row?.sender || row?.role || ''}|${row?.text || ''}|${row?.sticker || ''}|${row?.effect || ''}|${timestampKey}`
+      : `id:${row?.id || ''}`
+    const key = timestampKey
+      ? contentKey
+      : (row?.clientId ? `client:${row.clientId}` : contentKey)
+    if (!unique.has(key)) unique.set(key, row)
+  }
+  return [...unique.values()].sort((a, b) => {
     // Prefer createdAtIso (client clock at send): serverTimestamp can resolve out of
     // order when messages are sent in quick succession, which flips bubble order.
     const ta = Date.parse(a?.createdAtIso || a?.createdAt || '') || 0
@@ -3295,45 +3308,31 @@ export function subscribeChatMessages(threadId, onData, onError, guestKey = '') 
       activeThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
       if (stopped || !activeThreadId) return
       const messagesRef = collection(db, CHAT_THREADS_COLLECTION, activeThreadId, 'messages')
-      let isoRows = []
-      let fullRows = null
-      let fallbackRows = null
-      let unsubIso = () => {}
-      let fallbackUnsub = () => {}
-      let fallbackStarted = false
-      const emit = () => {
-        if (fallbackRows) {
-          onData?.(sortChatMessages(fallbackRows).slice(-CHAT_MESSAGE_LIVE_LIMIT))
-          return
-        }
-        const byId = new Map()
-        fullRows?.forEach((row) => byId.set(row.id, row))
-        isoRows.forEach((row) => byId.set(row.id, row))
-        onData?.(sortChatMessages([...byId.values()]))
+      let polling = false
+      const emitSnapshot = (snap) => {
+        onData?.(sortChatMessages(rowsFromMessageSnap(snap)).slice(-CHAT_MESSAGE_LIVE_LIMIT))
       }
-      const startFallback = () => {
-        if (fallbackStarted) return
-        fallbackStarted = true
-        fallbackUnsub = onSnapshot(
-          messagesRef,
-          (snap) => {
-            fallbackRows = rowsFromMessageSnap(snap)
-            emit()
-          },
-          (error) => onError?.(error),
-        )
-      }
-      unsubIso = onSnapshot(
-        query(messagesRef, orderBy('createdAtIso', 'desc'), limit(CHAT_MESSAGE_LIVE_LIMIT)),
-        (snap) => {
-          isoRows = rowsFromMessageSnap(snap)
-          emit()
-        },
-        () => startFallback(),
+      unsubscribe = onSnapshot(
+        messagesRef,
+        emitSnapshot,
+        (error) => onError?.(error),
       )
+      const poll = () => {
+        if (stopped || polling) return
+        polling = true
+        void getDocs(messagesRef)
+          .then((snap) => {
+            if (!stopped) emitSnapshot(snap)
+          })
+          .catch(() => {})
+          .finally(() => { polling = false })
+      }
+      poll()
+      const timer = window.setInterval(poll, 2000)
+      const stop = unsubscribe
       unsubscribe = () => {
-        unsubIso()
-        fallbackUnsub()
+        stop()
+        window.clearInterval(timer)
       }
       if (stopped) unsubscribe()
     } catch (error) {
@@ -4188,6 +4187,7 @@ export async function sendChatMessage({
   fileSize,
   attachments,
   clientId,
+  createdAtIso,
 }) {
   const trimmed = String(text || '').trim()
   if (!threadId) {
@@ -4209,7 +4209,7 @@ export async function sendChatMessage({
   if (!canonicalThreadId) return null
   const threadRef = doc(db, CHAT_THREADS_COLLECTION, canonicalThreadId)
   const messagesRef = collection(threadRef, 'messages')
-  const nowIso = new Date().toISOString()
+  const nowIso = String(createdAtIso || '').trim() || new Date().toISOString()
   const label = guestLabel || guestLabelFromUid(canonicalThreadId)
   const key = guestKey || getGuestProfile(String(canonicalThreadId).replace(/^guest-/, ''))?.key || ''
   const safeClientId = String(clientId || '').trim().slice(0, 64)
@@ -4285,10 +4285,6 @@ export async function sendChatMessage({
   // A stable document id makes retries idempotent. Repeating the same clientId
   // updates one message instead of creating duplicate visible bubbles.
   const messageRef = safeClientId ? doc(messagesRef, safeClientId) : doc(messagesRef)
-  if (safeClientId) {
-    const existing = await getDoc(messageRef)
-    if (existing.exists()) return messageRef.id
-  }
   const batch = writeBatch(db)
   batch.set(messageRef, payload)
   batch.set(

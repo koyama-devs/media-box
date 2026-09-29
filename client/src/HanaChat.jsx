@@ -973,6 +973,7 @@ export default function HanaChat({
   /** Never leave composer icons dimmed if a send hangs. */
   const busyWatchdogRef = useRef(0)
   const lastSendTapRef = useRef(0)
+  const lastSendTimestampRef = useRef(0)
 
   const endComposerBusy = useCallback(() => {
     if (busyWatchdogRef.current) {
@@ -1873,13 +1874,16 @@ export default function HanaChat({
     if (hidden || actingAsOwner || !guestChatId) {
       return undefined
     }
-    if (!guestOnHuman) return undefined
     const unsub = subscribeChatMessages(
       guestChatId,
       (next) => {
         const filtered = next.filter((m) => !deletingIdsRef.current.has(m.id))
         const cached = messageCacheRef.current.get(guestChatId)
         if (!filtered.length && cached?.length) return
+        if (!guestOnHuman && filtered.some((message) => message.sender === 'hana')) {
+          saveChannel(guestChatId, 'human')
+          setChannel('human')
+        }
         messageCacheRef.current.set(guestChatId, filtered)
         saveLocalChatMessages(guestChatId, filtered)
         setHanaMessages((prev) => mergeServerMessagesWithPending(filtered, prev))
@@ -4159,7 +4163,9 @@ export default function HanaChat({
     setError('')
     const role = actingAsOwner ? 'hana' : 'guest'
     const pendingId = nextStickerPendingId()
-    const nowIso = new Date().toISOString()
+    const nowMs = Math.max(Date.now(), lastSendTimestampRef.current + 1)
+    lastSendTimestampRef.current = nowMs
+    const nowIso = new Date(nowMs).toISOString()
     let threadId = ''
     try {
       threadId = actingAsOwner
@@ -4229,6 +4235,7 @@ export default function HanaChat({
         sender: role,
         sticker: id,
         clientId: pendingId,
+        createdAtIso: nowIso,
         ...guestMeta,
       })
       sendInFlightRef.current.set(pendingId, writePromise)
@@ -4444,6 +4451,7 @@ export default function HanaChat({
         fileMime: uploaded.fileMime,
         fileSize: uploaded.fileSize,
         clientId: pendingId,
+        createdAtIso: nowIso,
         ...guestMeta,
       })
       sendInFlightRef.current.set(pendingId, writePromise)
@@ -4687,6 +4695,7 @@ export default function HanaChat({
         effect: described.effect,
         effectEmoji: described.effectEmoji,
         clientId: pendingId,
+        createdAtIso: nowIso,
         ...guestMeta,
       })
       sendInFlightRef.current.set(pendingId, writePromise)
@@ -5156,6 +5165,7 @@ export default function HanaChat({
       effect: local.effect || undefined,
       effectEmoji: local.effectEmoji || undefined,
       replyTo: local.replyTo || null,
+      createdAtIso: local.createdAtIso || local.createdAt || '',
       ...guestMeta,
       ...mediaPayload,
     })
@@ -5371,6 +5381,7 @@ export default function HanaChat({
             sender: 'hana',
             clientId: pendingId,
             replyTo: pendingReply,
+            createdAtIso: nowIso,
             guestKey: ownerActiveGuestKey || '',
             guestLabel: ownerActiveGuestLabel,
             ...mediaFields,
@@ -5542,6 +5553,7 @@ export default function HanaChat({
             guestKey: guestProfile?.key || guestKey || '',
             clientId: pendingId,
             replyTo: pendingReply,
+            createdAtIso: nowIso,
             ...mediaFields,
           })
           return { serverId, mediaFields }
