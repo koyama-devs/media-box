@@ -3217,9 +3217,22 @@ export function deliveryStatusLabel(status) {
 }
 
 function rowsFromMessageSnap(snap) {
-  return snap.docs
+  const byClientId = new Map()
+  snap.docs
     .map((document) => serializeChatMessage(document.id, document.data()))
     .filter((message) => !message.deleted)
+    .forEach((message) => {
+      const key = message.clientId ? `client:${message.clientId}` : `doc:${message.id}`
+      const existing = byClientId.get(key)
+      if (!existing) {
+        byClientId.set(key, message)
+        return
+      }
+      const existingTime = Date.parse(existing.createdAtIso || existing.createdAt || '') || 0
+      const messageTime = Date.parse(message.createdAtIso || message.createdAt || '') || 0
+      if (messageTime >= existingTime) byClientId.set(key, message)
+    })
+  return [...byClientId.values()]
 }
 
 /**
@@ -4269,7 +4282,13 @@ export async function sendChatMessage({
   }
 
   // Atomic: never update thread preview without the message doc (and vice versa).
-  const messageRef = doc(messagesRef)
+  // A stable document id makes retries idempotent. Repeating the same clientId
+  // updates one message instead of creating duplicate visible bubbles.
+  const messageRef = safeClientId ? doc(messagesRef, safeClientId) : doc(messagesRef)
+  if (safeClientId) {
+    const existing = await getDoc(messageRef)
+    if (existing.exists()) return messageRef.id
+  }
   const batch = writeBatch(db)
   batch.set(messageRef, payload)
   batch.set(

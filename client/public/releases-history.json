@@ -1,6 +1,15 @@
 {
-  "updatedAt": "2026-09-29T14:52:49.301Z",
+  "updatedAt": "2026-09-29T15:04:32.320Z",
   "releases": [
+    {
+      "version": "mumt446p-177z54",
+      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
+      "builtAt": "2026-09-29T15:03:59.290Z",
+      "previousVersion": "mumsp0bv-ctze5u",
+      "previousHostingVersionId": "7e99e3bf1b909c75",
+      "hostingVersionId": "2d97edf12d100f65",
+      "recordedAt": "2026-09-29T15:03:59.462Z"
+    },
     {
       "version": "mumsp0bv-ctze5u",
       "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
@@ -351,15 +360,6 @@
       "previousHostingVersionId": "e5d210799fc84d7c",
       "hostingVersionId": "af98a67ca11bb03a",
       "recordedAt": "2026-09-20T10:10:59.690Z"
-    },
-    {
-      "version": "mu9n3785-3a10kv",
-      "notes": "チャットヘッダー修正：夏まつりバナーの重なりを解消、オンライン／オフライン文字を削除（アバターの点のみ）。",
-      "builtAt": "2026-09-20T09:54:21.827Z",
-      "previousVersion": "mu9mtyaw-di59u1",
-      "previousHostingVersionId": "fe99b8f19b006a31",
-      "hostingVersionId": "e5d210799fc84d7c",
-      "recordedAt": "2026-09-20T09:54:22.206Z"
     }
   ]
 }
