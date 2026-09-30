@@ -3250,6 +3250,18 @@ function preferMessageRow(existing, candidate) {
   return messageTime >= existingTime ? candidate : existing
 }
 
+/** Union message lists — keep the row with richer reactions (flower fill after reopen). */
+export function mergeChatMessageLists(...lists) {
+  const byId = new Map()
+  for (const list of lists) {
+    for (const row of list || []) {
+      if (!row?.id) continue
+      byId.set(row.id, preferMessageRow(byId.get(row.id), row))
+    }
+  }
+  return sortChatMessages([...byId.values()])
+}
+
 function rowsFromMessageSnap(snap) {
   const byClientId = new Map()
   snap.docs
@@ -3400,8 +3412,8 @@ export function subscribeChatMessages(threadId, onData, onError, guestKey = '') 
   }
 }
 
-export async function fetchChatMessages(threadId, _guestKey = '') {
-  const activeThreadId = String(threadId || '').trim()
+export async function fetchChatMessages(threadId, guestKey = '') {
+  const activeThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
   if (!activeThreadId) return []
   const messagesRef = collection(db, CHAT_THREADS_COLLECTION, activeThreadId, 'messages')
   const isoQuery = query(
