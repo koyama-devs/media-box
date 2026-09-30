@@ -150,10 +150,7 @@ export function applyChatMessageSnapshot({
   threadId = '',
 }) {
   const filtered = (serverRows || []).filter((m) => !deletingIds.has(m.id))
-  // Only merge local reaction cache on cold open — not on every live snapshot (live chat lag).
-  const cachedRows = threadId && !(previous || []).length
-    ? loadThreadMessageCache(threadId)
-    : []
+  const cachedRows = threadId ? loadThreadMessageCache(threadId) : []
   const withReactions = mergeChatMessageLists(filtered, previous, cachedRows)
   reconcileChatOutboxWithMessages(withReactions)
   return mergeServerMessagesWithPending(withReactions, previous)
