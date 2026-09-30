@@ -23,6 +23,7 @@ import {
   listChatOutboxForThread,
   listChatRecoveryForThread,
   outboxEntryToLocalMessage,
+  purgeChatDeliveryEntry,
   resolveRetryableOutboxEntry,
   upsertChatOutbox
 } from './chatOutbox'
@@ -33,7 +34,6 @@ import {
   CHAT_SEND_TIMEOUT_MS,
   CHAT_UPLOAD_TIMEOUT_MS,
   mapMessagesWithServerId,
-  mergeServerMessagesWithPending,
   nextChatPendingId,
   nextStickerPendingId,
   patchMessagesByPendingId,
@@ -82,6 +82,7 @@ import {
   getGuestProfile,
   getMessageDeliveryStatus,
   isChatAudioAttachment,
+  isTestChatMessageText,
   listGuestProfiles,
   markThreadRead,
   mergeChatMessageLists,
@@ -1849,6 +1850,7 @@ export default function HanaChat({
             previous: prev,
             deletingIds: deletingIdsRef.current,
             threadId: liveThreadId,
+            guestKey: guestProfile?.key || guestKey || '',
           })
           stashThreadMessagesInCache(liveThreadId, merged)
           return merged
@@ -1905,6 +1907,7 @@ export default function HanaChat({
             previous: prev,
             deletingIds: deletingIdsRef.current,
             threadId: listenThreadId,
+            guestKey: ownerActiveGuestKey || '',
           })
           stashThreadMessagesInCache(listenThreadId, merged)
           return merged
@@ -1945,18 +1948,28 @@ export default function HanaChat({
       ? (ownerLiveThreadId || activeThreadId)
       : (guestOnHuman ? guestLiveThreadId : '')
     if (!threadId) return undefined
-    const entries = listChatRecoveryForThread(
-      threadId,
-      actingAsOwner ? ownerActiveGuestKey : (guestProfile?.key || guestKey || ''),
-    )
-    if (!entries.length) return undefined
+    const recoveryGuestKey = actingAsOwner
+      ? ownerActiveGuestKey
+      : (guestProfile?.key || guestKey || '')
+    const entries = listChatRecoveryForThread(threadId, recoveryGuestKey)
+    const recoverable = []
+    for (const entry of entries) {
+      const body = String(entry?.text || entry?.sticker || '').trim()
+      const serverId = String(entry?.serverId || '').trim()
+      if (isTestChatMessageText(body) && !serverId) {
+        purgeChatDeliveryEntry(entry.clientId)
+        continue
+      }
+      recoverable.push(entry)
+    }
+    if (!recoverable.length) return undefined
 
     setHanaMessages((prev) => {
       const existing = new Set(
         (prev || []).flatMap((m) => [String(m.id || ''), String(m.clientId || '')]),
       )
       const extras = []
-      for (const entry of entries) {
+      for (const entry of recoverable) {
         if (existing.has(String(entry.clientId || ''))) continue
         const local = outboxEntryToLocalMessage(entry)
         if (local) extras.push(local)
@@ -1966,9 +1979,11 @@ export default function HanaChat({
     })
 
     const timer = window.setTimeout(() => {
-      for (const entry of entries) {
+      for (const entry of recoverable) {
         const id = String(entry.clientId || '')
         if (!id || sendInFlightRef.current.has(id)) continue
+        const body = String(entry?.text || entry?.sticker || '').trim()
+        if (isTestChatMessageText(body)) continue
         void retryFailedSendRef.current(id)
       }
     }, 700)
@@ -4030,6 +4045,7 @@ export default function HanaChat({
           previous: prev,
           deletingIds: deletingIdsRef.current,
           threadId: openId,
+          guestKey: key,
         })
         stashThreadMessagesInCache(openId, merged)
         return merged
@@ -5036,6 +5052,11 @@ export default function HanaChat({
       || (Array.isArray(local.attachments) && local.attachments.length)
     )
     if (!text && !hasMediaPayload) return
+    if (isTestChatMessageText(text || local.sticker || '')) {
+      purgeChatDeliveryEntry(clientId)
+      setHanaMessages((prev) => prev.filter((m) => m.id !== mid && m.clientId !== clientId))
+      return
+    }
 
     setError('')
     setHanaMessages((prev) => prev.map((m) => (

@@ -191,9 +191,89 @@ export function reconcileChatOutboxWithMessages(messages = []) {
     const serverId = String(entry?.serverId || '').trim()
     if (!clientId) continue
     if (messages.some((message) => serverHasOutboxDelivery(message, clientId, serverId))) {
-      removeChatOutbox(clientId)
+      purgeChatDeliveryEntry(clientId)
     }
   }
+}
+
+/** Drop outbox + archive row (no re-archive) — e.g. admin deleted Firestore doc or purged test junk. */
+export function purgeChatDeliveryEntry(clientId) {
+  const id = String(clientId || '').trim()
+  if (!id || typeof window === 'undefined') return
+  try {
+    const outbox = listChatOutbox().filter((row) => String(row?.clientId || '') !== id)
+    window.localStorage.setItem(OUTBOX_KEY, JSON.stringify(outbox))
+    const archive = listChatArchive().filter((row) => String(row?.clientId || '') !== id)
+    window.localStorage.setItem(ARCHIVE_KEY, JSON.stringify(archive))
+  } catch {
+    /* ignore */
+  }
+}
+
+function outboxEntryBody(entry) {
+  return String(entry?.text || entry?.sticker || '').trim()
+}
+
+function listChatArchiveForThread(threadId, guestKey = '') {
+  return listChatArchive().filter((entry) => canonicalArchiveThreadMatches(entry, threadId, guestKey))
+}
+
+/**
+ * Align local outbox/archive with Firestore snapshot so deleted or purged messages are not replayed.
+ * @param {function(string): boolean} [isTestMessageFn] optional — drops pending test junk with no server copy
+ */
+export function reconcileChatDeliveryStorage(messages = [], threadId = '', guestKey = '', isTestMessageFn = null) {
+  if (typeof window === 'undefined') return
+  const serverIds = new Set()
+  const clientIdsOnServer = new Set()
+  for (const message of messages || []) {
+    if (!message || message.deleted) continue
+    const id = String(message.id || '').trim()
+    const cid = String(message.clientId || '').trim()
+    if (id) serverIds.add(id)
+    if (cid) clientIdsOnServer.add(cid)
+  }
+  const seen = new Set()
+  const rows = [
+    ...listChatOutboxForThread(threadId, guestKey),
+    ...listChatArchiveForThread(threadId, guestKey),
+  ]
+  for (const entry of rows) {
+    const clientId = String(entry?.clientId || '').trim()
+    if (!clientId || seen.has(clientId)) continue
+    seen.add(clientId)
+    const serverId = String(entry?.serverId || '').trim()
+    if (serverId && !serverIds.has(serverId)) {
+      purgeChatDeliveryEntry(clientId)
+      continue
+    }
+    if (
+      !serverId
+      && typeof isTestMessageFn === 'function'
+      && isTestMessageFn(outboxEntryBody(entry))
+      && !clientIdsOnServer.has(clientId)
+    ) {
+      purgeChatDeliveryEntry(clientId)
+    }
+  }
+}
+
+export function purgeTestChatDeliveryForThread(threadId, guestKey = '', isTestMessageFn = null) {
+  if (typeof window === 'undefined' || typeof isTestMessageFn !== 'function') return 0
+  let n = 0
+  const seen = new Set()
+  for (const entry of [
+    ...listChatOutboxForThread(threadId, guestKey),
+    ...listChatArchiveForThread(threadId, guestKey),
+  ]) {
+    const clientId = String(entry?.clientId || '').trim()
+    if (!clientId || seen.has(clientId)) continue
+    seen.add(clientId)
+    if (!isTestMessageFn(outboxEntryBody(entry))) continue
+    purgeChatDeliveryEntry(clientId)
+    n += 1
+  }
+  return n
 }
 
 export function resolveRetryableOutboxEntry({

@@ -17,11 +17,14 @@ const fakeLocalStorage = {
 globalThis.window = { localStorage: fakeLocalStorage }
 
 const {
+  deliverChatOutbox,
   listChatOutbox,
+  listChatRecoveryForThread,
   upsertChatOutbox,
   markChatOutboxSent,
   resolveRetryableOutboxEntry,
   listChatOutboxForThread,
+  reconcileChatDeliveryStorage,
 } = await import('./chatOutbox.js')
 
 test('outbox recovery keeps pending bubble for canonical guest thread', () => {
@@ -104,6 +107,37 @@ test('pending outbox exists even when the channel preference was not persisted',
   })
 
   assert.equal(listChatOutboxForThread('guest-zen', 'zen').length, 1)
+})
+
+test('admin-deleted server copy drops archived outbox so reload does not replay', () => {
+  store.clear()
+  upsertChatOutbox({
+    clientId: 'pending-deleted',
+    threadId: 'guest-gabusan',
+    guestKey: 'gabusan',
+    text: 'Test1',
+    sender: 'guest',
+    createdAtIso: new Date().toISOString(),
+  })
+  deliverChatOutbox('pending-deleted', 'server-deleted-1')
+  assert.equal(listChatRecoveryForThread('guest-gabusan', 'gabusan').length, 1)
+  reconcileChatDeliveryStorage([], 'guest-gabusan', 'gabusan')
+  assert.equal(listChatRecoveryForThread('guest-gabusan', 'gabusan').length, 0)
+})
+
+test('pending test junk is dropped when absent from server snapshot', () => {
+  store.clear()
+  upsertChatOutbox({
+    clientId: 'pending-testx',
+    threadId: 'guest-gabusan',
+    guestKey: 'gabusan',
+    text: 'Testx',
+    sender: 'guest',
+    createdAtIso: new Date().toISOString(),
+  })
+  const isTest = (body) => String(body || '').toLowerCase() === 'testx'
+  reconcileChatDeliveryStorage([], 'guest-gabusan', 'gabusan', isTest)
+  assert.equal(listChatOutbox().length, 0)
 })
 
 test('successful write stays durable until the server snapshot confirms it', () => {

@@ -19,6 +19,7 @@ import {
     remindAtFromChoice,
 } from './chatExtras'
 import { renderChatTextWithLinks } from './chatLinkify'
+import { purgeTestChatDeliveryForThread } from './chatOutbox'
 import { saveThreadMessageCache } from './chatSendPipeline'
 import { readDefaultReaction } from './chatSettings'
 import {
@@ -39,6 +40,7 @@ import {
     getFirebaseErrorMessage,
     getMessageDeliveryStatus,
     isProtectedOwnerAccount,
+    isTestChatMessageText,
     listGuestProfiles,
     listOwnerProfiles,
     markThreadRead,
@@ -1015,8 +1017,10 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
       const result = await purgeGabuTestChatMessages()
       for (const row of result.threads || []) {
         saveThreadMessageCache(row.threadId, [])
+        purgeTestChatDeliveryForThread(row.threadId, 'gabusan', isTestChatMessageText)
       }
       saveThreadMessageCache('guest-gabusan', [])
+      purgeTestChatDeliveryForThread('guest-gabusan', 'gabusan', isTestChatMessageText)
       const detail = result.threads.length
         ? result.threads.map((t) => `${t.threadId}: ${t.deleted}件`).join('、')
         : '該当なし'
@@ -1047,7 +1051,9 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
     try {
       const guestKey = activeThread?.guestKey || String(activeId).replace(/^guest-/, '')
       const result = await purgeTestChatMessagesInThread(activeId, guestKey)
-      if (result.deleted) saveThreadMessageCache(result.threadId || activeId, [])
+      const clearedThreadId = result.threadId || activeId
+      if (result.deleted) saveThreadMessageCache(clearedThreadId, [])
+      purgeTestChatDeliveryForThread(clearedThreadId, guestKey, isTestChatMessageText)
       const sampleNote = result.samples?.length ? ` (${result.samples.slice(0, 5).join(', ')})` : ''
       setStatusNote(
         result.deleted
