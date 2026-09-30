@@ -4221,35 +4221,9 @@ async function hashPushToken(token) {
  */
 export function resolvePushUserKey(authRole, passOrKey = '') {
   const profile = resolveSessionProfile(authRole === 'owner' ? 'owner' : 'guest', passOrKey)
-  const key = resolveAccountKey(profile?.key || passOrKey)
+  const key = normalizeAccountKey(profile?.key)
   if (authRole === 'owner') return key || 'hana'
   return key || ''
-}
-
-/**
- * All pushTokens.userKey values that may exist for one guest (canonical + passKey / legacy aliases).
- * Cloud Functions should query every key when delivering Hana → guest push.
- */
-export function pushTokenLookupKeys(userKey = '') {
-  const canonical = resolveAccountKey(userKey)
-  if (!canonical) return []
-  const keys = new Set([canonical])
-  const needle = normalizeAccountKey(userKey)
-  if (needle) keys.add(needle)
-  const account = findChatAccountByPassKey(needle) || findChatAccountByPassKey(canonical)
-    || chatAccountsCache.find((item) => item.key === canonical)
-  if (account?.key) keys.add(normalizeAccountKey(account.key))
-  if (account?.passKey) keys.add(normalizeAccountKey(account.passKey))
-  if (GUEST_PROFILES[canonical]?.key) keys.add(GUEST_PROFILES[canonical].key)
-  for (const profile of Object.values(GUEST_PROFILES)) {
-    if (profile.key === canonical) keys.add(profile.key)
-  }
-  if (canonical === 'gabusan' || needle === 'gabu' || needle === 'gabriel') {
-    keys.add('gabusan')
-    keys.add('gabu')
-    keys.add('gabriel')
-  }
-  return [...keys].filter(Boolean)
 }
 
 /**
@@ -4257,7 +4231,7 @@ export function pushTokenLookupKeys(userKey = '') {
  * Used by the Capacitor shell; safe no-op if token/user missing.
  */
 export async function savePushToken({ userKey, token, platform } = {}) {
-  const key = resolveAccountKey(userKey) || normalizeAccountKey(userKey)
+  const key = normalizeAccountKey(userKey)
   const value = String(token || '').trim()
   if (!key || !value) return null
   const id = await hashPushToken(value)
@@ -4315,10 +4289,7 @@ export async function sendChatMessage({
   const messagesRef = collection(threadRef, 'messages')
   const nowIso = String(createdAtIso || '').trim() || new Date().toISOString()
   const label = guestLabel || guestLabelFromUid(canonicalThreadId)
-  const threadGuestSlug = String(canonicalThreadId).replace(/^guest-/, '')
-  const key = resolveAccountKey(
-    guestKey || getGuestProfile(threadGuestSlug)?.key || threadGuestSlug,
-  ) || normalizeAccountKey(threadGuestSlug)
+  const key = guestKey || getGuestProfile(String(canonicalThreadId).replace(/^guest-/, ''))?.key || ''
   const safeClientId = String(clientId || '').trim().slice(0, 64)
 
   const stickerId = normalizeChatSticker(sticker)
@@ -4338,7 +4309,6 @@ export async function sendChatMessage({
     createdAt: serverTimestamp(),
     createdAtIso: nowIso,
     deleted: false,
-    ...(key ? { guestKey: key } : {}),
     ...(safeClientId ? { clientId: safeClientId } : {}),
     ...(stickerId ? { sticker: stickerId } : {}),
     ...(effectId ? { effect: effectId } : {}),
