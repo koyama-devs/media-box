@@ -3293,7 +3293,10 @@ export async function resolveCanonicalChatThreadId(threadId = '', guestKey = '')
 /** Live chat bubbles stay at newest 300 — do not raise this for media/search. */
 export const CHAT_MESSAGE_LIVE_LIMIT = 300
 
-/** @returns {() => void} */
+/**
+ * Live bubble list — orderBy newest-first + limit (required for new sends to appear).
+ * @returns {() => void}
+ */
 export function subscribeChatMessages(threadId, onData, onError, guestKey = '') {
   if (!threadId) {
     onData?.([])
@@ -3301,39 +3304,32 @@ export function subscribeChatMessages(threadId, onData, onError, guestKey = '') 
   }
   let stopped = false
   let unsubscribe = () => {}
-  let activeThreadId = ''
 
   void (async () => {
     try {
-      activeThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
+      const activeThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
       if (stopped || !activeThreadId) return
       const messagesRef = collection(db, CHAT_THREADS_COLLECTION, activeThreadId, 'messages')
-      let polling = false
       const emitSnapshot = (snap) => {
         onData?.(sortChatMessages(rowsFromMessageSnap(snap)).slice(-CHAT_MESSAGE_LIVE_LIMIT))
       }
-      unsubscribe = onSnapshot(
+      const liveQuery = query(
         messagesRef,
-        emitSnapshot,
-        (error) => onError?.(error),
+        orderBy('createdAtIso', 'desc'),
+        limit(CHAT_MESSAGE_LIVE_LIMIT),
       )
-      const poll = () => {
-        if (stopped || polling) return
-        polling = true
-        void getDocs(messagesRef)
-          .then((snap) => {
-            if (!stopped) emitSnapshot(snap)
-          })
-          .catch(() => {})
-          .finally(() => { polling = false })
-      }
-      poll()
-      const timer = window.setInterval(poll, 2000)
-      const stop = unsubscribe
-      unsubscribe = () => {
-        stop()
-        window.clearInterval(timer)
-      }
+      unsubscribe = onSnapshot(
+        liveQuery,
+        emitSnapshot,
+        (error) => {
+          if (stopped) return
+          unsubscribe = onSnapshot(
+            query(messagesRef, orderBy('createdAt', 'desc'), limit(CHAT_MESSAGE_LIVE_LIMIT)),
+            emitSnapshot,
+            (fallbackError) => onError?.(fallbackError || error),
+          )
+        },
+      )
       if (stopped) unsubscribe()
     } catch (error) {
       if (!stopped) onError?.(error)
@@ -3349,8 +3345,22 @@ export function subscribeChatMessages(threadId, onData, onError, guestKey = '') 
 export async function fetchChatMessages(threadId, guestKey = '') {
   const activeThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
   if (!activeThreadId) return []
-  const snap = await getDocs(collection(db, CHAT_THREADS_COLLECTION, activeThreadId, 'messages'))
-  return sortChatMessages(rowsFromMessageSnap(snap)).slice(-CHAT_MESSAGE_LIVE_LIMIT)
+  const messagesRef = collection(db, CHAT_THREADS_COLLECTION, activeThreadId, 'messages')
+  try {
+    const snap = await getDocs(query(
+      messagesRef,
+      orderBy('createdAtIso', 'desc'),
+      limit(CHAT_MESSAGE_LIVE_LIMIT),
+    ))
+    return sortChatMessages(rowsFromMessageSnap(snap)).slice(-CHAT_MESSAGE_LIVE_LIMIT)
+  } catch {
+    const snap = await getDocs(query(
+      messagesRef,
+      orderBy('createdAt', 'desc'),
+      limit(CHAT_MESSAGE_LIVE_LIMIT),
+    ))
+    return sortChatMessages(rowsFromMessageSnap(snap)).slice(-CHAT_MESSAGE_LIVE_LIMIT)
+  }
 }
 
 function mediaItemsFromChatMessage(message) {

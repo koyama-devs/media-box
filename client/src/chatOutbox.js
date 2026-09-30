@@ -167,6 +167,35 @@ export function markChatOutboxSent(clientId, serverId) {
   }
 }
 
+export function deliverChatOutbox(clientId, serverId) {
+  markChatOutboxSent(clientId, serverId)
+  removeChatOutbox(clientId)
+}
+
+function serverHasOutboxDelivery(message, clientId, serverId = '') {
+  if (!message || message.pending || message.sendFailed) return false
+  const id = String(message?.id || '').trim()
+  const cid = String(message?.clientId || '').trim()
+  const target = String(clientId || '').trim()
+  const sid = String(serverId || '').trim()
+  if (!target) return false
+  if (id === target || cid === target) return true
+  if (sid && (id === sid || cid === sid)) return true
+  return false
+}
+
+export function reconcileChatOutboxWithMessages(messages = []) {
+  if (typeof window === 'undefined' || !Array.isArray(messages) || !messages.length) return
+  for (const entry of listChatOutbox()) {
+    const clientId = String(entry?.clientId || '').trim()
+    const serverId = String(entry?.serverId || '').trim()
+    if (!clientId) continue
+    if (messages.some((message) => serverHasOutboxDelivery(message, clientId, serverId))) {
+      removeChatOutbox(clientId)
+    }
+  }
+}
+
 export function resolveRetryableOutboxEntry({
   threadId = '',
   guestKey = '',
@@ -182,7 +211,20 @@ export function resolveRetryableOutboxEntry({
         return targetId && (id === targetId || currentClientId === targetId)
       })
     : null
-  if (stateMatch) return stateMatch
+  if (stateMatch) {
+    if (serverHasOutboxDelivery(stateMatch, targetId, stateMatch.serverId || stateMatch.id)) {
+      removeChatOutbox(targetId)
+    }
+    return stateMatch
+  }
+
+  const delivered = Array.isArray(messages)
+    ? messages.find((message) => serverHasOutboxDelivery(message, targetId))
+    : null
+  if (delivered) {
+    removeChatOutbox(targetId)
+    return null
+  }
 
   const outboxRows = listChatOutboxForThread(threadId, guestKey)
   if (!targetId) return null

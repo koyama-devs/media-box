@@ -19,14 +19,30 @@ import { collectMessageSearchHits, normalizeMessageSearchQuery } from './chatMes
 import ChatNatsuFireworks from './ChatNatsuFireworks'
 import { playChatNotifySound, unlockChatNotifySound } from './chatNotifySound'
 import {
+    deliverChatOutbox,
     listChatOutboxForThread,
     listChatRecoveryForThread,
     outboxEntryToLocalMessage,
-    removeChatOutbox,
     resolveRetryableOutboxEntry,
     upsertChatOutbox
 } from './chatOutbox'
 import ChatPokeZukan, { PokeZukanChip } from './ChatPokeZukan'
+import {
+    bootstrapThreadRows,
+    buildOptimisticMessage,
+    CHAT_SEND_TIMEOUT_MS,
+    CHAT_UPLOAD_TIMEOUT_MS,
+    ingestLiveChatSnapshot,
+    loadThreadMessageCache,
+    mapMessagesWithServerId,
+    nextChatPendingId,
+    nextStickerPendingId,
+    patchMessagesByPendingId,
+    runChatWrite,
+    saveThreadMessageCache,
+    watchLateChatWrite,
+    withChatTimeout,
+} from './chatSendPipeline'
 import {
     readDefaultReaction,
     readEnterToSend,
@@ -423,35 +439,6 @@ function useNarrowScreen() {
   return narrow
 }
 
-/** Keep optimistic (pending) bubbles until the matching Firestore message arrives. */
-let chatSendSeq = 0
-const CHAT_SEND_TIMEOUT_MS = 28_000
-const CHAT_UPLOAD_TIMEOUT_MS = 120_000
-
-function nextChatPendingId(kind = 'msg') {
-  chatSendSeq += 1
-  return `pending-${kind}-${Date.now()}-${chatSendSeq}`
-}
-
-function nextStickerPendingId() {
-  return nextChatPendingId('sticker')
-}
-
-/** Reject if Firestore/Storage never settles (common on flaky mobile networks). */
-function withChatTimeout(promise, ms, message = '送信がタイムアウトしました。') {
-  let timer = 0
-  const timeoutPromise = new Promise((_, reject) => {
-    timer = window.setTimeout(() => {
-      const err = new Error(message)
-      err.code = 'chat/timeout'
-      reject(err)
-    }, Math.max(1000, Number(ms) || CHAT_SEND_TIMEOUT_MS))
-  })
-  return Promise.race([Promise.resolve(promise), timeoutPromise]).finally(() => {
-    if (timer) window.clearTimeout(timer)
-  })
-}
-
 /** Resolve caption + big-icon emoji for a standalone effect-bar tap. */
 function describeStandaloneEffect(payload, defaultReaction) {
   if (payload?.kind === 'moment') {
@@ -476,49 +463,6 @@ function describeStandaloneEffect(payload, defaultReaction) {
     effectEmoji: emoji,
     text: '花びらを届けたよ',
   }
-}
-
-function mergeServerMessagesWithPending(server, previous) {
-  // Keep in-flight + failed local bubbles until the matching Firestore doc arrives.
-  const pending = (previous || []).filter((message) => (
-    message?.pending || message?.sendFailed
-  ))
-  if (!pending.length) return server
-  const usedServerIds = new Set()
-  const kept = []
-  for (const item of pending) {
-    const itemClientId = String(item.clientId || item.id || '')
-    const itemServerId = String(item.serverId || '')
-    const pendingTs = Date.parse(item.createdAtIso || item.createdAt || '') || 0
-    const match = server.find((row) => {
-      if (usedServerIds.has(row.id)) return false
-      if (itemServerId && row.id === itemServerId) return true
-      if (itemClientId && row.clientId && row.clientId === itemClientId) return true
-      // Pending sends always carry clientId — never content-match (that drops the
-      // optimistic bubble against an older same-text message before the new doc
-      // appears in the snapshot, which looks like a "missing last message").
-      if (itemServerId || itemClientId) return false
-      if ((row.sender || row.role) !== (item.sender || item.role)) return false
-      if (String(row.text || '') !== String(item.text || '')) return false
-      if (String(row.sticker || '') !== String(item.sticker || '')) return false
-      if (String(row.effect || '') !== String(item.effect || '')) return false
-      if (Boolean(row.imageUrl) !== Boolean(item.imageUrl)) return false
-      if (Boolean(row.fileUrl) !== Boolean(item.fileUrl)) return false
-      if (String(row.fileKind || '') !== String(item.fileKind || '')) return false
-      if (pendingTs) {
-        const rowTs = Date.parse(row.createdAtIso || row.createdAt || '') || 0
-        if (rowTs && Math.abs(rowTs - pendingTs) > 90_000) return false
-      }
-      return true
-    })
-    if (match) {
-      usedServerIds.add(match.id)
-      removeChatOutbox(itemClientId || item.id)
-    } else {
-      kept.push(item)
-    }
-  }
-  return sortChatMessages(kept.length ? [...server, ...kept] : server)
 }
 
 function chatListIsNearLatest(listNode) {
@@ -606,33 +550,6 @@ function saveChannel(guestId, channel) {
     window.localStorage.setItem(storageKey(CHANNEL_PREFIX, guestId), channel)
   } catch {
     /* ignore */
-  }
-}
-
-const CHAT_LOCAL_CACHE_PREFIX = 'hana-chat-message-cache-v1:'
-
-function chatLocalCacheKey(threadId) {
-  return `${CHAT_LOCAL_CACHE_PREFIX}${String(threadId || '').trim()}`
-}
-
-function loadLocalChatMessages(threadId) {
-  const id = String(threadId || '').trim()
-  if (!id || typeof window === 'undefined') return []
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(chatLocalCacheKey(id)) || '[]')
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function saveLocalChatMessages(threadId, messages) {
-  const id = String(threadId || '').trim()
-  if (!id || typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(chatLocalCacheKey(id), JSON.stringify((messages || []).slice(-300)))
-  } catch {
-    /* Ignore quota/private-mode failures; Firestore remains the source of truth. */
   }
 }
 
@@ -1001,27 +918,19 @@ export default function HanaChat({
       setHanaMessages([])
       return
     }
-    const ids = [threadId, ...relatedIds].filter(Boolean)
-    for (const id of ids) {
-      const cached = messageCacheRef.current.get(id)
-      if (Array.isArray(cached) && cached.length > 0) {
-        // Alias cache under the thread we are about to open so subscribe merges cleanly.
-        messageCacheRef.current.set(threadId, cached)
-        setHanaMessages(cached)
-        return
-      }
-      const local = loadLocalChatMessages(id)
-      if (local.length > 0) {
-        messageCacheRef.current.set(threadId, local)
-        setHanaMessages(local)
-        return
-      }
-    }
-    const cached = messageCacheRef.current.get(threadId)
     const recovery = listChatRecoveryForThread(threadId)
       .map((entry) => outboxEntryToLocalMessage(entry))
       .filter(Boolean)
-    setHanaMessages(Array.isArray(cached) ? cached : (loadLocalChatMessages(threadId).length ? loadLocalChatMessages(threadId) : recovery))
+    const rows = bootstrapThreadRows({
+      threadId,
+      relatedIds,
+      memoryCache: messageCacheRef.current,
+      recoveryRows: recovery,
+    })
+    if (rows.length) {
+      messageCacheRef.current.set(threadId, rows)
+    }
+    setHanaMessages(rows)
   }, [])
 
   const pinChatListToLatest = useCallback(() => {
@@ -1600,7 +1509,7 @@ export default function HanaChat({
     setAiMessages(stored?.length ? stored : defaultIntroMessages(guestProfile))
     setChannel(savedChannel)
     if (savedChannel === 'human') {
-      const cachedMessages = loadLocalChatMessages(id)
+      const cachedMessages = loadThreadMessageCache(id)
       if (cachedMessages.length) {
         messageCacheRef.current.set(id, cachedMessages)
         setHanaMessages(cachedMessages)
@@ -1878,15 +1787,17 @@ export default function HanaChat({
       guestChatId,
       (next) => {
         const filtered = next.filter((m) => !deletingIdsRef.current.has(m.id))
-        const cached = messageCacheRef.current.get(guestChatId)
-        if (!filtered.length && cached?.length) return
         if (!guestOnHuman && filtered.some((message) => message.sender === 'hana')) {
           saveChannel(guestChatId, 'human')
           setChannel('human')
         }
         messageCacheRef.current.set(guestChatId, filtered)
-        saveLocalChatMessages(guestChatId, filtered)
-        setHanaMessages((prev) => mergeServerMessagesWithPending(filtered, prev))
+        setHanaMessages((prev) => ingestLiveChatSnapshot({
+          threadId: guestChatId,
+          serverRows: filtered,
+          previous: prev,
+          deletingIds: deletingIdsRef.current,
+        }))
         setMessagesHydrated(true)
         setError('')
         // Advance 既読 on every live snapshot while the guest chat is open.
@@ -1932,11 +1843,13 @@ export default function HanaChat({
       (next) => {
         if (cancelled) return
         const filtered = next.filter((m) => !deletingIdsRef.current.has(m.id))
-        const cached = messageCacheRef.current.get(activeThreadId)
-        if (!filtered.length && cached?.length) return
         messageCacheRef.current.set(activeThreadId, filtered)
-        saveLocalChatMessages(activeThreadId, filtered)
-        setHanaMessages((prev) => mergeServerMessagesWithPending(filtered, prev))
+        setHanaMessages((prev) => ingestLiveChatSnapshot({
+          threadId: activeThreadId,
+          serverRows: filtered,
+          previous: prev,
+          deletingIds: deletingIdsRef.current,
+        }))
         setMessagesHydrated(true)
         if (openRef.current && document.visibilityState === 'visible') {
           markThreadRead(activeThreadId, 'hana', ownerActiveGuestKey).catch(() => {})
@@ -4040,7 +3953,7 @@ export default function HanaChat({
       if (loadToken !== ownerThreadLoadRef.current) return
       if (!rows.length && messageCacheRef.current.get(openId)?.length) return
       messageCacheRef.current.set(openId, rows)
-      saveLocalChatMessages(openId, rows)
+      saveThreadMessageCache(openId, rows)
       setHanaMessages(rows)
       setMessagesHydrated(true)
     }).catch(() => {})
@@ -4206,20 +4119,13 @@ export default function HanaChat({
 
       setHanaMessages((prev) => [
         ...prev,
-        {
-          id: pendingId,
-          clientId: pendingId,
-          pending: true,
-          sendFailed: false,
-          role,
+        buildOptimisticMessage({
+          pendingId,
           sender: role,
           text: label,
-          rawText: label,
-          sticker: id,
-          createdAt: nowIso,
           createdAtIso: nowIso,
-          replyTo: null,
-        },
+          extra: { sticker: id, replyTo: null },
+        }),
       ])
       scrollToLatestRef.current()
 
@@ -4238,62 +4144,41 @@ export default function HanaChat({
         createdAtIso: nowIso,
         ...guestMeta,
       })
-      sendInFlightRef.current.set(pendingId, writePromise)
-
-      let serverId = null
-      try {
-        serverId = await withChatTimeout(writePromise, CHAT_SEND_TIMEOUT_MS)
-      } catch (err) {
-        if (err?.code === 'chat/timeout') {
-          setHanaMessages((prev) => prev.map((m) => (
-            m.id === pendingId
-              ? { ...m, pending: true, sendFailed: false }
-              : m
-          )))
-          setError('')
-          writePromise.then((lateId) => {
-            if (!lateId) return
-            markChatOutboxSent(pendingId, lateId)
-            sendInFlightRef.current.delete(pendingId)
-            setHanaMessages((prev) => prev.map((m) => (
-              m.id === pendingId
-                ? {
-                    ...m,
-                    id: lateId,
-                    serverId: lateId,
-                    pending: false,
-                    sendFailed: false,
-                    clientId: pendingId,
-                  }
-                : m
-            )))
-          }).catch(() => {
-            sendInFlightRef.current.delete(pendingId)
-          })
-          window.setTimeout(() => {
-            void retryFailedSendRef.current?.(pendingId)
-          }, 1200)
-          if (!actingAsOwner) setChannel('human')
-          return
-        }
-        throw err
+      const outcome = await runChatWrite({
+        clientId: pendingId,
+        writePromise,
+        timeoutMs: CHAT_SEND_TIMEOUT_MS,
+        inFlightMap: sendInFlightRef.current,
+      })
+      if (outcome.status === 'timeout') {
+        setHanaMessages((prev) => patchMessagesByPendingId(prev, pendingId, {
+          pending: true,
+          sendFailed: false,
+        }))
+        setError('')
+        watchLateChatWrite({
+          writePromise: outcome.writePromise,
+          clientId: pendingId,
+          pendingId,
+          inFlightMap: sendInFlightRef.current,
+          onServerId: (serverId) => {
+            setHanaMessages((prev) => mapMessagesWithServerId(prev, {
+              pendingId,
+              serverId,
+              clientId: pendingId,
+            }))
+          },
+          retryFn: (cid) => retryFailedSendRef.current?.(cid),
+        })
+        if (!actingAsOwner) setChannel('human')
+        return
       }
-
-      markChatOutboxSent(pendingId, serverId)
-      sendInFlightRef.current.delete(pendingId)
-      if (serverId) {
-        setHanaMessages((prev) => prev.map((m) => (
-          m.id === pendingId
-            ? {
-                ...m,
-                id: serverId,
-                serverId,
-                pending: false,
-                sendFailed: false,
-                clientId: pendingId,
-              }
-            : m
-        )))
+      if (outcome.serverId) {
+        setHanaMessages((prev) => mapMessagesWithServerId(prev, {
+          pendingId,
+          serverId: outcome.serverId,
+          clientId: pendingId,
+        }))
       }
       if (!actingAsOwner) setChannel('human')
     } catch (err) {
@@ -4481,7 +4366,7 @@ export default function HanaChat({
           setError('')
           writePromise.then((lateId) => {
             if (!lateId) return
-            markChatOutboxSent(pendingId, lateId)
+            deliverChatOutbox(pendingId, lateId)
             sendInFlightRef.current.delete(pendingId)
             setHanaMessages((prev) => prev.map((m) => (
               m.id === pendingId
@@ -4508,7 +4393,7 @@ export default function HanaChat({
         }
         throw err
       }
-      markChatOutboxSent(pendingId, serverId)
+      deliverChatOutbox(pendingId, serverId)
       sendInFlightRef.current.delete(pendingId)
       if (imageUrl) {
         await new Promise((resolve) => {
@@ -4713,7 +4598,7 @@ export default function HanaChat({
           setError('')
           writePromise.then((lateId) => {
             if (!lateId) return
-            markChatOutboxSent(pendingId, lateId)
+            deliverChatOutbox(pendingId, lateId)
             sendInFlightRef.current.delete(pendingId)
             setHanaMessages((prev) => prev.map((m) => (
               m.id === pendingId
@@ -4739,7 +4624,7 @@ export default function HanaChat({
         throw err
       }
 
-      markChatOutboxSent(pendingId, serverId)
+      deliverChatOutbox(pendingId, serverId)
       sendInFlightRef.current.delete(pendingId)
       if (serverId) {
         setHanaMessages((prev) => prev.map((m) => (
@@ -5075,21 +4960,14 @@ export default function HanaChat({
 
     const applySuccess = (serverId) => {
       if (!serverId) return
-      markChatOutboxSent(clientId, serverId)
+      deliverChatOutbox(clientId, serverId)
       sendInFlightRef.current.delete(clientId)
-      setHanaMessages((prev) => prev.map((m) => (
-        (m.id === mid || m.clientId === clientId)
-          ? {
-              ...m,
-              id: serverId,
-              serverId,
-              pending: false,
-              sendFailed: false,
-              uploading: false,
-              clientId,
-            }
-          : m
-      )))
+      setHanaMessages((prev) => mapMessagesWithServerId(prev, {
+        pendingId: mid,
+        serverId,
+        clientId,
+        extra: { uploading: false },
+      }))
     }
 
     const existing = sendInFlightRef.current.get(clientId)
@@ -5392,7 +5270,7 @@ export default function HanaChat({
 
         const applyOwnerSuccess = ({ serverId, mediaFields }) => {
           if (!serverId) return
-          markChatOutboxSent(pendingId, serverId)
+          deliverChatOutbox(pendingId, serverId)
           sendInFlightRef.current.delete(pendingId)
           setHanaMessages((prev) => prev.map((m) => (
             m.id === pendingId
@@ -5562,7 +5440,7 @@ export default function HanaChat({
 
         const applyGuestSuccess = ({ serverId, mediaFields }) => {
           if (!serverId) return
-          markChatOutboxSent(pendingId, serverId)
+          deliverChatOutbox(pendingId, serverId)
           sendInFlightRef.current.delete(pendingId)
           setHanaMessages((prev) => prev.map((m) => (
             m.id === pendingId
