@@ -45,6 +45,8 @@ import {
     normalizeAccountIdleDays,
     OWNER_PROFILE,
     pulseChatPresence,
+    purgeGabuTestChatMessages,
+    purgeTestChatMessagesInThread,
     resolveAvatarSrc,
     resolveChatPresence,
     sendChatMessage,
@@ -997,6 +999,52 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
     }
   }
 
+  const handlePurgeGabuTestMessages = async () => {
+    if (clearBusy) return
+    const ok = window.confirm(
+      'ガブさん（gabusan）とのスレッドから、test11 / T1 / テスト などのテストメッセージだけを削除します。\n本番の会話は残します。よろしいですか？',
+    )
+    if (!ok) return
+    setClearBusy(true)
+    setError('')
+    setStatusNote('')
+    try {
+      const result = await purgeGabuTestChatMessages()
+      const detail = result.threads.length
+        ? result.threads.map((t) => `${t.threadId}: ${t.deleted}件`).join('、')
+        : '該当なし'
+      setStatusNote(`ガブのテストメッセージを ${result.deleted} 件削除しました。（${detail}）`)
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || 'テストメッセージの削除に失敗しました。')
+    } finally {
+      setClearBusy(false)
+    }
+  }
+
+  const handlePurgeActiveTestMessages = async () => {
+    if (!activeId || clearBusy) return
+    const ok = window.confirm(
+      `「${activeGuestName}」とのスレッドから test / T1 形式のテストメッセージだけを削除しますか？`,
+    )
+    if (!ok) return
+    setClearBusy(true)
+    setError('')
+    setStatusNote('')
+    try {
+      const guestKey = activeThread?.guestKey || String(activeId).replace(/^guest-/, '')
+      const result = await purgeTestChatMessagesInThread(activeId, guestKey)
+      setStatusNote(
+        result.deleted
+          ? `テストメッセージ ${result.deleted} 件を削除しました。`
+          : '削除対象のテストメッセージはありませんでした。',
+      )
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || 'テストメッセージの削除に失敗しました。')
+    } finally {
+      setClearBusy(false)
+    }
+  }
+
   const handleClearAllHistories = async () => {
     if (clearBusy) return
     const ok = window.confirm(
@@ -1114,6 +1162,14 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
               onClick={() => startCreateAccount('owner')}
             >
               オーナー追加
+            </button>
+            <button
+              type="button"
+              className="admin-btn admin-btn--secondary"
+              disabled={busy || clearBusy}
+              onClick={handlePurgeGabuTestMessages}
+            >
+              {clearBusy ? '削除中…' : 'ガブ：テストのみ削除'}
             </button>
             <button
               type="button"
@@ -1695,6 +1751,14 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
                       {activeGuestPresence.label}
                     </span>
                   </div>
+                  <button
+                    type="button"
+                    className="admin-btn admin-btn--ghost admin-btn--sm"
+                    disabled={clearBusy}
+                    onClick={handlePurgeActiveTestMessages}
+                  >
+                    テストのみ削除
+                  </button>
                   <button
                     type="button"
                     className="admin-btn admin-btn--ghost admin-btn--sm"

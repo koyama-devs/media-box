@@ -4589,6 +4589,110 @@ async function deleteAllDocsInCollection(collectionRef) {
   }
 }
 
+/** Dev/test junk only (test11, T1, テスト, …) — not normal chat sentences. */
+export function isTestChatMessageText(text) {
+  const t = String(text || '').trim()
+  if (!t || t.length > 80) return false
+  if (/^test\d*$/i.test(t)) return true
+  if (/^t\d+$/i.test(t)) return true
+  if (/^テスト\d*$/u.test(t)) return true
+  if (/^test[-_.]?\d+$/i.test(t)) return true
+  return false
+}
+
+async function refreshThreadLastTextAfterDeletes(threadId) {
+  if (!threadId) return
+  const messagesRef = collection(db, CHAT_THREADS_COLLECTION, threadId, 'messages')
+  let latest = null
+  try {
+    const isoSnap = await getDocs(query(messagesRef, orderBy('createdAtIso', 'desc'), limit(8)))
+    for (const document of isoSnap.docs) {
+      const row = serializeChatMessage(document.id, document.data())
+      if (row.deleted) continue
+      latest = row
+      break
+    }
+  } catch {
+    /* legacy threads */
+  }
+  if (!latest) {
+    try {
+      const legacySnap = await getDocs(query(messagesRef, orderBy('createdAt', 'desc'), limit(8)))
+      for (const document of legacySnap.docs) {
+        const row = serializeChatMessage(document.id, document.data())
+        if (row.deleted) continue
+        latest = row
+        break
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  await setDoc(
+    doc(db, CHAT_THREADS_COLLECTION, threadId),
+    { lastText: String(latest?.text || '').slice(0, 160) },
+    { merge: true },
+  )
+}
+
+/**
+ * Delete test-only bubbles in one thread (admin / owner session).
+ * @returns {Promise<{ threadId: string, deleted: number, samples: string[] }>}
+ */
+export async function purgeTestChatMessagesInThread(threadId, guestKey = '') {
+  const activeThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
+  if (!activeThreadId) {
+    return { threadId: String(threadId || ''), deleted: 0, samples: [] }
+  }
+  const messagesRef = collection(db, CHAT_THREADS_COLLECTION, activeThreadId, 'messages')
+  const snap = await getDocs(messagesRef)
+  const toDelete = []
+  const samples = []
+  for (const document of snap.docs) {
+    const data = document.data() || {}
+    if (data.deleted) continue
+    const text = String(data.text || '').trim()
+    if (!isTestChatMessageText(text)) continue
+    toDelete.push(document.ref)
+    if (samples.length < 12) samples.push(text)
+  }
+  for (let i = 0; i < toDelete.length; i += 400) {
+    const batch = writeBatch(db)
+    toDelete.slice(i, i + 400).forEach((ref) => batch.delete(ref))
+    await batch.commit()
+  }
+  if (toDelete.length) {
+    await refreshThreadLastTextAfterDeletes(activeThreadId)
+  }
+  return { threadId: activeThreadId, deleted: toDelete.length, samples }
+}
+
+/**
+ * Purge test messages from every gabusan thread (guest-gabusan + legacy ids).
+ * @returns {Promise<{ deleted: number, threads: { threadId: string, deleted: number }[] }>}
+ */
+export async function purgeGabuTestChatMessages() {
+  const threadIds = new Set(['guest-gabusan'])
+  try {
+    const byKey = await getDocs(
+      query(collection(db, CHAT_THREADS_COLLECTION), where('guestKey', '==', 'gabusan')),
+    )
+    byKey.docs.forEach((document) => threadIds.add(document.id))
+  } catch {
+    /* rules / index */
+  }
+  const threads = []
+  let deleted = 0
+  for (const threadId of threadIds) {
+    const result = await purgeTestChatMessagesInThread(threadId, 'gabusan')
+    if (result.deleted > 0) {
+      threads.push({ threadId: result.threadId, deleted: result.deleted })
+      deleted += result.deleted
+    }
+  }
+  return { deleted, threads }
+}
+
 /**
  * Clear one chat thread's message history.
  * @param {string} threadId
