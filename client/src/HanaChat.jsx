@@ -39,9 +39,8 @@ import {
     nextStickerPendingId,
     patchMessagesByPendingId,
     runChatWrite,
-    saveThreadMessageCache,
     watchLateChatWrite,
-    withChatTimeout,
+    withChatTimeout
 } from './chatSendPipeline'
 import {
     readDefaultReaction,
@@ -1866,7 +1865,7 @@ export default function HanaChat({
       cancelled = true
       unsub()
     }
-  }, [hidden, actingAsOwner, activeThreadId])
+  }, [hidden, actingAsOwner, activeThreadId, ownerActiveGuestKey])
 
   // Restore unsent text/stickers after reload so bubbles do not silently vanish.
   useEffect(() => {
@@ -3951,10 +3950,13 @@ export default function HanaChat({
     const loadToken = ++ownerThreadLoadRef.current
     void fetchChatMessages(openId, key).then((rows) => {
       if (loadToken !== ownerThreadLoadRef.current) return
-      if (!rows.length && messageCacheRef.current.get(openId)?.length) return
       messageCacheRef.current.set(openId, rows)
-      saveThreadMessageCache(openId, rows)
-      setHanaMessages(rows)
+      setHanaMessages((prev) => ingestLiveChatSnapshot({
+        threadId: openId,
+        serverRows: rows,
+        previous: prev,
+        deletingIds: deletingIdsRef.current,
+      }))
       setMessagesHydrated(true)
     }).catch(() => {})
     void consolidateGuestThreads({

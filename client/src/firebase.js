@@ -3248,6 +3248,14 @@ function rowsFromMessageSnap(snap) {
   return [...byClientId.values()]
 }
 
+/** Primary iso query + legacy createdAt — union so guest/history rows are not dropped. */
+function mergeLiveMessageRows(isoRows, legacyRows) {
+  const byId = new Map()
+  for (const row of legacyRows || []) byId.set(row.id, row)
+  for (const row of isoRows || []) byId.set(row.id, row)
+  return sortChatMessages([...byId.values()]).slice(-CHAT_MESSAGE_LIVE_LIMIT)
+}
+
 /**
  * Resolve every chat to one canonical thread: guest-{guestKey}.
  * Legacy UUID/random thread ids are accepted only as input; reads/writes are
@@ -3294,7 +3302,8 @@ export async function resolveCanonicalChatThreadId(threadId = '', guestKey = '')
 export const CHAT_MESSAGE_LIVE_LIMIT = 300
 
 /**
- * Live bubble list — orderBy newest-first + limit (required for new sends to appear).
+ * Live bubble list — orderBy createdAtIso desc + limit(300) (new sends), merged with
+ * createdAt desc for legacy docs missing createdAtIso (Zen guest bubbles on Hana inbox).
  * @returns {() => void}
  */
 export function subscribeChatMessages(threadId, onData, onError, guestKey = '') {
@@ -3303,34 +3312,53 @@ export function subscribeChatMessages(threadId, onData, onError, guestKey = '') 
     return () => {}
   }
   let stopped = false
-  let unsubscribe = () => {}
+  let unsubIso = () => {}
+  let unsubLegacy = () => {}
 
   void (async () => {
     try {
       const activeThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
       if (stopped || !activeThreadId) return
       const messagesRef = collection(db, CHAT_THREADS_COLLECTION, activeThreadId, 'messages')
-      const emitSnapshot = (snap) => {
-        onData?.(sortChatMessages(rowsFromMessageSnap(snap)).slice(-CHAT_MESSAGE_LIVE_LIMIT))
+      let isoRows = []
+      let legacyRows = []
+      const emit = () => {
+        if (stopped) return
+        onData?.(mergeLiveMessageRows(isoRows, legacyRows))
       }
-      const liveQuery = query(
+      const isoQuery = query(
         messagesRef,
         orderBy('createdAtIso', 'desc'),
         limit(CHAT_MESSAGE_LIVE_LIMIT),
       )
-      unsubscribe = onSnapshot(
-        liveQuery,
-        emitSnapshot,
+      const legacyQuery = query(
+        messagesRef,
+        orderBy('createdAt', 'desc'),
+        limit(CHAT_MESSAGE_LIVE_LIMIT),
+      )
+      unsubIso = onSnapshot(
+        isoQuery,
+        (snap) => {
+          isoRows = rowsFromMessageSnap(snap)
+          emit()
+        },
+        (error) => onError?.(error),
+      )
+      unsubLegacy = onSnapshot(
+        legacyQuery,
+        (snap) => {
+          legacyRows = rowsFromMessageSnap(snap)
+          emit()
+        },
         (error) => {
-          if (stopped) return
-          unsubscribe = onSnapshot(
-            query(messagesRef, orderBy('createdAt', 'desc'), limit(CHAT_MESSAGE_LIVE_LIMIT)),
-            emitSnapshot,
-            (fallbackError) => onError?.(fallbackError || error),
-          )
+          // Legacy index/query may fail on empty threads — iso stream still drives UI.
+          if (!isoRows.length) onError?.(error)
         },
       )
-      if (stopped) unsubscribe()
+      if (stopped) {
+        unsubIso()
+        unsubLegacy()
+      }
     } catch (error) {
       if (!stopped) onError?.(error)
     }
@@ -3338,7 +3366,8 @@ export function subscribeChatMessages(threadId, onData, onError, guestKey = '') 
 
   return () => {
     stopped = true
-    unsubscribe()
+    unsubIso()
+    unsubLegacy()
   }
 }
 
@@ -3346,21 +3375,30 @@ export async function fetchChatMessages(threadId, guestKey = '') {
   const activeThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
   if (!activeThreadId) return []
   const messagesRef = collection(db, CHAT_THREADS_COLLECTION, activeThreadId, 'messages')
+  const isoQuery = query(
+    messagesRef,
+    orderBy('createdAtIso', 'desc'),
+    limit(CHAT_MESSAGE_LIVE_LIMIT),
+  )
+  const legacyQuery = query(
+    messagesRef,
+    orderBy('createdAt', 'desc'),
+    limit(CHAT_MESSAGE_LIVE_LIMIT),
+  )
   try {
-    const snap = await getDocs(query(
-      messagesRef,
-      orderBy('createdAtIso', 'desc'),
-      limit(CHAT_MESSAGE_LIVE_LIMIT),
-    ))
-    return sortChatMessages(rowsFromMessageSnap(snap)).slice(-CHAT_MESSAGE_LIVE_LIMIT)
+    const [isoSnap, legacySnap] = await Promise.all([
+      getDocs(isoQuery).catch(() => null),
+      getDocs(legacyQuery).catch(() => null),
+    ])
+    const isoRows = isoSnap ? rowsFromMessageSnap(isoSnap) : []
+    const legacyRows = legacySnap ? rowsFromMessageSnap(legacySnap) : []
+    if (isoRows.length || legacyRows.length) {
+      return mergeLiveMessageRows(isoRows, legacyRows)
+    }
   } catch {
-    const snap = await getDocs(query(
-      messagesRef,
-      orderBy('createdAt', 'desc'),
-      limit(CHAT_MESSAGE_LIVE_LIMIT),
-    ))
-    return sortChatMessages(rowsFromMessageSnap(snap)).slice(-CHAT_MESSAGE_LIVE_LIMIT)
+    /* fall through */
   }
+  return []
 }
 
 function mediaItemsFromChatMessage(message) {
