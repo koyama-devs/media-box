@@ -1676,7 +1676,9 @@ export function reactionMine(counts, reactorId) {
   const rid = String(reactorId || '').trim().toLowerCase()
   if (!rid || !counts) return 0
   if (Array.isArray(counts)) return counts.filter((id) => id === rid).length
-  return Number(counts[rid]) || 0
+  let n = Number(counts[rid]) || 0
+  if (!n && rid !== 'guest') n = Number(counts.guest) || 0
+  return n
 }
 
 /**
@@ -3229,6 +3231,25 @@ export function deliveryStatusLabel(status) {
   return ''
 }
 
+function reactionRowScore(message) {
+  let score = 0
+  for (const counts of Object.values(message?.reactions || {})) {
+    score += reactionTotal(counts)
+  }
+  return score
+}
+
+function preferMessageRow(existing, candidate) {
+  if (!existing) return candidate
+  if (!candidate) return existing
+  const scoreA = reactionRowScore(existing)
+  const scoreB = reactionRowScore(candidate)
+  if (scoreB !== scoreA) return scoreB > scoreA ? candidate : existing
+  const existingTime = Date.parse(existing.createdAtIso || existing.createdAt || '') || 0
+  const messageTime = Date.parse(candidate.createdAtIso || candidate.createdAt || '') || 0
+  return messageTime >= existingTime ? candidate : existing
+}
+
 function rowsFromMessageSnap(snap) {
   const byClientId = new Map()
   snap.docs
@@ -3236,14 +3257,7 @@ function rowsFromMessageSnap(snap) {
     .filter((message) => !message.deleted)
     .forEach((message) => {
       const key = message.clientId ? `client:${message.clientId}` : `doc:${message.id}`
-      const existing = byClientId.get(key)
-      if (!existing) {
-        byClientId.set(key, message)
-        return
-      }
-      const existingTime = Date.parse(existing.createdAtIso || existing.createdAt || '') || 0
-      const messageTime = Date.parse(message.createdAtIso || message.createdAt || '') || 0
-      if (messageTime >= existingTime) byClientId.set(key, message)
+      byClientId.set(key, preferMessageRow(byClientId.get(key), message))
     })
   return [...byClientId.values()]
 }
@@ -3251,8 +3265,12 @@ function rowsFromMessageSnap(snap) {
 /** Primary iso query + legacy createdAt — union so guest/history rows are not dropped. */
 function mergeLiveMessageRows(isoRows, legacyRows) {
   const byId = new Map()
-  for (const row of legacyRows || []) byId.set(row.id, row)
-  for (const row of isoRows || []) byId.set(row.id, row)
+  for (const row of legacyRows || []) {
+    byId.set(row.id, preferMessageRow(byId.get(row.id), row))
+  }
+  for (const row of isoRows || []) {
+    byId.set(row.id, preferMessageRow(byId.get(row.id), row))
+  }
   return sortChatMessages([...byId.values()]).slice(-CHAT_MESSAGE_LIVE_LIMIT)
 }
 
@@ -3263,15 +3281,7 @@ function mergeLiveMessageRows(isoRows, legacyRows) {
  */
 export async function resolveCanonicalChatThreadId(threadId = '', guestKey = '') {
   const rawId = String(threadId || '').trim()
-  const storedGuestKey = (() => {
-    try {
-      return normalizeAccountKey(String(window.localStorage.getItem(ACTIVE_GUEST_KEY_STORAGE) || ''))
-    } catch {
-      return ''
-    }
-  })()
-  let key = normalizeAccountKey(guestKey) || storedGuestKey
-
+  let key = normalizeAccountKey(guestKey)
   if (!key && rawId) {
     const canonicalMatch = rawId.match(/^guest-([a-z0-9_-]+)$/i)
     if (canonicalMatch) key = normalizeAccountKey(canonicalMatch[1])
@@ -3294,7 +3304,6 @@ export async function resolveCanonicalChatThreadId(threadId = '', guestKey = '')
   }
   if (key) return `guest-${key}`
   if (rawId && rawId.startsWith('guest-')) return rawId
-  if (rawId && storedGuestKey && !rawId.startsWith('guest-')) return `guest-${storedGuestKey}`
   return rawId
 }
 
@@ -3306,73 +3315,53 @@ export const CHAT_MESSAGE_LIVE_LIMIT = 300
  * createdAt desc for legacy docs missing createdAtIso (Zen guest bubbles on Hana inbox).
  * @returns {() => void}
  */
-export function subscribeChatMessages(threadId, onData, onError, guestKey = '') {
+export function subscribeChatMessages(threadId, onData, onError, _guestKey = '') {
   if (!threadId) {
     onData?.([])
     return () => {}
   }
-  let stopped = false
-  let unsubIso = () => {}
-  let unsubLegacy = () => {}
-
-  void (async () => {
-    try {
-      const activeThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
-      if (stopped || !activeThreadId) return
-      const messagesRef = collection(db, CHAT_THREADS_COLLECTION, activeThreadId, 'messages')
-      let isoRows = []
-      let legacyRows = []
-      const emit = () => {
-        if (stopped) return
-        onData?.(mergeLiveMessageRows(isoRows, legacyRows))
-      }
-      const isoQuery = query(
-        messagesRef,
-        orderBy('createdAtIso', 'desc'),
-        limit(CHAT_MESSAGE_LIVE_LIMIT),
-      )
-      const legacyQuery = query(
-        messagesRef,
-        orderBy('createdAt', 'desc'),
-        limit(CHAT_MESSAGE_LIVE_LIMIT),
-      )
-      unsubIso = onSnapshot(
-        isoQuery,
-        (snap) => {
-          isoRows = rowsFromMessageSnap(snap)
-          emit()
-        },
-        (error) => onError?.(error),
-      )
-      unsubLegacy = onSnapshot(
-        legacyQuery,
-        (snap) => {
-          legacyRows = rowsFromMessageSnap(snap)
-          emit()
-        },
-        (error) => {
-          // Legacy index/query may fail on empty threads — iso stream still drives UI.
-          if (!isoRows.length) onError?.(error)
-        },
-      )
-      if (stopped) {
-        unsubIso()
-        unsubLegacy()
-      }
-    } catch (error) {
-      if (!stopped) onError?.(error)
-    }
-  })()
-
+  const messagesRef = collection(db, CHAT_THREADS_COLLECTION, threadId, 'messages')
+  let isoRows = []
+  let legacyRows = []
+  const emit = () => {
+    onData?.(mergeLiveMessageRows(isoRows, legacyRows))
+  }
+  const isoQuery = query(
+    messagesRef,
+    orderBy('createdAtIso', 'desc'),
+    limit(CHAT_MESSAGE_LIVE_LIMIT),
+  )
+  const legacyQuery = query(
+    messagesRef,
+    orderBy('createdAt', 'desc'),
+    limit(CHAT_MESSAGE_LIVE_LIMIT),
+  )
+  const unsubIso = onSnapshot(
+    isoQuery,
+    (snap) => {
+      isoRows = rowsFromMessageSnap(snap)
+      emit()
+    },
+    (error) => onError?.(error),
+  )
+  const unsubLegacy = onSnapshot(
+    legacyQuery,
+    (snap) => {
+      legacyRows = rowsFromMessageSnap(snap)
+      emit()
+    },
+    (error) => {
+      if (!isoRows.length) onError?.(error)
+    },
+  )
   return () => {
-    stopped = true
     unsubIso()
     unsubLegacy()
   }
 }
 
-export async function fetchChatMessages(threadId, guestKey = '') {
-  const activeThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
+export async function fetchChatMessages(threadId, _guestKey = '') {
+  const activeThreadId = String(threadId || '').trim()
   if (!activeThreadId) return []
   const messagesRef = collection(db, CHAT_THREADS_COLLECTION, activeThreadId, 'messages')
   const isoQuery = query(
@@ -4467,17 +4456,19 @@ export async function reactToChatMessage({
   emoji,
   reactorId,
   mode = 'toggle',
+  guestKey: _guestKey = '',
 }) {
   const em = String(emoji || '').trim()
   const rid = String(reactorId || '').trim().toLowerCase()
-  if (!threadId || !messageId || !em || !rid) {
+  const activeThreadId = String(threadId || '').trim()
+  if (!activeThreadId || !messageId || !em || !rid) {
     throw new Error('リアクションできません（対象が不正です）。')
   }
   if (em.length > 8) {
     throw new Error('この絵文字は使えません。')
   }
 
-  const messageRef = doc(db, CHAT_THREADS_COLLECTION, threadId, 'messages', messageId)
+  const messageRef = doc(db, CHAT_THREADS_COLLECTION, activeThreadId, 'messages', messageId)
   const snap = await getDoc(messageRef)
   if (!snap.exists()) {
     const error = new Error('メッセージが見つかりません（まだ送信中かも）。')

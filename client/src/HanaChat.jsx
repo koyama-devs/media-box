@@ -5,134 +5,133 @@ import hanachanArt from './assets/hanachan.svg'
 import ChatAvatar from './ChatAvatar'
 import { CHAT_CARD_SHARE_EVENT, CHAT_CLOSE_EVENT } from './chatCardShare'
 import {
-    addChatReminder,
-    dueChatReminders,
-    loadAllLocalChatPins,
-    loadChatPins,
-    markChatReminderDone,
-    remindAtFromChoice,
-    toggleChatPin,
-    unpinChatMessageEverywhere
+  addChatReminder,
+  dueChatReminders,
+  loadAllLocalChatPins,
+  loadChatPins,
+  markChatReminderDone,
+  remindAtFromChoice,
+  toggleChatPin,
+  unpinChatMessageEverywhere
 } from './chatExtras'
 import ChatImageLightbox from './ChatImageLightbox'
 import { collectMessageSearchHits, normalizeMessageSearchQuery } from './chatMessageSearch'
 import ChatNatsuFireworks from './ChatNatsuFireworks'
 import { playChatNotifySound, unlockChatNotifySound } from './chatNotifySound'
 import {
-    deliverChatOutbox,
-    listChatOutboxForThread,
-    listChatRecoveryForThread,
-    outboxEntryToLocalMessage,
-    resolveRetryableOutboxEntry,
-    upsertChatOutbox
+  deliverChatOutbox,
+  listChatOutboxForThread,
+  listChatRecoveryForThread,
+  outboxEntryToLocalMessage,
+  resolveRetryableOutboxEntry,
+  upsertChatOutbox
 } from './chatOutbox'
 import ChatPokeZukan, { PokeZukanChip } from './ChatPokeZukan'
 import {
-    bootstrapThreadRows,
-    buildOptimisticMessage,
-    CHAT_SEND_TIMEOUT_MS,
-    CHAT_UPLOAD_TIMEOUT_MS,
-    ingestLiveChatSnapshot,
-    loadThreadMessageCache,
-    mapMessagesWithServerId,
-    nextChatPendingId,
-    nextStickerPendingId,
-    patchMessagesByPendingId,
-    runChatWrite,
-    watchLateChatWrite,
-    withChatTimeout
+  applyChatMessageSnapshot,
+  buildOptimisticMessage,
+  CHAT_SEND_TIMEOUT_MS,
+  CHAT_UPLOAD_TIMEOUT_MS,
+  mapMessagesWithServerId,
+  mergeServerMessagesWithPending,
+  nextChatPendingId,
+  nextStickerPendingId,
+  patchMessagesByPendingId,
+  runChatWrite,
+  watchLateChatWrite,
+  withChatTimeout
 } from './chatSendPipeline'
 import {
-    readDefaultReaction,
-    readEnterToSend,
-    readMessageSound,
-    readStickerSet,
-    readVoiceSkin,
-    writeDefaultReaction,
-    writeEnterToSend,
-    writeMessageSound,
-    writeStickerSet,
-    writeVoiceSkin,
+  readDefaultReaction,
+  readEnterToSend,
+  readMessageSound,
+  readStickerSet,
+  readVoiceSkin,
+  writeDefaultReaction,
+  writeEnterToSend,
+  writeMessageSound,
+  writeStickerSet,
+  writeVoiceSkin,
 } from './chatSettings'
 import { canMutateOwnMessage, useIsCoarsePointer } from './ChatSwipeBubble'
 import ChatWeightGarden, { WeightGardenChip } from './ChatWeightGarden'
 import EmotionMomentLayer, { EMOTION_MOMENTS, triggerEmotionMoment } from './EmotionMoment'
 import {
-    analyzeGuestMessageForOwner,
-    applyReactionLocally,
-    broadcastChatEffect,
-    CHAT_PRESENCE_MODES,
-    CHAT_REACTION_EMOJIS,
-    chatWithHanachan,
-    classifyChatAttachment,
-    confirmJpTripArrived,
-    consolidateGuestThreads,
-    DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
-    deleteChatMessage,
-    ensureChatThread,
-    ensureDefaultChatAccounts,
-    ensureGuestChatId,
-    ensureWeightGardenDefaults,
-    fetchChatMessages,
-    fetchChatThreadMediaItems,
-    formatChatFileSize,
-    formatChatTimestamp,
-    getChatMessageAttachments,
-    getFirebaseErrorMessage,
-    getGuestProfile,
-    getMessageDeliveryStatus,
-    isChatAudioAttachment,
-    listGuestProfiles,
-    markThreadRead,
-    messageEditWindowMsFromMinutes,
-    migrateLocalPinsToThread,
-    normalizeChatPresenceMode,
-    OWNER_PROFILE,
-    pulseChatPresence,
-    resolveAccountKey,
-    resolveAvatarSrc,
-    resolveCanonicalChatThreadId,
-    resolveChatPresence,
-    resolveGuestDisplayName,
-    resolveSessionProfile,
-    sendChatMessage,
-    setChatPresenceStatus,
-    setChatProfileStatus,
-    setChatTyping,
-    sortChatMessages,
-    subscribeChatAccounts,
-    subscribeChatMessages,
-    subscribeChatProfiles,
-    subscribeChatThreads,
-    subscribeOwnChatThread,
-    subscribeWeightGarden,
-    suggestHanaChat,
-    threadUnreadCount,
-    toggleChatReaction,
-    toggleThreadChatPin,
-    translateChatMessage,
-    unpinThreadChatMessage,
-    updateChatMessage,
-    uploadChatAttachment
+  analyzeGuestMessageForOwner,
+  applyReactionLocally,
+  broadcastChatEffect,
+  CHAT_PRESENCE_MODES,
+  CHAT_REACTION_EMOJIS,
+  chatWithHanachan,
+  classifyChatAttachment,
+  confirmJpTripArrived,
+  consolidateGuestThreads,
+  DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
+  deleteChatMessage,
+  ensureChatThread,
+  ensureDefaultChatAccounts,
+  ensureGuestChatId,
+  ensureWeightGardenDefaults,
+  fetchChatMessages,
+  fetchChatThreadMediaItems,
+  formatChatFileSize,
+  formatChatTimestamp,
+  getChatMessageAttachments,
+  getFirebaseErrorMessage,
+  getGuestProfile,
+  getMessageDeliveryStatus,
+  isChatAudioAttachment,
+  listGuestProfiles,
+  markThreadRead,
+  messageEditWindowMsFromMinutes,
+  migrateLocalPinsToThread,
+  normalizeChatPresenceMode,
+  OWNER_PROFILE,
+  pulseChatPresence,
+  resolveAccountKey,
+  resolveAvatarSrc,
+  resolveCanonicalChatThreadId,
+  resolveChatPresence,
+  resolveGuestDisplayName,
+  resolveSessionProfile,
+  sendChatMessage,
+  setChatPresenceStatus,
+  setChatProfileStatus,
+  setChatTyping,
+  sortChatMessages,
+  subscribeChatAccounts,
+  subscribeChatMessages,
+  subscribeChatProfiles,
+  subscribeChatThreads,
+  subscribeOwnChatThread,
+  subscribeWeightGarden,
+  suggestHanaChat,
+  threadUnreadCount,
+  toggleChatReaction,
+  toggleThreadChatPin,
+  translateChatMessage,
+  unpinThreadChatMessage,
+  updateChatMessage,
+  uploadChatAttachment
 } from './firebase'
 import FlowerRainLayer, {
-    CHAT_PARTY_REACTION,
-    triggerFlowerRain,
-    triggerPartyBurst,
+  CHAT_PARTY_REACTION,
+  triggerFlowerRain,
+  triggerPartyBurst,
 } from './FlowerRain'
 import './hana-chat.css'
 import HanaCall from './HanaCall'
 import HanaChatMessageList, { EMPTY_CHAT_REACTIONS } from './HanaChatMessageList'
 import HanaSticker, {
-    stickerBurst,
-    stickerSetsForViewer,
-    suggestHanaStickers,
+  stickerBurst,
+  stickerSetsForViewer,
+  suggestHanaStickers,
 } from './HanaStickers'
 import HanaVoicePlayer, { VoiceSkinPicker } from './HanaVoicePlayer'
 import NatsuKingyo from './NatsuKingyo'
 import {
-    collectUnansweredOwnerAssistMessages,
-    ownerAssistShouldCollapse,
+  collectUnansweredOwnerAssistMessages,
+  ownerAssistShouldCollapse,
 } from './OwnerMessageAssist'
 import { POKE_ZUKAN_GUEST, tokyoZukanYmd, worldActiveMon } from './pokeZukan'
 import useComposerVoiceNote, { formatVoiceClock } from './useComposerVoiceNote'
@@ -917,19 +916,24 @@ export default function HanaChat({
       setHanaMessages([])
       return
     }
+    const ids = [threadId, ...relatedIds].filter(Boolean)
+    for (const id of ids) {
+      const cached = messageCacheRef.current.get(id)
+      if (Array.isArray(cached) && cached.length > 0) {
+        messageCacheRef.current.set(threadId, cached)
+        setHanaMessages(cached)
+        return
+      }
+    }
+    const cached = messageCacheRef.current.get(threadId)
+    if (Array.isArray(cached) && cached.length > 0) {
+      setHanaMessages(cached)
+      return
+    }
     const recovery = listChatRecoveryForThread(threadId)
       .map((entry) => outboxEntryToLocalMessage(entry))
       .filter(Boolean)
-    const rows = bootstrapThreadRows({
-      threadId,
-      relatedIds,
-      memoryCache: messageCacheRef.current,
-      recoveryRows: recovery,
-    })
-    if (rows.length) {
-      messageCacheRef.current.set(threadId, rows)
-    }
-    setHanaMessages(rows)
+    setHanaMessages(recovery)
   }, [])
 
   const pinChatListToLatest = useCallback(() => {
@@ -1507,14 +1511,6 @@ export default function HanaChat({
     setGuestChatId(id)
     setAiMessages(stored?.length ? stored : defaultIntroMessages(guestProfile))
     setChannel(savedChannel)
-    if (savedChannel === 'human') {
-      const cachedMessages = loadThreadMessageCache(id)
-      if (cachedMessages.length) {
-        messageCacheRef.current.set(id, cachedMessages)
-        setHanaMessages(cachedMessages)
-        setMessagesHydrated(true)
-      }
-    }
     setStorageReady(true)
   }, [hidden, guestKey, guestProfile, actingAsOwner])
 
@@ -1779,36 +1775,31 @@ export default function HanaChat({
   }, [open, messagesHydrated])
 
   useEffect(() => {
-    if (hidden || actingAsOwner || !guestChatId) {
+    const liveThreadId = guestProfile?.key ? `guest-${guestProfile.key}` : guestChatId
+    if (hidden || actingAsOwner || !liveThreadId) {
       return undefined
     }
     const unsub = subscribeChatMessages(
-      guestChatId,
+      liveThreadId,
       (next) => {
         const filtered = next.filter((m) => !deletingIdsRef.current.has(m.id))
         if (!guestOnHuman && filtered.some((message) => message.sender === 'hana')) {
-          saveChannel(guestChatId, 'human')
+          saveChannel(liveThreadId, 'human')
           setChannel('human')
         }
-        messageCacheRef.current.set(guestChatId, filtered)
-        setHanaMessages((prev) => ingestLiveChatSnapshot({
-          threadId: guestChatId,
-          serverRows: filtered,
-          previous: prev,
-          deletingIds: deletingIdsRef.current,
-        }))
+        messageCacheRef.current.set(liveThreadId, filtered)
+        setHanaMessages((prev) => mergeServerMessagesWithPending(filtered, prev))
         setMessagesHydrated(true)
         setError('')
         // Advance 既読 on every live snapshot while the guest chat is open.
         if (openRef.current && document.visibilityState === 'visible') {
-          markThreadRead(guestChatId, 'guest', guestKey).catch(() => {})
+          markThreadRead(liveThreadId, 'guest', guestKey).catch(() => {})
         }
       },
       (err) => setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。'),
-      guestKey,
     )
     return unsub
-  }, [hidden, actingAsOwner, guestOnHuman, guestChatId, guestKey])
+  }, [hidden, actingAsOwner, guestOnHuman, guestChatId, guestKey, guestProfile?.key])
 
   // Canonicalize/migrate legacy threads for EVERY guest using the same path.
   // We never switch the active UI back to a legacy UUID; Firestore migration
@@ -1843,12 +1834,7 @@ export default function HanaChat({
         if (cancelled) return
         const filtered = next.filter((m) => !deletingIdsRef.current.has(m.id))
         messageCacheRef.current.set(activeThreadId, filtered)
-        setHanaMessages((prev) => ingestLiveChatSnapshot({
-          threadId: activeThreadId,
-          serverRows: filtered,
-          previous: prev,
-          deletingIds: deletingIdsRef.current,
-        }))
+        setHanaMessages((prev) => mergeServerMessagesWithPending(filtered, prev))
         setMessagesHydrated(true)
         if (openRef.current && document.visibilityState === 'visible') {
           markThreadRead(activeThreadId, 'hana', ownerActiveGuestKey).catch(() => {})
@@ -1859,7 +1845,6 @@ export default function HanaChat({
         if (cancelled) return
         setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。')
       },
-      ownerActiveGuestKey,
     )
     return () => {
       cancelled = true
@@ -3951,8 +3936,7 @@ export default function HanaChat({
     void fetchChatMessages(openId, key).then((rows) => {
       if (loadToken !== ownerThreadLoadRef.current) return
       messageCacheRef.current.set(openId, rows)
-      setHanaMessages((prev) => ingestLiveChatSnapshot({
-        threadId: openId,
+      setHanaMessages((prev) => applyChatMessageSnapshot({
         serverRows: rows,
         previous: prev,
         deletingIds: deletingIdsRef.current,
@@ -4693,7 +4677,8 @@ export default function HanaChat({
       return
     }
 
-    const threadId = actingAsOwner ? activeThreadId : guestChatId
+    const guestCanon = guestProfile?.key ? `guest-${guestProfile.key}` : guestChatId
+    const threadId = actingAsOwner ? activeThreadId : guestCanon
     const messageId = String(message.serverId || message.id || '').trim()
     if (!threadId || !messageId) {
       setError('リアクションできません（スレッド未接続）。')
@@ -4716,6 +4701,10 @@ export default function HanaChat({
         mode,
       })
     } catch (err) {
+      setHanaMessages((prev) => prev.map((m) => {
+        if (m.id !== message.id && m.serverId !== message.id && m.id !== message.serverId) return m
+        return { ...m, reactions: message.reactions || {} }
+      }))
       setError(getFirebaseErrorMessage(err) || 'リアクションに失敗しました。')
     } finally {
       if (keepKb) {

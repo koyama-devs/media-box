@@ -92,7 +92,6 @@ export function mergeServerMessagesWithPending(server, previous) {
     const match = server.find((row) => {
       if (usedServerIds.has(row.id)) return false
       if (itemServerId && row.id === itemServerId) return true
-      if (itemClientId && row.id === itemClientId) return true
       if (itemClientId && row.clientId && row.clientId === itemClientId) return true
       if (itemServerId || itemClientId) return false
       if ((row.sender || row.role) !== (item.sender || item.role)) return false
@@ -142,18 +141,20 @@ export function bootstrapThreadRows({
   return recoveryRows
 }
 
-/** Apply a Firestore snapshot: reconcile outbox, merge pending, persist server rows. */
-export function ingestLiveChatSnapshot({
-  threadId,
+/** Firestore snapshot → bubble list (804e4e1-style: no localStorage message cache). */
+export function applyChatMessageSnapshot({
   serverRows,
   previous,
   deletingIds = new Set(),
 }) {
   const filtered = (serverRows || []).filter((m) => !deletingIds.has(m.id))
   reconcileChatOutboxWithMessages(filtered)
-  const merged = mergeServerMessagesWithPending(filtered, previous)
-  if (threadId) saveThreadMessageCache(threadId, filtered)
-  return merged
+  return mergeServerMessagesWithPending(filtered, previous)
+}
+
+/** @deprecated Use applyChatMessageSnapshot — kept for call sites during migration. */
+export function ingestLiveChatSnapshot(args) {
+  return applyChatMessageSnapshot(args)
 }
 
 export function resolveWriteServerId(raw) {

@@ -1,6 +1,24 @@
 {
-  "updatedAt": "2026-09-29T17:00:49.817Z",
+  "updatedAt": "2026-09-30T03:13:13.186Z",
   "releases": [
+    {
+      "version": "munj4vqw-s0avwm",
+      "notes": "restore 804e4e1 reaction flow; canonical write; drop message cache",
+      "builtAt": "2026-09-30T03:12:25.538Z",
+      "previousVersion": "muniikgr-2im7t2",
+      "previousHostingVersionId": "21187a2861c3af62",
+      "hostingVersionId": "74863e60ada23820",
+      "recordedAt": "2026-09-30T03:12:25.771Z"
+    },
+    {
+      "version": "muniikgr-2im7t2",
+      "notes": "restore 804e4e1 reaction flow; canonical write; drop message cache",
+      "builtAt": "2026-09-30T02:55:02.730Z",
+      "previousVersion": "munhvu49-rxikpz",
+      "previousHostingVersionId": "f281729c3225c77f",
+      "hostingVersionId": "21187a2861c3af62",
+      "recordedAt": "2026-09-30T02:55:02.857Z"
+    },
     {
       "version": "mumx9pds-ch6t7c",
       "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
@@ -342,24 +360,6 @@
       "previousHostingVersionId": "2475eea5838c5766",
       "hostingVersionId": "7ce9b34af65b5153",
       "recordedAt": "2026-09-20T13:58:38.614Z"
-    },
-    {
-      "version": "mu9vf3wo-pcko5u",
-      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
-      "builtAt": "2026-09-20T13:47:34.170Z",
-      "previousVersion": "mu9v8mjs-q4xlgr",
-      "previousHostingVersionId": "bf31eff646a322ba",
-      "hostingVersionId": "2475eea5838c5766",
-      "recordedAt": "2026-09-20T13:47:34.883Z"
-    },
-    {
-      "version": "mu9v8mjs-q4xlgr",
-      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
-      "builtAt": "2026-09-20T13:42:30.912Z",
-      "previousVersion": "mu9uzbhy-dhlgo6",
-      "previousHostingVersionId": "61b6c97f9078c048",
-      "hostingVersionId": "bf31eff646a322ba",
-      "recordedAt": "2026-09-20T13:42:31.415Z"
     }
   ]
 }

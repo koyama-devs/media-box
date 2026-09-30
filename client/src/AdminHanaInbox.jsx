@@ -905,7 +905,7 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
     try {
       await toggleChatReaction({
         threadId: activeId,
-        messageId: message.id,
+        messageId: message.serverId || message.id,
         emoji,
         reactorId: OWNER_PROFILE.key,
         mode: options.mode || 'toggle',
