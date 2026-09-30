@@ -4,11 +4,10 @@
  */
 
 import {
-  deliverChatOutbox,
-  reconcileChatOutboxWithMessages,
-  removeChatOutbox,
+    deliverChatOutbox,
+    reconcileChatOutboxWithMessages,
+    removeChatOutbox,
 } from './chatOutbox.js'
-import { mergeChatMessageLists } from './firebase.js'
 
 function sortMergedMessages(rows = []) {
   return [...rows].sort((a, b) => {
@@ -147,13 +146,10 @@ export function applyChatMessageSnapshot({
   serverRows,
   previous,
   deletingIds = new Set(),
-  threadId = '',
 }) {
   const filtered = (serverRows || []).filter((m) => !deletingIds.has(m.id))
-  const cachedRows = threadId ? loadThreadMessageCache(threadId) : []
-  const withReactions = mergeChatMessageLists(filtered, previous, cachedRows)
-  reconcileChatOutboxWithMessages(withReactions)
-  return mergeServerMessagesWithPending(withReactions, previous)
+  reconcileChatOutboxWithMessages(filtered)
+  return mergeServerMessagesWithPending(filtered, previous)
 }
 
 /** @deprecated Use applyChatMessageSnapshot — kept for call sites during migration. */
