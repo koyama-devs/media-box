@@ -3083,8 +3083,9 @@ export async function stampPokeFoil(threadId, speciesId) {
  * Ephemeral typing heartbeat. It deliberately does not touch `updatedAt`, so
  * typing never reorders the inbox or changes unread-message state.
  */
-export async function setChatTyping(threadId, role, typing = true) {
-  if (!threadId || (role !== 'guest' && role !== 'hana')) return
+export async function setChatTyping(threadId, role, typing = true, guestKey = '') {
+  const activeThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
+  if (!activeThreadId || (role !== 'guest' && role !== 'hana')) return
   const nowIso = new Date().toISOString()
   const patch = role === 'hana'
     ? {
@@ -3095,7 +3096,7 @@ export async function setChatTyping(threadId, role, typing = true) {
         guestTypingAt: typing ? serverTimestamp() : null,
         guestTypingAtIso: typing ? nowIso : null,
       }
-  await setDoc(doc(db, CHAT_THREADS_COLLECTION, threadId), patch, { merge: true })
+  await setDoc(doc(db, CHAT_THREADS_COLLECTION, activeThreadId), patch, { merge: true })
 }
 
 /**
@@ -3327,60 +3328,81 @@ export const CHAT_MESSAGE_LIVE_LIMIT = 300
  * createdAt desc for legacy docs missing createdAtIso (Zen guest bubbles on Hana inbox).
  * @returns {() => void}
  */
-export function subscribeChatMessages(threadId, onData, onError, _guestKey = '') {
+export function subscribeChatMessages(threadId, onData, onError, guestKey = '') {
   if (!threadId) {
     onData?.([])
     return () => {}
   }
-  const messagesRef = collection(db, CHAT_THREADS_COLLECTION, threadId, 'messages')
-  let isoRows = []
-  let legacyRows = []
-  let isoSnapshotReady = false
-  const emit = () => {
-    if (!isoSnapshotReady) return
-    onData?.(mergeLiveMessageRows(isoRows, legacyRows))
-  }
-  const isoQuery = query(
-    messagesRef,
-    orderBy('createdAtIso', 'desc'),
-    limit(CHAT_MESSAGE_LIVE_LIMIT),
-  )
-  const legacyQuery = query(
-    messagesRef,
-    orderBy('createdAt', 'desc'),
-    limit(CHAT_MESSAGE_LIVE_LIMIT),
-  )
-  const unsubIso = onSnapshot(
-    isoQuery,
-    (snap) => {
-      isoRows = rowsFromMessageSnap(snap)
-      isoSnapshotReady = true
-      emit()
-    },
-    (error) => {
-      isoSnapshotReady = true
-      onError?.(error)
-      emit()
-    },
-  )
-  const unsubLegacy = onSnapshot(
-    legacyQuery,
-    (snap) => {
-      legacyRows = rowsFromMessageSnap(snap)
-      emit()
-    },
-    (error) => {
-      if (isoSnapshotReady && !isoRows.length) onError?.(error)
-    },
-  )
+  let stopped = false
+  let unsubIso = () => {}
+  let unsubLegacy = () => {}
+
+  void (async () => {
+    let activeThreadId = ''
+    try {
+      activeThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
+    } catch (error) {
+      if (!stopped) onError?.(error)
+      return
+    }
+    if (stopped || !activeThreadId) return
+
+    const messagesRef = collection(db, CHAT_THREADS_COLLECTION, activeThreadId, 'messages')
+    let isoRows = []
+    let legacyRows = []
+    let isoSnapshotReady = false
+    const emit = () => {
+      if (!isoSnapshotReady) return
+      onData?.(mergeLiveMessageRows(isoRows, legacyRows))
+    }
+    const isoQuery = query(
+      messagesRef,
+      orderBy('createdAtIso', 'desc'),
+      limit(CHAT_MESSAGE_LIVE_LIMIT),
+    )
+    const legacyQuery = query(
+      messagesRef,
+      orderBy('createdAt', 'desc'),
+      limit(CHAT_MESSAGE_LIVE_LIMIT),
+    )
+    unsubIso = onSnapshot(
+      isoQuery,
+      (snap) => {
+        isoRows = rowsFromMessageSnap(snap)
+        isoSnapshotReady = true
+        emit()
+      },
+      (error) => {
+        isoSnapshotReady = true
+        onError?.(error)
+        emit()
+      },
+    )
+    unsubLegacy = onSnapshot(
+      legacyQuery,
+      (snap) => {
+        legacyRows = rowsFromMessageSnap(snap)
+        emit()
+      },
+      (error) => {
+        if (isoSnapshotReady && !isoRows.length) onError?.(error)
+      },
+    )
+    if (stopped) {
+      unsubIso()
+      unsubLegacy()
+    }
+  })()
+
   return () => {
+    stopped = true
     unsubIso()
     unsubLegacy()
   }
 }
 
-export async function fetchChatMessages(threadId, _guestKey = '') {
-  const activeThreadId = String(threadId || '').trim()
+export async function fetchChatMessages(threadId, guestKey = '') {
+  const activeThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
   if (!activeThreadId) return []
   const messagesRef = collection(db, CHAT_THREADS_COLLECTION, activeThreadId, 'messages')
   const isoQuery = query(
