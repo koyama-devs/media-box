@@ -33,7 +33,6 @@ import {
   CHAT_SEND_TIMEOUT_MS,
   CHAT_UPLOAD_TIMEOUT_MS,
   mapMessagesWithServerId,
-  mergeServerMessagesWithPending,
   nextChatPendingId,
   nextStickerPendingId,
   patchMessagesByPendingId,
@@ -930,10 +929,9 @@ export default function HanaChat({
       setHanaMessages(cached)
       return
     }
-    const recovery = listChatRecoveryForThread(threadId)
-      .map((entry) => outboxEntryToLocalMessage(entry))
-      .filter(Boolean)
-    setHanaMessages(recovery)
+    // b2c5fe0: first paint from memory (or bootstrap cache). 65d7acf dropped
+    // localStorage — avoid flashing a few outbox/recovery rows before Firestore.
+    setHanaMessages([])
   }, [])
 
   const pinChatListToLatest = useCallback(() => {
@@ -1788,7 +1786,11 @@ export default function HanaChat({
           setChannel('human')
         }
         messageCacheRef.current.set(liveThreadId, filtered)
-        setHanaMessages((prev) => mergeServerMessagesWithPending(filtered, prev))
+        setHanaMessages((prev) => applyChatMessageSnapshot({
+          serverRows: filtered,
+          previous: prev,
+          deletingIds: deletingIdsRef.current,
+        }))
         setMessagesHydrated(true)
         setError('')
         // Advance 既読 on every live snapshot while the guest chat is open.
@@ -1834,7 +1836,11 @@ export default function HanaChat({
         if (cancelled) return
         const filtered = next.filter((m) => !deletingIdsRef.current.has(m.id))
         messageCacheRef.current.set(activeThreadId, filtered)
-        setHanaMessages((prev) => mergeServerMessagesWithPending(filtered, prev))
+        setHanaMessages((prev) => applyChatMessageSnapshot({
+          serverRows: filtered,
+          previous: prev,
+          deletingIds: deletingIdsRef.current,
+        }))
         setMessagesHydrated(true)
         if (openRef.current && document.visibilityState === 'visible') {
           markThreadRead(activeThreadId, 'hana', ownerActiveGuestKey).catch(() => {})
@@ -1854,7 +1860,7 @@ export default function HanaChat({
 
   // Restore unsent text/stickers after reload so bubbles do not silently vanish.
   useEffect(() => {
-    if (hidden) return undefined
+    if (hidden || !messagesHydrated) return undefined
     const threadId = actingAsOwner
       ? activeThreadId
       : (guestOnHuman ? guestChatId : '')
@@ -1896,6 +1902,7 @@ export default function HanaChat({
     guestOnHuman,
     guestProfile?.key,
     ownerActiveGuestKey,
+    messagesHydrated,
   ])
 
   useEffect(() => {

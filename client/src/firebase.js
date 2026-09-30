@@ -3323,7 +3323,9 @@ export function subscribeChatMessages(threadId, onData, onError, _guestKey = '')
   const messagesRef = collection(db, CHAT_THREADS_COLLECTION, threadId, 'messages')
   let isoRows = []
   let legacyRows = []
+  let isoSnapshotReady = false
   const emit = () => {
+    if (!isoSnapshotReady) return
     onData?.(mergeLiveMessageRows(isoRows, legacyRows))
   }
   const isoQuery = query(
@@ -3340,9 +3342,14 @@ export function subscribeChatMessages(threadId, onData, onError, _guestKey = '')
     isoQuery,
     (snap) => {
       isoRows = rowsFromMessageSnap(snap)
+      isoSnapshotReady = true
       emit()
     },
-    (error) => onError?.(error),
+    (error) => {
+      isoSnapshotReady = true
+      onError?.(error)
+      emit()
+    },
   )
   const unsubLegacy = onSnapshot(
     legacyQuery,
@@ -3351,7 +3358,7 @@ export function subscribeChatMessages(threadId, onData, onError, _guestKey = '')
       emit()
     },
     (error) => {
-      if (!isoRows.length) onError?.(error)
+      if (isoSnapshotReady && !isoRows.length) onError?.(error)
     },
   )
   return () => {
