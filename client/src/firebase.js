@@ -3288,17 +3288,32 @@ function mergeLiveMessageRows(isoRows, legacyRows) {
 }
 
 /**
- * Resolve every chat to one canonical thread: guest-{guestKey}.
- * Legacy UUID/random thread ids are accepted only as input; reads/writes are
- * redirected to the canonical guest thread so every guest follows the same path.
+ * Fast path for live subscribe — no Firestore round-trip when guestKey or guest-{key} is known.
+ * Returns '' when legacy UUID needs async resolveCanonicalChatThreadId.
  */
-export async function resolveCanonicalChatThreadId(threadId = '', guestKey = '') {
+export function resolveCanonicalChatThreadIdSync(threadId = '', guestKey = '') {
   const rawId = String(threadId || '').trim()
   let key = normalizeAccountKey(guestKey)
   if (!key && rawId) {
     const canonicalMatch = rawId.match(/^guest-([a-z0-9_-]+)$/i)
     if (canonicalMatch) key = normalizeAccountKey(canonicalMatch[1])
   }
+  if (key) return `guest-${key}`
+  if (rawId && rawId.startsWith('guest-')) return rawId
+  if (rawId && !/^guest-/i.test(rawId)) return ''
+  return rawId
+}
+
+/**
+ * Resolve every chat to one canonical thread: guest-{guestKey}.
+ * Legacy UUID/random thread ids are accepted only as input; reads/writes are
+ * redirected to the canonical guest thread so every guest follows the same path.
+ */
+export async function resolveCanonicalChatThreadId(threadId = '', guestKey = '') {
+  const sync = resolveCanonicalChatThreadIdSync(threadId, guestKey)
+  if (sync) return sync
+  const rawId = String(threadId || '').trim()
+  let key = normalizeAccountKey(guestKey)
   if (!key && rawId) {
     try {
       const snap = await getDoc(doc(db, CHAT_THREADS_COLLECTION, rawId))
@@ -3320,6 +3335,54 @@ export async function resolveCanonicalChatThreadId(threadId = '', guestKey = '')
   return rawId
 }
 
+function attachChatMessageListeners(activeThreadId, onData, onError) {
+  const messagesRef = collection(db, CHAT_THREADS_COLLECTION, activeThreadId, 'messages')
+  let isoRows = []
+  let legacyRows = []
+  let isoSnapshotReady = false
+  const emit = () => {
+    if (!isoSnapshotReady) return
+    onData?.(mergeLiveMessageRows(isoRows, legacyRows))
+  }
+  const isoQuery = query(
+    messagesRef,
+    orderBy('createdAtIso', 'desc'),
+    limit(CHAT_MESSAGE_LIVE_LIMIT),
+  )
+  const legacyQuery = query(
+    messagesRef,
+    orderBy('createdAt', 'desc'),
+    limit(CHAT_MESSAGE_LIVE_LIMIT),
+  )
+  const unsubIso = onSnapshot(
+    isoQuery,
+    (snap) => {
+      isoRows = rowsFromMessageSnap(snap)
+      isoSnapshotReady = true
+      emit()
+    },
+    (error) => {
+      isoSnapshotReady = true
+      onError?.(error)
+      emit()
+    },
+  )
+  const unsubLegacy = onSnapshot(
+    legacyQuery,
+    (snap) => {
+      legacyRows = rowsFromMessageSnap(snap)
+      emit()
+    },
+    (error) => {
+      if (isoSnapshotReady && !isoRows.length) onError?.(error)
+    },
+  )
+  return () => {
+    unsubIso()
+    unsubLegacy()
+  }
+}
+
 /** Live chat bubbles stay at newest 300 — do not raise this for media/search. */
 export const CHAT_MESSAGE_LIVE_LIMIT = 300
 
@@ -3333,9 +3396,14 @@ export function subscribeChatMessages(threadId, onData, onError, guestKey = '') 
     onData?.([])
     return () => {}
   }
+
+  const syncThreadId = resolveCanonicalChatThreadIdSync(threadId, guestKey)
+  if (syncThreadId) {
+    return attachChatMessageListeners(syncThreadId, onData, onError)
+  }
+
   let stopped = false
-  let unsubIso = () => {}
-  let unsubLegacy = () => {}
+  let unsub = () => {}
 
   void (async () => {
     let activeThreadId = ''
@@ -3346,58 +3414,13 @@ export function subscribeChatMessages(threadId, onData, onError, guestKey = '') 
       return
     }
     if (stopped || !activeThreadId) return
-
-    const messagesRef = collection(db, CHAT_THREADS_COLLECTION, activeThreadId, 'messages')
-    let isoRows = []
-    let legacyRows = []
-    let isoSnapshotReady = false
-    const emit = () => {
-      if (!isoSnapshotReady) return
-      onData?.(mergeLiveMessageRows(isoRows, legacyRows))
-    }
-    const isoQuery = query(
-      messagesRef,
-      orderBy('createdAtIso', 'desc'),
-      limit(CHAT_MESSAGE_LIVE_LIMIT),
-    )
-    const legacyQuery = query(
-      messagesRef,
-      orderBy('createdAt', 'desc'),
-      limit(CHAT_MESSAGE_LIVE_LIMIT),
-    )
-    unsubIso = onSnapshot(
-      isoQuery,
-      (snap) => {
-        isoRows = rowsFromMessageSnap(snap)
-        isoSnapshotReady = true
-        emit()
-      },
-      (error) => {
-        isoSnapshotReady = true
-        onError?.(error)
-        emit()
-      },
-    )
-    unsubLegacy = onSnapshot(
-      legacyQuery,
-      (snap) => {
-        legacyRows = rowsFromMessageSnap(snap)
-        emit()
-      },
-      (error) => {
-        if (isoSnapshotReady && !isoRows.length) onError?.(error)
-      },
-    )
-    if (stopped) {
-      unsubIso()
-      unsubLegacy()
-    }
+    unsub = attachChatMessageListeners(activeThreadId, onData, onError)
+    if (stopped) unsub()
   })()
 
   return () => {
     stopped = true
-    unsubIso()
-    unsubLegacy()
+    unsub()
   }
 }
 
