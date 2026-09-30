@@ -3250,6 +3250,18 @@ function preferMessageRow(existing, candidate) {
   return messageTime >= existingTime ? candidate : existing
 }
 
+/** Union message lists — keep the row with richer reactions (flower fill after reopen). */
+export function mergeChatMessageLists(...lists) {
+  const byId = new Map()
+  for (const list of lists) {
+    for (const row of list || []) {
+      if (!row?.id) continue
+      byId.set(row.id, preferMessageRow(byId.get(row.id), row))
+    }
+  }
+  return sortChatMessages([...byId.values()])
+}
+
 function rowsFromMessageSnap(snap) {
   const byClientId = new Map()
   snap.docs
@@ -4463,35 +4475,46 @@ export async function reactToChatMessage({
   emoji,
   reactorId,
   mode = 'toggle',
-  guestKey: _guestKey = '',
+  guestKey = '',
 }) {
   const em = String(emoji || '').trim()
   const rid = String(reactorId || '').trim().toLowerCase()
-  const activeThreadId = String(threadId || '').trim()
-  if (!activeThreadId || !messageId || !em || !rid) {
+  const rawThreadId = String(threadId || '').trim()
+  const mid = String(messageId || '').trim()
+  if (!rawThreadId || !mid || !em || !rid) {
     throw new Error('リアクションできません（対象が不正です）。')
   }
   if (em.length > 8) {
     throw new Error('この絵文字は使えません。')
   }
 
-  const messageRef = doc(db, CHAT_THREADS_COLLECTION, activeThreadId, 'messages', messageId)
-  const snap = await getDoc(messageRef)
-  if (!snap.exists()) {
-    const error = new Error('メッセージが見つかりません（まだ送信中かも）。')
-    error.code = 'chat/reaction-missing'
-    throw error
+  const threadCandidates = []
+  const addThread = (id) => {
+    const value = String(id || '').trim()
+    if (value && !threadCandidates.includes(value)) threadCandidates.push(value)
+  }
+  addThread(rawThreadId)
+  addThread(await resolveCanonicalChatThreadId(rawThreadId, guestKey))
+
+  for (const activeThreadId of threadCandidates) {
+    const messageRef = doc(db, CHAT_THREADS_COLLECTION, activeThreadId, 'messages', mid)
+    const snap = await getDoc(messageRef)
+    if (!snap.exists()) continue
+
+    const reactions = applyReactionLocally(
+      normalizeChatReactions(snap.data()?.reactions),
+      em,
+      rid,
+      mode,
+    )
+
+    await updateDoc(messageRef, { reactions: reactionsToFirestore(reactions) })
+    return reactions
   }
 
-  const reactions = applyReactionLocally(
-    normalizeChatReactions(snap.data()?.reactions),
-    em,
-    rid,
-    mode,
-  )
-
-  await updateDoc(messageRef, { reactions: reactionsToFirestore(reactions) })
-  return reactions
+  const error = new Error('メッセージが見つかりません（まだ送信中かも）。')
+  error.code = 'chat/reaction-missing'
+  throw error
 }
 
 /** @deprecated Prefer reactToChatMessage — kept for call-site compatibility. */

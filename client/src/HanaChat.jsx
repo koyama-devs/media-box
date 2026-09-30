@@ -37,6 +37,7 @@ import {
   nextStickerPendingId,
   patchMessagesByPendingId,
   runChatWrite,
+  saveThreadMessageCache,
   watchLateChatWrite,
   withChatTimeout
 } from './chatSendPipeline'
@@ -82,6 +83,7 @@ import {
   isChatAudioAttachment,
   listGuestProfiles,
   markThreadRead,
+  mergeChatMessageLists,
   messageEditWindowMsFromMinutes,
   migrateLocalPinsToThread,
   normalizeChatPresenceMode,
@@ -910,6 +912,15 @@ export default function HanaChat({
     messageEditWindowMsFromMinutes(DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES)
   ))
 
+  const stashThreadMessagesInCache = useCallback((threadId, rows) => {
+    const id = String(threadId || '').trim()
+    if (!id || !Array.isArray(rows)) return
+    const prev = messageCacheRef.current.get(id)
+    const merged = mergeChatMessageLists(rows, prev)
+    messageCacheRef.current.set(id, merged)
+    saveThreadMessageCache(id, merged)
+  }, [])
+
   const showThreadMessages = useCallback((threadId, relatedIds = []) => {
     if (!threadId) {
       setHanaMessages([])
@@ -919,8 +930,8 @@ export default function HanaChat({
     for (const id of ids) {
       const cached = messageCacheRef.current.get(id)
       if (Array.isArray(cached) && cached.length > 0) {
-        messageCacheRef.current.set(threadId, cached)
-        setHanaMessages(cached)
+        stashThreadMessagesInCache(threadId, cached)
+        setHanaMessages(messageCacheRef.current.get(threadId) || cached)
         return
       }
     }
@@ -932,7 +943,7 @@ export default function HanaChat({
     // b2c5fe0: first paint from memory (or bootstrap cache). 65d7acf dropped
     // localStorage — avoid flashing a few outbox/recovery rows before Firestore.
     setHanaMessages([])
-  }, [])
+  }, [stashThreadMessagesInCache])
 
   const pinChatListToLatest = useCallback(() => {
     const list = listRef.current
@@ -1785,12 +1796,16 @@ export default function HanaChat({
           saveChannel(liveThreadId, 'human')
           setChannel('human')
         }
-        messageCacheRef.current.set(liveThreadId, filtered)
-        setHanaMessages((prev) => applyChatMessageSnapshot({
-          serverRows: filtered,
-          previous: prev,
-          deletingIds: deletingIdsRef.current,
-        }))
+        setHanaMessages((prev) => {
+          const merged = applyChatMessageSnapshot({
+            serverRows: filtered,
+            previous: prev,
+            deletingIds: deletingIdsRef.current,
+            threadId: liveThreadId,
+          })
+          stashThreadMessagesInCache(liveThreadId, merged)
+          return merged
+        })
         setMessagesHydrated(true)
         setError('')
         // Advance 既読 on every live snapshot while the guest chat is open.
@@ -1835,12 +1850,16 @@ export default function HanaChat({
       (next) => {
         if (cancelled) return
         const filtered = next.filter((m) => !deletingIdsRef.current.has(m.id))
-        messageCacheRef.current.set(activeThreadId, filtered)
-        setHanaMessages((prev) => applyChatMessageSnapshot({
-          serverRows: filtered,
-          previous: prev,
-          deletingIds: deletingIdsRef.current,
-        }))
+        setHanaMessages((prev) => {
+          const merged = applyChatMessageSnapshot({
+            serverRows: filtered,
+            previous: prev,
+            deletingIds: deletingIdsRef.current,
+            threadId: activeThreadId,
+          })
+          stashThreadMessagesInCache(activeThreadId, merged)
+          return merged
+        })
         setMessagesHydrated(true)
         if (openRef.current && document.visibilityState === 'visible') {
           markThreadRead(activeThreadId, 'hana', ownerActiveGuestKey).catch(() => {})
@@ -3942,12 +3961,16 @@ export default function HanaChat({
     const loadToken = ++ownerThreadLoadRef.current
     void fetchChatMessages(openId, key).then((rows) => {
       if (loadToken !== ownerThreadLoadRef.current) return
-      messageCacheRef.current.set(openId, rows)
-      setHanaMessages((prev) => applyChatMessageSnapshot({
-        serverRows: rows,
-        previous: prev,
-        deletingIds: deletingIdsRef.current,
-      }))
+      setHanaMessages((prev) => {
+        const merged = applyChatMessageSnapshot({
+          serverRows: rows,
+          previous: prev,
+          deletingIds: deletingIdsRef.current,
+          threadId: openId,
+        })
+        stashThreadMessagesInCache(openId, merged)
+        return merged
+      })
       setMessagesHydrated(true)
     }).catch(() => {})
     void consolidateGuestThreads({
@@ -4697,7 +4720,11 @@ export default function HanaChat({
     }
 
     // Show the chip immediately; Firestore snapshot will confirm/reconcile.
-    setHanaMessages(patchLocal)
+    setHanaMessages((prev) => {
+      const next = patchLocal(prev)
+      stashThreadMessagesInCache(threadId, next)
+      return next
+    })
     setError('')
     try {
       await toggleChatReaction({
@@ -4706,12 +4733,19 @@ export default function HanaChat({
         emoji: em,
         reactorId: rid,
         mode,
+        guestKey: actingAsOwner
+          ? (ownerActiveGuestKey || '')
+          : (guestProfile?.key || guestKey || ''),
       })
     } catch (err) {
-      setHanaMessages((prev) => prev.map((m) => {
-        if (m.id !== message.id && m.serverId !== message.id && m.id !== message.serverId) return m
-        return { ...m, reactions: message.reactions || {} }
-      }))
+      setHanaMessages((prev) => {
+        const reverted = prev.map((m) => {
+          if (m.id !== message.id && m.serverId !== message.id && m.id !== message.serverId) return m
+          return { ...m, reactions: message.reactions || {} }
+        })
+        stashThreadMessagesInCache(threadId, reverted)
+        return reverted
+      })
       setError(getFirebaseErrorMessage(err) || 'リアクションに失敗しました。')
     } finally {
       if (keepKb) {
