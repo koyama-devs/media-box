@@ -19,6 +19,7 @@ import {
     remindAtFromChoice,
 } from './chatExtras'
 import { renderChatTextWithLinks } from './chatLinkify'
+import { saveThreadMessageCache } from './chatSendPipeline'
 import { readDefaultReaction } from './chatSettings'
 import {
     ACCOUNT_IDLE_DAYS_NEVER,
@@ -1004,7 +1005,7 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
   const handlePurgeGabuTestMessages = async () => {
     if (clearBusy) return
     const ok = window.confirm(
-      'ガブさん（gabusan）とのスレッドから、test11 / T1 / テスト などのテストメッセージだけを削除します。\n本番の会話は残します。よろしいですか？',
+      'ガブさん（gabusan）とのスレッドから、Test1 / Testx / T1 / test11 / テスト などの短いテストメッセージだけを削除します（大文字小文字どちらも対象）。\n本番の会話は残します。よろしいですか？',
     )
     if (!ok) return
     setClearBusy(true)
@@ -1012,10 +1013,21 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
     setStatusNote('')
     try {
       const result = await purgeGabuTestChatMessages()
+      for (const row of result.threads || []) {
+        saveThreadMessageCache(row.threadId, [])
+      }
+      saveThreadMessageCache('guest-gabusan', [])
       const detail = result.threads.length
         ? result.threads.map((t) => `${t.threadId}: ${t.deleted}件`).join('、')
         : '該当なし'
-      setStatusNote(`ガブのテストメッセージを ${result.deleted} 件削除しました。（${detail}）`)
+      const sampleNote = result.samples?.length
+        ? ` 例: ${result.samples.slice(0, 5).join(', ')}`
+        : ''
+      setStatusNote(
+        result.deleted
+          ? `ガブのテストメッセージを ${result.deleted} 件削除しました。（${detail}）${sampleNote}`
+          : `削除対象なし（${detail}）。Hosting最新版で再実行するか、本文が Test1 / Testx / T1 など短いテスト文字列か確認してください。`,
+      )
     } catch (err) {
       setError(getFirebaseErrorMessage(err) || 'テストメッセージの削除に失敗しました。')
     } finally {
@@ -1035,10 +1047,12 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
     try {
       const guestKey = activeThread?.guestKey || String(activeId).replace(/^guest-/, '')
       const result = await purgeTestChatMessagesInThread(activeId, guestKey)
+      if (result.deleted) saveThreadMessageCache(result.threadId || activeId, [])
+      const sampleNote = result.samples?.length ? ` (${result.samples.slice(0, 5).join(', ')})` : ''
       setStatusNote(
         result.deleted
-          ? `テストメッセージ ${result.deleted} 件を削除しました。`
-          : '削除対象のテストメッセージはありませんでした。',
+          ? `テストメッセージ ${result.deleted} 件を削除しました。${sampleNote}`
+          : '削除対象なし。Test1 / Testx / T1 形式の短い本文のみ対象です。',
       )
     } catch (err) {
       setError(getFirebaseErrorMessage(err) || 'テストメッセージの削除に失敗しました。')

@@ -20,15 +20,38 @@ const CHAT_THREADS = 'chatThreads'
 const CANONICAL_THREAD = 'guest-gabusan'
 const GUEST_KEY = 'gabusan'
 
-/** Trimmed body looks like dev/test traffic — keep real sentences. */
+/** Keep in sync with isTestChatMessageText in client/src/firebase.js */
+function normalizeAsciiTestMessageKey(text) {
+  let s = String(text || '').trim()
+  if (!s) return ''
+  try {
+    s = s.normalize('NFKC')
+  } catch {
+    /* ignore */
+  }
+  return s.replace(/[\uFF01-\uFF5E]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0)).toLowerCase()
+}
+
 function isTestMessageText(text) {
-  const t = String(text || '').trim()
-  if (!t || t.length > 80) return false
-  if (/^test\d*$/i.test(t)) return true
-  if (/^t\d+$/i.test(t)) return true
-  if (/^テスト\d*$/u.test(t)) return true
-  if (/^test[-_.]?\d+$/i.test(t)) return true
+  const raw = String(text || '').trim()
+  if (!raw || raw.length > 48) return false
+  if (/^テスト\d*$/u.test(raw)) return true
+  const t = normalizeAsciiTestMessageKey(raw)
+  if (!t) return false
+  if (t === 'test') return true
+  if (/^test\d+$/.test(t)) return true
+  if (/^testx\d*$/.test(t)) return true
+  if (/^test[_-]?\d+$/.test(t)) return true
+  if (/^test[a-z]\d*$/.test(t) && t.length <= 12) return true
+  if (/^t\d+$/.test(t)) return true
+  if (/^tx\d*$/.test(t) && t.length <= 8) return true
   return false
+}
+
+function messageBody(data) {
+  const text = String(data?.text || '').trim()
+  if (text) return text
+  return String(data?.sticker || '').trim()
 }
 
 async function listGabuThreadIds(db) {
@@ -76,7 +99,7 @@ async function purgeThread(db, threadId, execute) {
   for (const doc of snap.docs) {
     const data = doc.data() || {}
     if (data.deleted) continue
-    const text = String(data.text || '').trim()
+    const text = messageBody(data)
     if (isTestMessageText(text)) {
       toDelete.push({ id: doc.id, text })
     }

@@ -4589,15 +4589,39 @@ async function deleteAllDocsInCollection(collectionRef) {
   }
 }
 
-/** Dev/test junk only (test11, T1, テスト, …) — not normal chat sentences. */
+/** Fold fullwidth ASCII + case for Test1 / T1 / TESTx style junk (not normal sentences). */
+function normalizeAsciiTestMessageKey(text) {
+  let s = String(text || '').trim()
+  if (!s) return ''
+  try {
+    s = s.normalize('NFKC')
+  } catch {
+    /* ignore */
+  }
+  return s.replace(/[\uFF01-\uFF5E]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0)).toLowerCase()
+}
+
+/** Dev/test junk only (Test1, Testx, T1, test11, テスト, …) — not normal sentences. */
 export function isTestChatMessageText(text) {
-  const t = String(text || '').trim()
-  if (!t || t.length > 80) return false
-  if (/^test\d*$/i.test(t)) return true
-  if (/^t\d+$/i.test(t)) return true
-  if (/^テスト\d*$/u.test(t)) return true
-  if (/^test[-_.]?\d+$/i.test(t)) return true
+  const raw = String(text || '').trim()
+  if (!raw || raw.length > 48) return false
+  if (/^テスト\d*$/u.test(raw)) return true
+  const t = normalizeAsciiTestMessageKey(raw)
+  if (!t) return false
+  if (t === 'test') return true
+  if (/^test\d+$/.test(t)) return true
+  if (/^testx\d*$/.test(t)) return true
+  if (/^test[_-]?\d+$/.test(t)) return true
+  if (/^test[a-z]\d*$/.test(t) && t.length <= 12) return true
+  if (/^t\d+$/.test(t)) return true
+  if (/^tx\d*$/.test(t) && t.length <= 8) return true
   return false
+}
+
+function chatMessageBodyForPurgeTest(data) {
+  const text = String(data?.text || '').trim()
+  if (text) return text
+  return String(data?.sticker || '').trim()
 }
 
 async function refreshThreadLastTextAfterDeletes(threadId) {
@@ -4651,7 +4675,7 @@ export async function purgeTestChatMessagesInThread(threadId, guestKey = '') {
   for (const document of snap.docs) {
     const data = document.data() || {}
     if (data.deleted) continue
-    const text = String(data.text || '').trim()
+    const text = chatMessageBodyForPurgeTest(data)
     if (!isTestChatMessageText(text)) continue
     toDelete.push(document.ref)
     if (samples.length < 12) samples.push(text)
@@ -4671,7 +4695,7 @@ export async function purgeTestChatMessagesInThread(threadId, guestKey = '') {
  * Purge test messages from every gabusan thread (guest-gabusan + legacy ids).
  * @returns {Promise<{ deleted: number, threads: { threadId: string, deleted: number }[] }>}
  */
-export async function purgeGabuTestChatMessages() {
+async function collectGabusanThreadIds() {
   const threadIds = new Set(['guest-gabusan'])
   try {
     const byKey = await getDocs(
@@ -4679,18 +4703,40 @@ export async function purgeGabuTestChatMessages() {
     )
     byKey.docs.forEach((document) => threadIds.add(document.id))
   } catch {
-    /* rules / index */
+    /* query may need index; fall back to full scan */
   }
+  try {
+    const all = await getDocs(collection(db, CHAT_THREADS_COLLECTION))
+    all.docs.forEach((document) => {
+      const id = document.id
+      const data = document.data() || {}
+      if (id === 'guest-gabusan' || id.startsWith('guest-gabusan')) {
+        threadIds.add(id)
+        return
+      }
+      const key = String(data.guestKey || '').trim().toLowerCase()
+      if (key === 'gabusan' || key === 'gabu') threadIds.add(id)
+    })
+  } catch {
+    /* ignore */
+  }
+  return [...threadIds]
+}
+
+export async function purgeGabuTestChatMessages() {
+  const threadIds = await collectGabusanThreadIds()
   const threads = []
   let deleted = 0
+  const samples = []
   for (const threadId of threadIds) {
     const result = await purgeTestChatMessagesInThread(threadId, 'gabusan')
     if (result.deleted > 0) {
       threads.push({ threadId: result.threadId, deleted: result.deleted })
       deleted += result.deleted
+      samples.push(...(result.samples || []))
     }
   }
-  return { deleted, threads }
+  return { deleted, threads, samples: samples.slice(0, 20) }
 }
 
 /**
