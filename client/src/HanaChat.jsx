@@ -1696,18 +1696,18 @@ export default function HanaChat({
   }, [hidden, actingAsOwner, ownThread, notifyIncomingMessage])
 
   useEffect(() => {
-    if (hidden || actingAsOwner || !guestLiveThreadId) {
-      if (!guestLiveThreadId) setOwnThread(null)
+    if (hidden || actingAsOwner || !guestChatId) {
+      if (!guestChatId) setOwnThread(null)
       return undefined
     }
     return subscribeOwnChatThread(
-      guestLiveThreadId,
+      guestChatId,
       (next) => setOwnThread((prev) => (
         threadSnapshotEqualForUi(prev, next, GUEST_THREAD_ECHO_KEYS) ? prev : next
       )),
       () => {},
     )
-  }, [hidden, actingAsOwner, guestLiveThreadId])
+  }, [hidden, actingAsOwner, guestChatId])
 
   useEffect(() => {
     if (hidden) return undefined
@@ -1737,20 +1737,6 @@ export default function HanaChat({
   }, [hidden, sessionProfile.id, ownerActiveGuestKey, chatAccounts])
 
   const guestOnHuman = !actingAsOwner && channel === 'human'
-  const guestOnHumanRef = useRef(guestOnHuman)
-  guestOnHumanRef.current = guestOnHuman
-
-  /** Same thread id as message subscribe — typing + unread must not watch a legacy UUID. */
-  const guestLiveThreadId = !actingAsOwner
-    ? (guestProfile?.key ? `guest-${guestProfile.key}` : guestChatId)
-    : ''
-  const ownerLiveThreadId = actingAsOwner
-    ? (ownerActiveGuestKey ? `guest-${ownerActiveGuestKey}` : (activeThreadId || ''))
-    : ''
-  const typingGuestKeyRef = useRef('')
-  typingGuestKeyRef.current = actingAsOwner
-    ? (ownerActiveGuestKey || '')
-    : (guestProfile?.key || guestKey || '')
 
   // Messages first: reset summer FX whenever the open conversation changes.
   useEffect(() => {
@@ -1798,7 +1784,7 @@ export default function HanaChat({
   }, [open, messagesHydrated])
 
   useEffect(() => {
-    const liveThreadId = guestLiveThreadId
+    const liveThreadId = guestProfile?.key ? `guest-${guestProfile.key}` : guestChatId
     if (hidden || actingAsOwner || !liveThreadId) {
       return undefined
     }
@@ -1806,7 +1792,7 @@ export default function HanaChat({
       liveThreadId,
       (next) => {
         const filtered = next.filter((m) => !deletingIdsRef.current.has(m.id))
-        if (!guestOnHumanRef.current && filtered.some((message) => message.sender === 'hana')) {
+        if (!guestOnHuman && filtered.some((message) => message.sender === 'hana')) {
           saveChannel(liveThreadId, 'human')
           setChannel('human')
         }
@@ -1828,10 +1814,9 @@ export default function HanaChat({
         }
       },
       (err) => setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。'),
-      guestProfile?.key || guestKey || '',
     )
     return unsub
-  }, [hidden, actingAsOwner, guestLiveThreadId, guestKey, guestProfile?.key])
+  }, [hidden, actingAsOwner, guestOnHuman, guestChatId, guestKey, guestProfile?.key])
 
   // Canonicalize/migrate legacy threads for EVERY guest using the same path.
   // We never switch the active UI back to a legacy UUID; Firestore migration
@@ -1885,7 +1870,6 @@ export default function HanaChat({
         if (cancelled) return
         setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。')
       },
-      ownerActiveGuestKey || '',
     )
     return () => {
       cancelled = true
@@ -2170,8 +2154,8 @@ export default function HanaChat({
     if (hidden || !open) return undefined
 
     const threadId = actingAsOwner
-      ? ownerLiveThreadId
-      : (guestOnHuman ? guestLiveThreadId : null)
+      ? activeThreadId
+      : (guestOnHuman ? guestChatId : null)
     if (!threadId) return undefined
 
     const reader = actingAsOwner ? 'hana' : 'guest'
@@ -2193,10 +2177,9 @@ export default function HanaChat({
     actingAsOwner,
     activeThreadId,
     guestOnHuman,
-    guestLiveThreadId,
+    guestChatId,
     guestKey,
     hanaMessages[hanaMessages.length - 1]?.id,
-    ownerLiveThreadId,
     activeThreadMeta?.unreadByHana,
     activeThreadMeta?.unreadByGuest,
     activeThreadMeta?.updatedAt,
@@ -2279,7 +2262,7 @@ export default function HanaChat({
     ownThread?.id,
   ])
 
-  const typingThreadId = actingAsOwner ? ownerLiveThreadId : guestLiveThreadId
+  const typingThreadId = actingAsOwner ? activeThreadId : guestChatId
   const typingRole = actingAsOwner ? 'hana' : 'guest'
   const typingEligible = Boolean(
     open
@@ -2302,7 +2285,7 @@ export default function HanaChat({
     const stopCurrent = () => {
       const current = typingStateRef.current
       if (!current.threadId || !current.role) return
-      setChatTyping(current.threadId, current.role, false, typingGuestKeyRef.current).catch(() => {})
+      setChatTyping(current.threadId, current.role, false).catch(() => {})
       typingStateRef.current = { threadId: '', role: '', lastPulseAt: 0 }
     }
 
@@ -2356,7 +2339,7 @@ export default function HanaChat({
         return
       }
       state.lastPulseAt = Date.now()
-      setChatTyping(typingThreadId, typingRole, true, typingGuestKeyRef.current).catch(() => {})
+      setChatTyping(typingThreadId, typingRole, true).catch(() => {})
       armGuestIdleStop()
     }
 
@@ -2411,7 +2394,7 @@ export default function HanaChat({
     window.clearTimeout(typingStopTimerRef.current)
     const state = typingStateRef.current
     if (state.threadId && state.role) {
-      setChatTyping(state.threadId, state.role, false, typingGuestKeyRef.current).catch(() => {})
+      setChatTyping(state.threadId, state.role, false).catch(() => {})
     }
   }, [])
 

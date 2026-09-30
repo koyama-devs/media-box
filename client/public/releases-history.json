@@ -1,6 +1,24 @@
 {
-  "updatedAt": "2026-09-30T03:13:13.186Z",
+  "updatedAt": "2026-09-30T06:11:15.841Z",
   "releases": [
+    {
+      "version": "munpivv2-obn6ms",
+      "notes": "fix guest-side delay for Hana typing and messages: canonical thread listeners, no resubscribe on channel switch",
+      "builtAt": "2026-09-30T06:11:15.651Z",
+      "previousVersion": null,
+      "previousHostingVersionId": null,
+      "hostingVersionId": null,
+      "recordedAt": "2026-09-30T06:11:15.839Z"
+    },
+    {
+      "version": "munoj5tt-jeaecm",
+      "notes": "Persist flower reaction fill after kill/reopen: canonical thread writes, reaction merge on snapshots, local reaction cache.",
+      "builtAt": "2026-09-30T05:43:29.469Z",
+      "previousVersion": null,
+      "previousHostingVersionId": null,
+      "hostingVersionId": null,
+      "recordedAt": "2026-09-30T05:43:29.668Z"
+    },
     {
       "version": "munj4vqw-s0avwm",
       "notes": "restore 804e4e1 reaction flow; canonical write; drop message cache",
@@ -342,24 +360,6 @@
       "previousHostingVersionId": "b90a828dab60f508",
       "hostingVersionId": "a6e8729928d66e1f",
       "recordedAt": "2026-09-20T14:44:18.338Z"
-    },
-    {
-      "version": "mu9x0nwl-9ico85",
-      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
-      "builtAt": "2026-09-20T14:32:18.783Z",
-      "previousVersion": "mu9vtbpt-4rvc2k",
-      "previousHostingVersionId": "7ce9b34af65b5153",
-      "hostingVersionId": "b90a828dab60f508",
-      "recordedAt": "2026-09-20T14:32:19.262Z"
-    },
-    {
-      "version": "mu9vtbpt-4rvc2k",
-      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
-      "builtAt": "2026-09-20T13:58:37.779Z",
-      "previousVersion": "mu9vf3wo-pcko5u",
-      "previousHostingVersionId": "2475eea5838c5766",
-      "hostingVersionId": "7ce9b34af65b5153",
-      "recordedAt": "2026-09-20T13:58:38.614Z"
     }
   ]
 }
