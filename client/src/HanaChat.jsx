@@ -94,6 +94,7 @@ import {
   resolveCanonicalChatThreadId,
   resolveChatPresence,
   resolveGuestDisplayName,
+  resolvePushUserKey,
   resolveSessionProfile,
   sendChatMessage,
   setChatPresenceStatus,
@@ -1502,6 +1503,8 @@ export default function HanaChat({
   useEffect(() => {
     if (hidden) return undefined
     bindForegroundPush()
+    const pushKey = resolvePushUserKey(actingAsOwner ? 'owner' : 'guest', guestKey)
+    if (pushKey) void ensureWebPush(pushKey)
     const onPush = (event) => {
       const detail = event?.detail || {}
       if (detail.type && detail.type !== 'chat') return
@@ -1513,7 +1516,16 @@ export default function HanaChat({
     }
     window.addEventListener('hana-chat-push', onPush)
     return () => window.removeEventListener('hana-chat-push', onPush)
-  }, [hidden, notifyIncomingMessage])
+  }, [hidden, notifyIncomingMessage, actingAsOwner, guestKey])
+
+  // Guest devices often miss the login-time token if SW was not ready — refresh when chat opens.
+  useEffect(() => {
+    if (hidden || actingAsOwner || !open) return undefined
+    const pushKey = resolvePushUserKey('guest', guestKey)
+    if (!pushKey) return undefined
+    void ensureWebPush(pushKey)
+    return undefined
+  }, [hidden, actingAsOwner, open, guestKey])
 
   useEffect(() => {
     if (hidden) {

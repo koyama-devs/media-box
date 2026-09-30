@@ -11,6 +11,14 @@ initializeApp()
 const OWNER_PUSH_KEY = 'hana'
 const PUSH_TOKENS_COLLECTION = 'pushTokens'
 const CHAT_THREADS_COLLECTION = 'chatThreads'
+const CHAT_PROFILES_COLLECTION = 'chatProfiles'
+
+/** Same alias groups as client pushTokenLookupKeys (gabu passKey → gabusan tokens). */
+const GUEST_PUSH_ALIAS_GROUPS = [
+  ['gabusan', 'gabu', 'gabriel'],
+  ['zen'],
+  ['hiro'],
+]
 
 /** Fallback chain: the lite model has its own quota bucket on the free tier. */
 const GEMINI_MODEL_CHAIN = ['gemini-flash-latest', 'gemini-flash-lite-latest']
@@ -724,11 +732,74 @@ exports.analyzeBookPageForOwner = onCall({ cors: true, timeoutSeconds: 120, memo
   }
 })
 
-function resolveGuestKeyFromThread(threadId, threadData) {
-  const fromDoc = String(threadData?.guestKey || '').trim().toLowerCase()
+function normalizePushUserKey(value) {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '')
+}
+
+function resolveGuestKeyFromThread(threadId, threadData, message) {
+  const fromMessage = normalizePushUserKey(message?.guestKey)
+  if (fromMessage) return fromMessage
+  const fromDoc = normalizePushUserKey(threadData?.guestKey)
   if (fromDoc) return fromDoc
   const match = String(threadId || '').match(/^guest-(.+)$/i)
-  return match ? String(match[1] || '').trim().toLowerCase() : ''
+  return match ? normalizePushUserKey(match[1]) : ''
+}
+
+async function loadPushTokensForUserKeys(db, userKeys) {
+  const keys = [...new Set((userKeys || []).map(normalizePushUserKey).filter(Boolean))]
+  if (!keys.length) return []
+  const byId = new Map()
+  await Promise.all(keys.map(async (userKey) => {
+    const snap = await db
+      .collection(PUSH_TOKENS_COLLECTION)
+      .where('userKey', '==', userKey)
+      .limit(50)
+      .get()
+    snap.docs.forEach((document) => {
+      byId.set(document.id, document)
+    })
+  }))
+  return [...byId.values()]
+    .map((document) => ({ id: document.id, token: String(document.data()?.token || '').trim() }))
+    .filter((row) => row.token)
+}
+
+function aliasKeysForGuestPush(canonical) {
+  const base = normalizePushUserKey(canonical)
+  if (!base) return []
+  const keys = new Set([base])
+  for (const group of GUEST_PUSH_ALIAS_GROUPS) {
+    if (group.includes(base)) {
+      group.forEach((entry) => keys.add(normalizePushUserKey(entry)))
+    }
+  }
+  return [...keys].filter(Boolean)
+}
+
+/** Resolve every userKey that might hold this guest's FCM token (any guest account). */
+async function expandGuestPushUserKeys(db, primaryGuestKey) {
+  const canonical = normalizePushUserKey(primaryGuestKey)
+  if (!canonical) return []
+  const keys = new Set(aliasKeysForGuestPush(canonical))
+  try {
+    const profileSnap = await db.collection(CHAT_PROFILES_COLLECTION).doc(canonical).get()
+    if (profileSnap.exists) {
+      const data = profileSnap.data() || {}
+      const passKey = normalizePushUserKey(data.passKey)
+      if (passKey) keys.add(passKey)
+      if (data.role === 'guest' && normalizePushUserKey(profileSnap.id)) {
+        keys.add(normalizePushUserKey(profileSnap.id))
+      }
+    }
+  } catch (error) {
+    console.warn('expandGuestPushUserKeys', error?.message || error)
+  }
+  return [...keys].filter(Boolean)
+}
+
+async function loadPushTokensForGuestTarget(db, primaryGuestKey) {
+  const keys = await expandGuestPushUserKeys(db, primaryGuestKey)
+  return loadPushTokensForUserKeys(db, keys)
 }
 
 function previewText(text) {
@@ -764,22 +835,19 @@ exports.notifyOnChatMessage = onDocumentCreated(
     let title = 'Hana Mediabox'
     if (sender === 'guest') {
       targetUserKey = OWNER_PUSH_KEY
-      title = String(threadData?.guestLabel || resolveGuestKeyFromThread(threadId, threadData) || 'ゲスト')
+      title = String(threadData?.guestLabel || resolveGuestKeyFromThread(threadId, threadData, message) || 'ゲスト')
     } else {
-      targetUserKey = resolveGuestKeyFromThread(threadId, threadData)
+      targetUserKey = resolveGuestKeyFromThread(threadId, threadData, message)
       title = 'はな'
     }
-    if (!targetUserKey) return null
+    if (!targetUserKey) {
+      console.info('notifyOnChatMessage: missing guest target', { threadId, sender })
+      return null
+    }
 
-    const tokensSnap = await db
-      .collection(PUSH_TOKENS_COLLECTION)
-      .where('userKey', '==', targetUserKey)
-      .limit(50)
-      .get()
-
-    const tokenDocs = tokensSnap.docs
-      .map((document) => ({ id: document.id, token: String(document.data()?.token || '').trim() }))
-      .filter((row) => row.token)
+    const tokenDocs = sender === 'guest'
+      ? await loadPushTokensForUserKeys(db, [OWNER_PUSH_KEY])
+      : await loadPushTokensForGuestTarget(db, targetUserKey)
 
     if (!tokenDocs.length) {
       console.info('notifyOnChatMessage: no tokens for', targetUserKey)
@@ -856,22 +924,16 @@ async function notifyCallRing({ threadId, callId, after }) {
   let title = '着信'
   if (calleeRole === 'hana') {
     targetUserKey = OWNER_PUSH_KEY
-    title = String(threadData?.guestLabel || resolveGuestKeyFromThread(threadId, threadData) || 'ゲスト')
+    title = String(threadData?.guestLabel || resolveGuestKeyFromThread(threadId, threadData, after) || 'ゲスト')
   } else {
-    targetUserKey = resolveGuestKeyFromThread(threadId, threadData)
+    targetUserKey = resolveGuestKeyFromThread(threadId, threadData, after)
     title = 'はな'
   }
   if (!targetUserKey) return null
 
-  const tokensSnap = await db
-    .collection(PUSH_TOKENS_COLLECTION)
-    .where('userKey', '==', targetUserKey)
-    .limit(50)
-    .get()
-
-  const tokenDocs = tokensSnap.docs
-    .map((document) => ({ id: document.id, token: String(document.data()?.token || '').trim() }))
-    .filter((row) => row.token)
+  const tokenDocs = calleeRole === 'hana'
+    ? await loadPushTokensForUserKeys(db, [OWNER_PUSH_KEY])
+    : await loadPushTokensForGuestTarget(db, targetUserKey)
 
   if (!tokenDocs.length) {
     console.info('notifyOnChatCall: no tokens for', targetUserKey)
