@@ -186,23 +186,6 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
   }, [])
 
   useEffect(() => {
-    if (!activeId) {
-      setMessages([])
-      return undefined
-    }
-    const unsub = subscribeChatMessages(
-      activeId,
-      (next) => {
-        setMessages(next)
-        markThreadRead(activeId, 'hana', activeGuestKey).catch(() => {})
-      },
-      (err) => setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。'),
-    )
-    markThreadRead(activeId, 'hana', activeGuestKey).catch(() => {})
-    return unsub
-  }, [activeId, activeGuestKey])
-
-  useEffect(() => {
     if (!activeId) return undefined
     const beat = () => {
       pulseChatPresence(activeId, 'hana').catch(() => {})
@@ -635,6 +618,32 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
     return known?.displayName || activeThread?.guestLabel || 'ゲスト'
   }, [activeId, activeThread, guestRoster])
 
+  const activeGuestKey = useMemo(() => {
+    if (!activeId) return ''
+    const known = guestRoster.find((entry) => entry.threadId === activeId)?.profile
+    if (known) return known.key
+    return String(activeThread?.guestKey || '').trim().toLowerCase()
+  }, [activeId, activeThread, guestRoster])
+
+  useEffect(() => {
+    if (!activeId) {
+      setMessages([])
+      return undefined
+    }
+    const guestKey = activeGuestKey
+    const unsub = subscribeChatMessages(
+      activeId,
+      (next) => {
+        setMessages(next)
+        markThreadRead(activeId, 'hana', guestKey).catch(() => {})
+      },
+      (err) => setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。'),
+      guestKey,
+    )
+    markThreadRead(activeId, 'hana', guestKey).catch(() => {})
+    return unsub
+  }, [activeId, activeGuestKey])
+
   messagesRef.current = messages
 
   const requestOwnerAssist = useCallback(async (message, { force = false, batch = null } = {}) => {
@@ -821,13 +830,6 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
       getAvatarPresetSrc(profile.avatarPresetId),
     )
   }
-
-  const activeGuestKey = useMemo(() => {
-    if (!activeId) return ''
-    const known = guestRoster.find((entry) => entry.threadId === activeId)?.profile
-    if (known) return known.key
-    return String(activeThread?.guestKey || '').trim().toLowerCase()
-  }, [activeId, activeThread, guestRoster])
 
   const avatarSrcForMessage = (message) => {
     if (message.sender === 'hana') {
