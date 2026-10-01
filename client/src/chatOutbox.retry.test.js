@@ -148,6 +148,33 @@ test('pending test junk is dropped when absent from server snapshot', () => {
   assert.equal(listChatOutbox().length, 0)
 })
 
+test('optimistic UI row must not purge outbox while send is still queued', () => {
+  store.clear()
+  resetOutboxStoreForTests()
+  upsertChatOutbox({
+    clientId: 'pending-close-app',
+    threadId: 'guest-zen',
+    guestKey: 'zen',
+    text: 'closed mid send',
+    sender: 'guest',
+    createdAtIso: new Date().toISOString(),
+  })
+  const fakeBubble = {
+    id: 'pending-close-app',
+    clientId: 'pending-close-app',
+    pending: false,
+    sendFailed: false,
+    text: 'closed mid send',
+  }
+  resolveRetryableOutboxEntry({
+    threadId: 'guest-zen',
+    guestKey: 'zen',
+    clientId: 'pending-close-app',
+    messages: [fakeBubble],
+  })
+  assert.equal(listChatOutbox().length, 1)
+})
+
 test('successful write stays durable until the server snapshot confirms it', () => {
   store.clear()
   resetOutboxStoreForTests()

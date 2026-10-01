@@ -19,7 +19,8 @@ function sortChatRows(rows = []) {
 
 function mergeStatus(local, remote) {
   const remoteSent = remote?.serverId || (!remote?.pending && !remote?.sendFailed && remote?.id)
-  const localPending = local?.pending || local?.sendFailed || local?.status === 'pending' || local?.status === 'failed'
+  const localPending = local?.pending || local?.sendFailed
+    || local?.status === 'pending' || local?.status === 'failed' || local?.status === 'sending'
   if (remoteSent) {
     return {
       pending: false,
@@ -64,7 +65,8 @@ export function mergeMessagesByClientId(localRows = [], remoteRows = []) {
 /** Keep outbox-only rows that are not yet on the server. */
 export function mergeServerWithOutboxPending(serverRows = [], previousRows = []) {
   const pending = (previousRows || []).filter((m) => (
-    m?.pending || m?.sendFailed || m?.status === 'pending' || m?.status === 'failed'
+    m?.pending || m?.sendFailed
+    || m?.status === 'pending' || m?.status === 'failed' || m?.status === 'sending'
   ))
   if (!pending.length) return serverRows
   const serverKeys = new Set(
@@ -96,7 +98,8 @@ function rowIsInFlight(message) {
     message?.pending
     || message?.sendFailed
     || message?.status === 'pending'
-    || message?.status === 'failed',
+    || message?.status === 'failed'
+    || message?.status === 'sending',
   )
 }
 

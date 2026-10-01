@@ -202,14 +202,21 @@ export function deliverChatOutbox(clientId, serverId) {
 }
 
 function serverHasOutboxDelivery(message, clientId, serverId = '') {
-  if (!message || message.pending || message.sendFailed) return false
+  const target = String(clientId || '').trim()
+  if (!target || !message || message.pending || message.sendFailed) return false
+
+  const outboxEntry = listChatOutbox().find((row) => String(row?.clientId || '') === target)
+  const sid = String(serverId || message?.serverId || outboxEntry?.serverId || '').trim()
+  if (outboxEntry && !sid) return false
+
   const id = String(message?.id || '').trim()
   const cid = String(message?.clientId || '').trim()
-  const target = String(clientId || '').trim()
-  const sid = String(serverId || '').trim()
-  if (!target) return false
-  if (id === target || cid === target) return true
-  if (sid && (id === sid || cid === sid)) return true
+  if (sid && sid !== target && (id === sid || cid === sid)) return true
+  if (sid && sid === target) {
+    const confirmedSid = String(message?.serverId || outboxEntry?.serverId || '').trim()
+    if (confirmedSid === sid) return true
+  }
+  if ((cid === target || id === target) && !outboxEntry) return true
   return false
 }
 
@@ -321,7 +328,7 @@ export function resolveRetryableOutboxEntry({
       })
     : null
   if (stateMatch) {
-    if (serverHasOutboxDelivery(stateMatch, targetId, stateMatch.serverId || stateMatch.id)) {
+    if (serverHasOutboxDelivery(stateMatch, targetId, stateMatch.serverId)) {
       removeChatOutbox(targetId)
     }
     return stateMatch
@@ -344,12 +351,16 @@ export function resolveRetryableOutboxEntry({
 export function outboxEntryToLocalMessage(entry) {
   if (!entry?.clientId) return null
   const sender = entry.sender === 'hana' ? 'hana' : 'guest'
+  const hasServer = Boolean(String(entry.serverId || '').trim())
+  const failed = String(entry?.status || '') === 'failed'
   return {
     id: entry.clientId,
     clientId: entry.clientId,
+    clientMessageId: entry.clientId,
     serverId: entry.serverId || undefined,
-    pending: !entry.serverId,
-    sendFailed: false,
+    pending: !hasServer && !failed,
+    sendFailed: failed,
+    status: hasServer ? 'sent' : (failed ? 'failed' : 'sending'),
     role: sender,
     sender,
     text: entry.text,

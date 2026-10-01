@@ -50,7 +50,7 @@ import {
     humanChatThreadIdForUserKey,
     normalizeConversationId
 } from './chat/chatIdentity.js'
-import { mergeChatMessageLists, preferMessageRow } from './chat/chatMerge.js'
+import { preferMessageRow } from './chat/chatMerge.js'
 import {
     applyPokeWorldAction,
     applyPokeWorldAdopt,
@@ -1881,6 +1881,14 @@ function serializeChatThread(id, data) {
     unreadCountGuest: Math.max(0, Number(data?.unreadCountGuest) || 0),
     hanaLastReadAt: data?.hanaLastReadAt?.toDate?.()?.toISOString?.() || data?.hanaLastReadAtIso || null,
     guestLastReadAt: data?.guestLastReadAt?.toDate?.()?.toISOString?.() || data?.guestLastReadAtIso || null,
+    hanaLastReadAtIso: data?.hanaLastReadAtIso || null,
+    guestLastReadAtIso: data?.guestLastReadAtIso || null,
+    hanaLastReadMessageId: data?.hanaLastReadMessageId || null,
+    guestLastReadMessageId: data?.guestLastReadMessageId || null,
+    hanaLastDeliveredMessageId: data?.hanaLastDeliveredMessageId || null,
+    guestLastDeliveredMessageId: data?.guestLastDeliveredMessageId || null,
+    hanaLastDeliveredAtIso: data?.hanaLastDeliveredAtIso || null,
+    guestLastDeliveredAtIso: data?.guestLastDeliveredAtIso || null,
     guestOnlineAt: data?.guestOnlineAt?.toDate?.()?.toISOString?.() || data?.guestOnlineAtIso || null,
     hanaOnlineAt: data?.hanaOnlineAt?.toDate?.()?.toISOString?.() || data?.hanaOnlineAtIso || null,
     guestTypingAt: data?.guestTypingAt?.toDate?.()?.toISOString?.() || data?.guestTypingAtIso || null,
@@ -3229,38 +3237,41 @@ export function formatChatTimestamp(iso) {
 export function getMessageDeliveryStatus(message, thread, viewer) {
   if (!message || (viewer !== 'guest' && viewer !== 'hana')) return null
   if (message.sender !== viewer) return null
+  if (message.sendFailed || message.status === 'failed') return 'failed'
+  if (message.pending || message.status === 'pending' || message.status === 'sending') return 'sending'
+
   const createdIso = message.createdAtIso || message.createdAt
-  if (!createdIso) return 'sent'
-  const createdMs = Date.parse(createdIso) || 0
-  const msgId = String(message.id || message.clientId || '')
+  const createdMs = Date.parse(String(createdIso || '')) || 0
+  const msgId = String(message.id || message.clientId || message.clientMessageId || '').trim()
 
   const partnerReadId = viewer === 'guest' ? thread?.hanaLastReadMessageId : thread?.guestLastReadMessageId
   const partnerReadIso = viewer === 'guest'
     ? (thread?.hanaLastReadAtIso || thread?.hanaLastReadAt)
     : (thread?.guestLastReadAtIso || thread?.guestLastReadAt)
+  // *LastDelivered* = partner ack for messages sent by that side (guest ack → hanaLastDelivered).
   const partnerDeliveredId = viewer === 'guest'
-    ? thread?.hanaLastDeliveredMessageId
-    : thread?.guestLastDeliveredMessageId
+    ? thread?.guestLastDeliveredMessageId
+    : thread?.hanaLastDeliveredMessageId
   const partnerDeliveredIso = viewer === 'guest'
-    ? thread?.hanaLastDeliveredAtIso
-    : thread?.guestLastDeliveredAtIso
+    ? thread?.guestLastDeliveredAtIso
+    : thread?.hanaLastDeliveredAtIso
 
-  const unreadFlag = viewer === 'guest' ? thread?.unreadByHana : thread?.unreadByGuest
-  if (unreadFlag === false) return 'read'
+  const deliveredById = Boolean(partnerDeliveredId && msgId && partnerDeliveredId === msgId)
+  const deliveredByTime = Boolean(
+    partnerDeliveredIso
+    && createdMs
+    && (Date.parse(String(partnerDeliveredIso)) || 0) >= createdMs,
+  )
+  const isDelivered = deliveredById || deliveredByTime
 
-  if (partnerReadId && msgId && partnerReadId === msgId) return 'read'
-  if (partnerReadIso && createdMs) {
-    const readMs = Date.parse(partnerReadIso) || 0
-    if (!Number.isNaN(readMs) && readMs + 120_000 >= createdMs) return 'read'
-  }
-
-  if (partnerDeliveredId && msgId && partnerDeliveredId === msgId) return 'delivered'
-  if (partnerDeliveredIso && createdMs) {
-    const delMs = Date.parse(partnerDeliveredIso) || 0
-    if (!Number.isNaN(delMs) && delMs + 120_000 >= createdMs) return 'delivered'
-  }
-
-  if (unreadFlag !== false) return 'sent'
+  const readById = Boolean(partnerReadId && msgId && partnerReadId === msgId)
+  const readByTime = Boolean(
+    partnerReadIso
+    && createdMs
+    && (Date.parse(String(partnerReadIso)) || 0) >= createdMs,
+  )
+  if ((readById || readByTime) && isDelivered) return 'read'
+  if (isDelivered) return 'delivered'
   return 'sent'
 }
 
