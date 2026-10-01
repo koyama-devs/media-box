@@ -814,11 +814,14 @@ export default function HanaChat({
   /** Phone width: bottom half sticker dock (not the floating popover). */
   const stickerDockMode = narrowScreen
   const stickerDockOpenRef = useRef(false)
+  /** True when sticker or voice tray is open — half-screen dock layout, not plain IME. */
+  const stickerTrayActiveRef = useRef(false)
   /** Freeze dock chrome after first open so keyboard overlay never resizes layout. */
   const lockedDockChromeRef = useRef(0)
   /** Icon blur must not close dock — only 完了 / outside tap should. */
   const skipDockCloseOnNextBlurRef = useRef(false)
-  stickerDockOpenRef.current = Boolean(stickerOpen && stickerDockMode)
+  stickerTrayActiveRef.current = Boolean(stickerDockMode && stickerOpen)
+  stickerDockOpenRef.current = stickerTrayActiveRef.current
   const retainComposerFocusRef = useRef(false)
   const migrationCheckedRef = useRef(new Set())
   const seenEffectRef = useRef(new Set())
@@ -2867,8 +2870,8 @@ export default function HanaChat({
      * than the screen (composer buried below the fold).
      */
     const applyVisualKeyboardPin = () => {
-      // Sticker dock wins — never pin-to-keyboard over an open dock.
-      if (stickerDockOpenRef.current) {
+      // Sticker/voice tray wins — never pin-to-keyboard over an open dock.
+      if (stickerTrayActiveRef.current) {
         applyStickerDock()
         return
       }
@@ -2959,34 +2962,22 @@ export default function HanaChat({
         keyboardLatched = false
       }
       // Sticker dock owns the bottom half — never keep IME latch fighting it.
-      if (stickerDockOpenRef.current) keyboardLatched = false
+      if (stickerTrayActiveRef.current) keyboardLatched = false
       const keyboardOpen = keyboardLatched
 
-      if (!stickerDockOpenRef.current && !inputFocused && !keyboardOpen) {
+      if (!stickerTrayActiveRef.current && !inputFocused && !keyboardOpen) {
         baselineLayoutRef.current = Math.max(baselineLayoutRef.current || 0, inner)
-      } else if (vvInset > 0 && inputFocused && !stickerDockOpenRef.current) {
+      } else if (vvInset > 0 && inputFocused && !stickerTrayActiveRef.current) {
         const fullH = Math.max(baselineLayoutRef.current || 0, inner + Math.round(vvInset))
         if (fullH > (baselineLayoutRef.current || 0)) baselineLayoutRef.current = fullH
       }
 
-      if (stickerDockOpenRef.current) {
-        applyStickerDock()
-        return
-      }
-
-      // Mobile dock mode: while the composer is focused, keep the fixed
-      // dock geometry. On Android the keyboard opens progressively — if we
-      // switch to the dock layout mid-animation, the full-height panel
-      // pushes the input out of viewport and the browser blurs it
-      // (keyboard pops up then immediately drops). Use the visual-keyboard
-      // pin first and let the dock latch only once the keyboard settles.
-      if (stickerDockMode && inputFocused) {
+      if (stickerTrayActiveRef.current) {
         const isAndroid = /android/i.test(navigator.userAgent)
-        if (isAndroid && !keyboardLatched) {
+        if (isAndroid && inputFocused && !keyboardLatched) {
           applyVisualKeyboardPin()
           return
         }
-        stickerDockOpenRef.current = true
         applyStickerDock()
         return
       }
@@ -3004,6 +2995,14 @@ export default function HanaChat({
         if (viewportDebounceRef.current) {
           window.cancelAnimationFrame(viewportDebounceRef.current)
           viewportDebounceRef.current = null
+        }
+        if (
+          options.forceKeyboard
+          && document.activeElement === inputRef.current
+          && !stickerTrayActiveRef.current
+        ) {
+          applyVisualKeyboardPin()
+          return
         }
         applyMobileViewport()
       }
@@ -3494,7 +3493,8 @@ export default function HanaChat({
   const voiceNote = useComposerVoiceNote({
     enabled: open && !hidden && !editingId,
   })
-  stickerDockOpenRef.current = Boolean((stickerOpen || voiceNote.open) && stickerDockMode)
+  stickerTrayActiveRef.current = Boolean(stickerDockMode && (stickerOpen || voiceNote.open))
+  stickerDockOpenRef.current = stickerTrayActiveRef.current
 
   useEffect(() => {
     if (!open) return undefined
@@ -3581,26 +3581,11 @@ export default function HanaChat({
       ? lockedDockChromeRef.current
       : (bottomChromePxRef.current > 0 ? bottomChromePxRef.current : halfScreenDockPx())
     lockedDockChromeRef.current = h
-    // Keep dock fixed; only slide soft keyboard up as an overlay.
-    stickerDockOpenRef.current = true
+    // Keyboard-over-dock while sticker tray stays open; typing-only uses visualViewport pin.
     keyboardPinnedRef.current = false
     flushSync(() => {
-      setStickerOpen(true)
-      setBottomChromePx(h)
       setComposerFocused(true)
     })
-    const panel = panelRef.current
-    if (panel) {
-      // Restore full layout immediately (clears leftover is-keyboard shrink).
-      panel.classList.remove('is-keyboard')
-      panel.style.top = '0px'
-      panel.style.bottom = 'auto'
-      panel.style.height = `${layoutH}px`
-      panel.style.maxHeight = `${layoutH}px`
-      panel.style.minHeight = '0px'
-      panel.style.setProperty('--hana-sticker-dock-h', `${h}px`)
-      panel.style.setProperty('--hana-bottom-chrome-h', `${h}px`)
-    }
     const input = inputRef.current
     if (input) {
       try {
@@ -3609,7 +3594,7 @@ export default function HanaChat({
         input.focus()
       }
     }
-    syncPanelViewportRef.current({ immediate: true, force: true })
+    syncPanelViewportRef.current({ immediate: true, force: true, forceKeyboard: true })
   }, [halfScreenDockPx])
 
   const resetComposerAutoFocusLock = useCallback(() => {
@@ -3994,10 +3979,6 @@ export default function HanaChat({
     // the composer sits under the returning keyboard.
     const relayout = () => {
       if (typeof window !== 'undefined' && window.scrollY) window.scrollTo(0, 0)
-      if (stickerDockMode) {
-        revealComposerKeyboard()
-        return
-      }
       const input = inputRef.current
       if (input) {
         try {
@@ -6508,9 +6489,6 @@ export default function HanaChat({
                 }}
                 onPointerDown={() => {
                   if (voiceNote.open) voiceNote.close()
-                  if (!stickerDockMode) return
-                  if (/android/i.test(navigator.userAgent)) return
-                  revealComposerKeyboard()
                 }}
                 onFocus={(event) => {
                   try {
@@ -6518,14 +6496,11 @@ export default function HanaChat({
                   } catch { /* ignore */ }
                   if (typeof window !== 'undefined' && window.scrollY) window.scrollTo(0, 0)
                   setComposerFocused(true)
-                  if (stickerDockMode) {
-                    if (/android/i.test(navigator.userAgent)) return
-                    if (!stickerDockOpenRef.current) {
-                      revealComposerKeyboard()
-                    }
-                    return
-                  }
-                  syncPanelViewportRef.current({ immediate: true, force: true })
+                  syncPanelViewportRef.current({
+                    immediate: true,
+                    force: true,
+                    forceKeyboard: true,
+                  })
                 }}
                 onBlur={() => {
                   window.setTimeout(() => {
