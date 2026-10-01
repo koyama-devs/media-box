@@ -2,10 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, use
 import { createPortal, flushSync } from 'react-dom'
 import { setAppUnreadBadge } from './appBadge'
 import hanachanArt from './assets/hanachan.svg'
-import {
-  bootstrapConversationRowsAsync,
-  bootstrapConversationRowsSync,
-} from './chat/chatBootstrap.js'
+import { bootstrapConversationRowsSync } from './chat/chatBootstrap.js'
 import { newestMessageId, notifyPartnerMessagesDelivered } from './chat/chatDeliverySync.js'
 import { normalizeConversationId } from './chat/chatIdentity.js'
 import { mergeMessagesByClientId } from './chat/chatMerge.js'
@@ -47,6 +44,7 @@ import {
   nextStickerPendingId,
   runDirectSendWithOutbox,
   saveThreadMessageCache,
+  stageOptimisticOutgoingMessage,
   withChatTimeout
 } from './chatSendPipeline'
 import {
@@ -1123,10 +1121,36 @@ export default function HanaChat({
     ? ownerActiveGuestKey
     : (guestProfile?.key || guestKey || '')
 
+  const bootstrapRelatedIds = useMemo(() => {
+    if (actingAsOwner) {
+      return [
+        activeThreadId,
+        ownerLiveThreadId,
+        ownerActiveGuestKey ? `guest-${ownerActiveGuestKey}` : '',
+        resolveCanonicalChatThreadIdSync(ownerLiveThreadId, ownerActiveGuestKey),
+      ].filter(Boolean)
+    }
+    return [
+      guestChatId,
+      guestProfile?.key ? `guest-${guestProfile.key}` : '',
+      resolveCanonicalChatThreadIdSync(guestLiveThreadId, guestProfile?.key || guestKey || ''),
+    ].filter(Boolean)
+  }, [
+    actingAsOwner,
+    activeThreadId,
+    ownerLiveThreadId,
+    ownerActiveGuestKey,
+    guestChatId,
+    guestProfile?.key,
+    guestKey,
+    guestLiveThreadId,
+  ])
+
   useConversationBootstrap({
     enabled: !hidden && Boolean(activeLiveConversationId),
     conversationId: activeLiveConversationId,
     guestUserId: activeLiveGuestUserId,
+    relatedIds: bootstrapRelatedIds,
     memoryCache: messageCacheRef.current,
     onRows: (rows) => {
       if (!rows.length || !activeLiveConversationId) return
@@ -1135,36 +1159,6 @@ export default function HanaChat({
     },
     onHydrated: () => setMessagesHydrated(true),
   })
-
-  useEffect(() => {
-    if (!open || actingAsOwner || !guestOnHuman || !guestLiveThreadId) return undefined
-    let cancelled = false
-    const relatedIds = [
-      guestChatId,
-      guestProfile?.key ? `guest-${guestProfile.key}` : '',
-    ].filter(Boolean)
-    void bootstrapConversationRowsAsync({
-      conversationId: guestLiveThreadId,
-      relatedIds,
-      memoryCache: messageCacheRef.current,
-      guestUserId: guestProfile?.key || guestKey || '',
-    }).then((rows) => {
-      if (cancelled || !rows.length) return
-      stashThreadMessagesInCache(guestLiveThreadId, rows)
-      setHanaMessages((prev) => mergeMessagesByClientId(prev, rows))
-      setMessagesHydrated(true)
-    })
-    return () => { cancelled = true }
-  }, [
-    open,
-    actingAsOwner,
-    guestOnHuman,
-    guestLiveThreadId,
-    guestChatId,
-    guestProfile?.key,
-    guestKey,
-    stashThreadMessagesInCache,
-  ])
 
   const typingGuestKeyRef = useRef('')
   typingGuestKeyRef.current = actingAsOwner
@@ -2272,10 +2266,20 @@ export default function HanaChat({
 
   const activeThreadMeta = useMemo(() => {
     if (actingAsOwner) {
-      return threads.find((thread) => thread.id === activeThreadId) || null
+      const needle = String(activeThreadId || '').trim()
+      const fsId = resolveCanonicalChatThreadIdSync(needle, ownerActiveGuestKey)
+      return threads.find((thread) => thread.id === needle)
+        || (fsId ? threads.find((thread) => thread.id === fsId) : null)
+        || (ownerActiveGuestKey
+          ? threads.find((thread) => (
+            thread.guestKey === ownerActiveGuestKey
+            || thread.id === `guest-${ownerActiveGuestKey}`
+          ))
+          : null)
+        || null
     }
     return ownThread
-  }, [actingAsOwner, threads, activeThreadId, ownThread])
+  }, [actingAsOwner, threads, activeThreadId, ownThread, ownerActiveGuestKey])
 
   // Mark read while chat is open+visible. Must re-run when new partner messages
   // arrive — otherwise 既読 sticks at the first open and never advances.
@@ -5024,24 +5028,17 @@ export default function HanaChat({
               sender: pendingReply.sender || pendingReply.role,
             }
           : null
-        setHanaMessages((prev) => [
-          ...prev,
-          {
-            id: pendingId,
-            clientId: pendingId,
-            pending: false,
-            sendFailed: false,
-            uploading: false,
-            role: 'hana',
+        const optimisticRow = stageOptimisticOutgoingMessage(
+          effectiveThreadId,
+          buildOptimisticMessage({
+            pendingId,
             sender: 'hana',
             text: sendText,
-            rawText: sendText,
-            createdAt: nowIso,
             createdAtIso: nowIso,
-            ...localMedia,
-            replyTo: replySnapshot,
-          },
-        ])
+            extra: { ...localMedia, replyTo: replySnapshot },
+          }),
+        )
+        setHanaMessages((prev) => mergeMessagesByClientId(prev, [optimisticRow]))
         scrollToLatestRef.current()
         upsertChatOutbox({
           clientId: pendingId,
@@ -5134,27 +5131,17 @@ export default function HanaChat({
               sender: pendingReply.sender || pendingReply.role,
             }
           : null
-        const optimisticRow = {
-          id: pendingId,
-          clientId: pendingId,
-          pending: false,
-          sendFailed: false,
-          uploading: false,
-          role: 'guest',
-          sender: 'guest',
-          text: sendText,
-          rawText: sendText,
-          createdAt: nowIso,
-          createdAtIso: nowIso,
-          ...localMedia,
-          replyTo: replySnapshot,
-        }
-        setHanaMessages((prev) => {
-          const next = [...prev, optimisticRow]
-          const cacheId = normalizeConversationId(threadId) || threadId
-          if (cacheId) saveThreadMessageCache(cacheId, next)
-          return next
-        })
+        const optimisticRow = stageOptimisticOutgoingMessage(
+          threadId,
+          buildOptimisticMessage({
+            pendingId,
+            sender: 'guest',
+            text: sendText,
+            createdAtIso: nowIso,
+            extra: { ...localMedia, replyTo: replySnapshot },
+          }),
+        )
+        setHanaMessages((prev) => mergeMessagesByClientId(prev, [optimisticRow]))
         scrollToLatestRef.current()
         setChannel('human')
         upsertChatOutbox({

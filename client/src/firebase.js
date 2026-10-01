@@ -3995,12 +3995,13 @@ export async function consolidateGuestThreads({
 
 /** Guest: watch own thread metadata (unread badge). */
 export function subscribeOwnChatThread(threadId, onData, onError) {
-  if (!threadId) {
+  const fsThreadId = resolveCanonicalChatThreadIdSync(threadId)
+  if (!fsThreadId) {
     onData?.(null)
     return () => {}
   }
   return onSnapshot(
-    doc(db, CHAT_THREADS_COLLECTION, threadId),
+    doc(db, CHAT_THREADS_COLLECTION, fsThreadId),
     (snap) => {
       if (!snap.exists()) {
         onData?.(null)

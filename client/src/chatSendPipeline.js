@@ -4,7 +4,7 @@
  */
 
 import { normalizeConversationId } from './chat/chatIdentity.js'
-import { mergeChatMessageLists, mergeServerWithOutboxPending } from './chat/chatMerge.js'
+import { mergeChatMessageLists, mergeMessagesByClientId, mergeServerWithOutboxPending } from './chat/chatMerge.js'
 import { newClientMessageId } from './chat/clientMessageId.js'
 import { ensureChatStorageReady } from './chat/chatStorageInit.js'
 import { isTestChatMessageText } from './chat/testMessageText.js'
@@ -250,8 +250,10 @@ export function buildOptimisticMessage({
     id: pendingId,
     clientId: pendingId,
     clientMessageId: pendingId,
-    pending: false,
+    pending: true,
     sendFailed: false,
+    status: 'pending',
+    uploading: false,
     role,
     sender: role,
     text,
@@ -260,6 +262,16 @@ export function buildOptimisticMessage({
     createdAtIso,
     ...extra,
   }
+}
+
+/** Local-first send: persist to memory/IndexedDB queue, then paint bubble immediately. */
+export function stageOptimisticOutgoingMessage(conversationId, message) {
+  const cacheId = normalizeConversationId(conversationId) || String(conversationId || '').trim()
+  if (!cacheId || !message) return message
+  const prev = loadThreadMessagesSync(cacheId)
+  const merged = mergeMessagesByClientId(prev, [message])
+  saveThreadMessageCache(cacheId, merged)
+  return message
 }
 
 /**

@@ -47,6 +47,7 @@ export function useConversationBootstrap({
       if (cancelled) return
       const localMerged = mergeMessagesByClientId(syncRows, asyncRows)
       if (localMerged.length) onRowsRef.current?.(localMerged, { phase: 'idb' })
+      if (!cancelled) onHydratedRef.current?.()
       const serverMerged = await syncConversationMessagesFromServer({
         conversationId: logicalId,
         guestUserId,
@@ -55,7 +56,6 @@ export function useConversationBootstrap({
       if (!cancelled && serverMerged.length) {
         onRowsRef.current?.(serverMerged, { phase: 'server' })
       }
-      if (!cancelled) onHydratedRef.current?.()
     })
     return () => { cancelled = true }
   }, [enabled, conversationId, guestUserId, relatedKey])
