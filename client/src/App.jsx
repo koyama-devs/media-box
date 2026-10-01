@@ -4,6 +4,7 @@ import './App.css'
 import hanachanArt from './assets/hanachan.svg'
 import { AVATAR_PRESETS, getAvatarPresetSrc } from './avatarPresets'
 import { clearBookBookmark, getAllBookBookmarks, getBookBookmark } from './bookProgress'
+import { ensureChatStorageReady } from './chat/chatStorageInit.js'
 import ChatAvatar from './ChatAvatar'
 import {
     CHAT_CLOSE_EVENT,
@@ -391,6 +392,10 @@ function SpinnerIcon() {
 }
 
 function App() {
+  useEffect(() => {
+    void ensureChatStorageReady()
+  }, [])
+
   const [isLoggedIn, setIsLoggedIn] = useState(() => {
     try {
       if (window.localStorage.getItem(AUTH_KEY) !== 'true') return false

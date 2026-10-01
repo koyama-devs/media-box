@@ -14,13 +14,26 @@ import OwnerMessageAssist, {
 } from './OwnerMessageAssist'
 import hanachanArt from './assets/hanachan.svg'
 import { getAvatarPresetSrc } from './avatarPresets'
+import { mergeMessagesByClientId } from './chat/chatMerge.js'
+import { newestMessageId, notifyPartnerMessagesDelivered } from './chat/chatDeliverySync.js'
+import { startChatOutboxWorker } from './chat/chatOutboxWorker.js'
+import { createOutboxSendJob } from './chat/chatSender.js'
+import { ensureChatStorageReady } from './chat/chatStorageInit.js'
+import { useConversationBootstrap } from './chat/useConversationBootstrap.js'
 import {
     addChatReminder,
     remindAtFromChoice,
 } from './chatExtras'
 import { renderChatTextWithLinks } from './chatLinkify'
-import { purgeTestChatDeliveryForThread } from './chatOutbox'
-import { saveThreadMessageCache } from './chatSendPipeline'
+import {
+    listChatOutboxDue,
+    listChatOutboxForThread,
+    purgeTestChatDeliveryForThread
+} from './chatOutbox'
+import {
+    applyChatMessageSnapshot,
+    saveThreadMessageCache,
+} from './chatSendPipeline'
 import { readDefaultReaction } from './chatSettings'
 import {
     ACCOUNT_IDLE_DAYS_NEVER,
@@ -38,11 +51,15 @@ import {
     formatChatTimestamp,
     getChatMessageAttachment,
     getFirebaseErrorMessage,
+    getGuestProfile,
     getMessageDeliveryStatus,
+    humanChatThreadIdForUserKey,
+    humanUserKeyFromChatThreadId,
     isProtectedOwnerAccount,
     isTestChatMessageText,
     listGuestProfiles,
     listOwnerProfiles,
+    markThreadDelivered,
     markThreadRead,
     messageEditWindowMsFromMinutes,
     normalizeAccountIdleDays,
@@ -119,6 +136,10 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
   const [chatProfiles, setChatProfiles] = useState({})
   const [translations, setTranslations] = useState({})
   const [ownerAssist, setOwnerAssist] = useState({})
+  const adminSendInFlightRef = useRef(new Map())
+  const adminMessageCacheRef = useRef(new Map())
+  const adminRetrySendRef = useRef(async () => {})
+  const adminDeliveredSeenRef = useRef(new Map())
   const [ownerAssistEnabled, setOwnerAssistEnabled] = useState(true)
   const [remindMessage, setRemindMessage] = useState(null)
   const [previewImage, setPreviewImage] = useState(null)
@@ -189,21 +210,20 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
   }, [])
 
   useEffect(() => {
-    if (!activeId) return undefined
-    const beat = () => {
-      pulseChatPresence(activeId, 'hana').catch(() => {})
-    }
-    beat()
-    const timer = window.setInterval(beat, 20_000)
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') beat()
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisibility)
-    }
-  }, [activeId])
+    void ensureChatStorageReady()
+  }, [])
+
+  useEffect(() => {
+    return startChatOutboxWorker({
+      flush: () => {
+        for (const entry of listChatOutboxDue()) {
+          const id = String(entry?.clientId || '')
+          if (!id || adminSendInFlightRef.current.has(id)) continue
+          void adminRetrySendRef.current(id)
+        }
+      },
+    })
+  }, [])
 
   const messagesScrollKey = useMemo(() => {
     const last = messages[messages.length - 1]
@@ -610,10 +630,16 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
     return threads.filter((t) => !knownIds.has(t.id) && !knownKeys.has(t.guestKey))
   }, [threads, guestRoster])
 
-  const activeThread = useMemo(
-    () => threads.find((t) => t.id === activeId) || null,
-    [threads, activeId],
-  )
+  const activeThread = useMemo(() => {
+    if (!activeId) return null
+    const direct = threads.find((t) => t.id === activeId)
+    if (direct) return direct
+    const key = humanUserKeyFromChatThreadId(activeId)
+    if (key) {
+      return threads.find((t) => String(t.guestKey || '').trim().toLowerCase() === key) || null
+    }
+    return null
+  }, [threads, activeId])
 
   const activeGuestName = useMemo(() => {
     if (!activeId) return ''
@@ -621,31 +647,91 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
     return known?.displayName || activeThread?.guestLabel || 'ゲスト'
   }, [activeId, activeThread, guestRoster])
 
+  /** Login user id (gabusan, zen, …) — the only chat identity, like LINE. */
   const activeGuestKey = useMemo(() => {
-    if (!activeId) return ''
-    const known = guestRoster.find((entry) => entry.threadId === activeId)?.profile
-    if (known) return known.key
+    const fromRoster = guestRoster.find((entry) => entry.threadId === activeId)?.profile?.key
+    if (fromRoster) return fromRoster
+    const fromThreadId = humanUserKeyFromChatThreadId(activeId)
+    if (fromThreadId) return fromThreadId
     return String(activeThread?.guestKey || '').trim().toLowerCase()
   }, [activeId, activeThread, guestRoster])
 
+  const humanThreadId = humanChatThreadIdForUserKey(activeGuestKey)
+
+  useConversationBootstrap({
+    enabled: Boolean(humanThreadId),
+    conversationId: humanThreadId,
+    guestUserId: activeGuestKey,
+    memoryCache: adminMessageCacheRef.current,
+    onRows: (rows) => {
+      if (!rows.length || !humanThreadId) return
+      adminMessageCacheRef.current.set(humanThreadId, rows)
+      saveThreadMessageCache(humanThreadId, rows)
+      setMessages((prev) => mergeMessagesByClientId(prev, rows))
+    },
+  })
+
   useEffect(() => {
-    if (!activeId) {
+    if (!activeId || String(activeId).startsWith('guest-')) return
+    const legacy = threads.find((t) => t.id === activeId)
+    const key = String(legacy?.guestKey || '').trim().toLowerCase()
+    if (key) setActiveId(`guest-${key}`)
+  }, [activeId, threads])
+
+  useEffect(() => {
+    if (!humanThreadId) {
       setMessages([])
       return undefined
     }
     const guestKey = activeGuestKey
     const unsub = subscribeChatMessages(
-      activeId,
+      humanThreadId,
       (next) => {
-        setMessages(next)
-        markThreadRead(activeId, 'hana', guestKey).catch(() => {})
+        setMessages((prev) => {
+          const merged = applyChatMessageSnapshot({
+            serverRows: next,
+            previous: prev,
+            threadId: humanThreadId,
+            guestKey,
+          })
+          adminMessageCacheRef.current.set(humanThreadId, merged)
+          return merged
+        })
+        notifyPartnerMessagesDelivered({
+          threadId: humanThreadId,
+          viewer: 'hana',
+          guestKey,
+          rows: next,
+          deliveredSeenRef: adminDeliveredSeenRef,
+          markDelivered: markThreadDelivered,
+        })
+        markThreadRead(humanThreadId, 'hana', guestKey, {
+          lastMessageId: newestMessageId(next),
+        }).catch(() => {})
       },
       (err) => setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。'),
       guestKey,
     )
-    markThreadRead(activeId, 'hana', guestKey).catch(() => {})
+    markThreadRead(humanThreadId, 'hana', guestKey).catch(() => {})
     return unsub
-  }, [activeId, activeGuestKey])
+  }, [humanThreadId, activeGuestKey])
+
+  useEffect(() => {
+    if (!humanThreadId) return undefined
+    const beat = () => {
+      pulseChatPresence(humanThreadId, 'hana').catch(() => {})
+    }
+    beat()
+    const timer = window.setInterval(beat, 20_000)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') beat()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [humanThreadId])
 
   messagesRef.current = messages
 
@@ -894,10 +980,10 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
   }
 
   const handleDelete = async (message) => {
-    if (!canMutateMessage(message) || message.deleted || !activeId) return
+    if (!canMutateMessage(message) || message.deleted || !humanThreadId) return
     if (!window.confirm('このメッセージを削除しますか？')) return
     try {
-      await deleteChatMessage({ threadId: activeId, messageId: message.id })
+      await deleteChatMessage({ threadId: humanThreadId, messageId: message.id })
       if (editingId === message.id) {
         setEditingId(null)
         setDraft('')
@@ -908,10 +994,10 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
   }
 
   const handleReact = async (message, emoji, options = {}) => {
-    if (!activeId || message?.deleted || !emoji || !message?.id) return
+    if (!humanThreadId || message?.deleted || !emoji || !message?.id) return
     try {
       await toggleChatReaction({
-        threadId: activeId,
+        threadId: humanThreadId,
         messageId: message.serverId || message.id,
         emoji,
         reactorId: OWNER_PROFILE.key,
@@ -926,12 +1012,12 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
     if (!message || message.deleted) return false
 
     if (actionId === 'pin') {
-      if (!activeId) {
+      if (!humanThreadId) {
         setStatusNote('スレッドを選んでください')
         return true
       }
       void toggleThreadChatPin({
-        threadId: activeId,
+        threadId: humanThreadId,
         message,
         pinnedBy: OWNER_PROFILE.key,
       })
@@ -978,13 +1064,13 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
       setRemindMessage(null)
       return
     }
-    addChatReminder(OWNER_PROFILE.key, remindMessage, remindAt, { threadId: activeId || '' })
+    addChatReminder(OWNER_PROFILE.key, remindMessage, remindAt, { threadId: humanThreadId || '' })
     setRemindMessage(null)
     setStatusNote('リマインダーをセットしました')
   }
 
   const handleClearActiveThread = async () => {
-    if (!activeId || clearBusy) return
+    if (!humanThreadId || clearBusy) return
     const ok = window.confirm(
       `「${activeGuestName}」とのチャット履歴をすべて削除しますか？\nこの操作は取り消せません。`,
     )
@@ -993,7 +1079,7 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
     setError('')
     setStatusNote('')
     try {
-      await clearChatThreadHistory(activeId, { deleteThread: false })
+      await clearChatThreadHistory(humanThreadId, { deleteThread: false })
       setMessages([])
       clearComposerExtras()
       setStatusNote(`${activeGuestName}の履歴を削除しました。`)
@@ -1040,7 +1126,7 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
   }
 
   const handlePurgeActiveTestMessages = async () => {
-    if (!activeId || clearBusy) return
+    if (!humanThreadId || clearBusy) return
     const ok = window.confirm(
       `「${activeGuestName}」とのスレッドから test / T1 形式のテストメッセージだけを削除しますか？`,
     )
@@ -1049,9 +1135,9 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
     setError('')
     setStatusNote('')
     try {
-      const guestKey = activeThread?.guestKey || String(activeId).replace(/^guest-/, '')
-      const result = await purgeTestChatMessagesInThread(activeId, guestKey)
-      const clearedThreadId = result.threadId || activeId
+      const guestKey = activeGuestKey || activeThread?.guestKey || humanUserKeyFromChatThreadId(humanThreadId)
+      const result = await purgeTestChatMessagesInThread(humanThreadId, guestKey)
+      const clearedThreadId = result.threadId || humanThreadId
       if (result.deleted) saveThreadMessageCache(clearedThreadId, [])
       purgeTestChatDeliveryForThread(clearedThreadId, guestKey, isTestChatMessageText)
       const sampleNote = result.samples?.length ? ` (${result.samples.slice(0, 5).join(', ')})` : ''
@@ -1116,6 +1202,44 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
     }
   }
 
+  const adminRetryFailedSend = useCallback(async (clientId) => {
+    const id = String(clientId || '').trim()
+    if (!id || !humanThreadId || !activeGuestKey) return
+    const row = listChatOutboxForThread(humanThreadId, activeGuestKey)
+      .find((entry) => String(entry?.clientId || '') === id)
+    if (!row) return
+    try {
+      await createOutboxSendJob({
+        conversationId: humanThreadId,
+        text: row.text,
+        sender: 'hana',
+        guestUserId: activeGuestKey,
+        guestLabel: activeGuestName,
+        clientId: id,
+        createdAtIso: row.createdAtIso,
+        replyTo: row.replyTo,
+        inFlightMap: adminSendInFlightRef.current,
+        runSend: () => sendChatMessage({
+          threadId: humanThreadId,
+          text: String(row.text || '').trim(),
+          sender: 'hana',
+          guestKey: activeGuestKey,
+          guestLabel: activeGuestName,
+          clientId: id,
+          replyTo: row.replyTo,
+          createdAtIso: row.createdAtIso,
+          sticker: row.sticker || undefined,
+          effect: row.effect || undefined,
+          effectEmoji: row.effectEmoji || undefined,
+        }),
+      })
+    } catch (err) {
+      setError(getFirebaseErrorMessage(err) || '送信に失敗しました。')
+    }
+  }, [humanThreadId, activeGuestKey, activeGuestName])
+
+  adminRetrySendRef.current = adminRetryFailedSend
+
   const handleSend = async (event) => {
     event.preventDefault()
     const text = draft.trim()
@@ -1127,14 +1251,31 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
     setDraft('')
     clearComposerExtras()
     try {
+      if (!humanThreadId || !activeGuestKey) {
+        setError('ゲストを選んでください。')
+        return
+      }
       if (pendingEditId) {
-        await updateChatMessage({ threadId: activeId, messageId: pendingEditId, text })
+        await updateChatMessage({ threadId: humanThreadId, messageId: pendingEditId, text })
       } else {
-        await sendChatMessage({
-          threadId: activeId,
+        await createOutboxSendJob({
+          conversationId: humanThreadId,
           text,
           sender: 'hana',
+          guestUserId: activeGuestKey,
+          guestLabel: activeGuestName,
           replyTo: pendingReply,
+          inFlightMap: adminSendInFlightRef.current,
+          runSend: ({ clientId, createdAtIso }) => sendChatMessage({
+            threadId: humanThreadId,
+            text,
+            sender: 'hana',
+            guestKey: activeGuestKey,
+            guestLabel: activeGuestName,
+            clientId,
+            replyTo: pendingReply,
+            createdAtIso,
+          }),
         })
       }
     } catch (err) {
@@ -1726,8 +1867,23 @@ export default function AdminHanaInbox({ section = 'users', onUnreadChange, onOp
                   type="button"
                   className={`admin-chat-thread${activeId === thread.id ? ' is-active' : ''}${thread.unreadByHana ? ' is-unread' : ''}`}
                   onClick={() => {
+                    const key = String(thread.guestKey || '').trim().toLowerCase()
+                    if (!key) {
+                      setError('古いスレッド（ユーザーIDなし）です。上のゲスト一覧から開いてください。')
+                      return
+                    }
+                    const profile = getGuestProfile(key)
+                    if (profile) {
+                      handleOpenGuest(profile)
+                      return
+                    }
                     clearComposerExtras()
-                    setActiveId(thread.id)
+                    setActiveId(`guest-${key}`)
+                    void ensureChatThread({
+                      threadId: `guest-${key}`,
+                      guestKey: key,
+                      guestLabel: thread.guestLabel || key,
+                    }).catch(() => {})
                   }}
                 >
                   <strong>{thread.guestLabel}</strong>

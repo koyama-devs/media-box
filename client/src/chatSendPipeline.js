@@ -3,13 +3,20 @@
  * Firestore listener is source of truth; outbox only covers in-flight/failed writes.
  */
 
+import { normalizeConversationId } from './chat/chatIdentity.js'
+import { mergeChatMessageLists, mergeServerWithOutboxPending } from './chat/chatMerge.js'
+import { newClientMessageId } from './chat/clientMessageId.js'
+import { isTestChatMessageText } from './chat/testMessageText.js'
 import {
   deliverChatOutbox,
   reconcileChatDeliveryStorage,
   reconcileChatOutboxWithMessages,
   removeChatOutbox,
+  touchOutboxSendFailed,
+  touchOutboxSending,
 } from './chatOutbox.js'
-import { isTestChatMessageText, mergeChatMessageLists } from './firebase.js'
+import { saveConversationSyncState } from './storage/conversationStore.js'
+import { loadThreadMessagesSync, saveThreadMessagesSync, upsertLocalChatMessage } from './storage/messageStore.js'
 
 function sortMergedMessages(rows = []) {
   return [...rows].sort((a, b) => {
@@ -23,17 +30,12 @@ function sortMergedMessages(rows = []) {
 export const CHAT_SEND_TIMEOUT_MS = 28_000
 export const CHAT_UPLOAD_TIMEOUT_MS = 120_000
 
-const CHAT_LOCAL_CACHE_PREFIX = 'hana-chat-message-cache-v1:'
-
-let chatSendSeq = 0
-
-export function nextChatPendingId(kind = 'msg') {
-  chatSendSeq += 1
-  return `pending-${kind}-${Date.now()}-${chatSendSeq}`
+export function nextChatPendingId() {
+  return newClientMessageId()
 }
 
 export function nextStickerPendingId() {
-  return nextChatPendingId('sticker')
+  return nextChatPendingId()
 }
 
 export function withChatTimeout(promise, ms, message = '送信がタイムアウトしました。') {
@@ -50,73 +52,30 @@ export function withChatTimeout(promise, ms, message = '送信がタイムアウ
   })
 }
 
-function chatLocalCacheKey(threadId) {
-  return `${CHAT_LOCAL_CACHE_PREFIX}${String(threadId || '').trim()}`
-}
-
 /** Offline reopen — last Firestore snapshot only (no pending flags). */
 export function loadThreadMessageCache(threadId) {
-  const id = String(threadId || '').trim()
-  if (!id || typeof window === 'undefined') return []
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(chatLocalCacheKey(id)) || '[]')
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
+  return loadThreadMessagesSync(threadId)
 }
 
 export function saveThreadMessageCache(threadId, messages) {
-  const id = String(threadId || '').trim()
-  if (!id || typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(
-      chatLocalCacheKey(id),
-      JSON.stringify((messages || []).slice(-300)),
-    )
-  } catch {
-    /* Firestore remains source of truth */
-  }
+  if (typeof window === 'undefined') return
+  saveThreadMessagesSync(threadId, messages)
 }
 
 /** Keep in-flight/failed bubbles until Firestore confirms the same clientId/doc id. */
 export function mergeServerMessagesWithPending(server, previous) {
-  const pending = (previous || []).filter((message) => (
-    message?.pending || message?.sendFailed
-  ))
-  if (!pending.length) return server
-  const usedServerIds = new Set()
-  const kept = []
-  for (const item of pending) {
+  const merged = mergeServerWithOutboxPending(server, previous)
+  for (const item of previous || []) {
     const itemClientId = String(item.clientId || item.id || '')
-    const itemServerId = String(item.serverId || '')
-    const pendingTs = Date.parse(item.createdAtIso || item.createdAt || '') || 0
-    const match = server.find((row) => {
-      if (usedServerIds.has(row.id)) return false
-      if (itemServerId && row.id === itemServerId) return true
-      if (itemClientId && row.clientId && row.clientId === itemClientId) return true
-      if (itemServerId || itemClientId) return false
-      if ((row.sender || row.role) !== (item.sender || item.role)) return false
-      if (String(row.text || '') !== String(item.text || '')) return false
-      if (String(row.sticker || '') !== String(item.sticker || '')) return false
-      if (String(row.effect || '') !== String(item.effect || '')) return false
-      if (Boolean(row.imageUrl) !== Boolean(item.imageUrl)) return false
-      if (Boolean(row.fileUrl) !== Boolean(item.fileUrl)) return false
-      if (String(row.fileKind || '') !== String(item.fileKind || '')) return false
-      if (pendingTs) {
-        const rowTs = Date.parse(row.createdAtIso || row.createdAt || '') || 0
-        if (rowTs && Math.abs(rowTs - pendingTs) > 90_000) return false
-      }
-      return true
-    })
-    if (match) {
-      usedServerIds.add(match.id)
-      removeChatOutbox(itemClientId || item.id)
-    } else {
-      kept.push(item)
-    }
+    if (!itemClientId) continue
+    const match = (server || []).find((row) => (
+      row.id === itemClientId
+      || row.clientId === itemClientId
+      || (item.serverId && row.id === item.serverId)
+    ))
+    if (match) removeChatOutbox(itemClientId)
   }
-  return sortMergedMessages(kept.length ? [...server, ...kept] : server)
+  return merged
 }
 
 /**
@@ -152,15 +111,29 @@ export function applyChatMessageSnapshot({
   guestKey = '',
 }) {
   const filtered = (serverRows || []).filter((m) => !deletingIds.has(m.id))
-  const cachedRows = threadId && !(previous || []).length
+  const cachedRows = threadId && !filtered.length && !(previous || []).length
     ? loadThreadMessageCache(threadId)
     : []
-  const withReactions = mergeChatMessageLists(filtered, previous, cachedRows)
-  reconcileChatOutboxWithMessages(withReactions)
+  const merged = filtered.length
+    ? mergeChatMessageLists(mergeServerMessagesWithPending(filtered, previous), previous)
+    : mergeServerMessagesWithPending(
+      mergeChatMessageLists(filtered, previous, cachedRows),
+      previous,
+    )
+  reconcileChatOutboxWithMessages(merged)
   if (threadId) {
-    reconcileChatDeliveryStorage(withReactions, threadId, guestKey, isTestChatMessageText)
+    reconcileChatDeliveryStorage(merged, threadId, guestKey, isTestChatMessageText)
   }
-  return mergeServerMessagesWithPending(withReactions, previous)
+  const cacheId = normalizeConversationId(threadId) || threadId
+  if (cacheId && merged.length) {
+    saveThreadMessageCache(cacheId, merged)
+    const newest = merged[merged.length - 1]
+    void saveConversationSyncState(cacheId, {
+      lastMessageId: String(newest?.id || newest?.clientId || ''),
+      lastSyncedAt: Date.now(),
+    })
+  }
+  return merged
 }
 
 /** @deprecated Use applyChatMessageSnapshot — kept for call sites during migration. */
@@ -275,6 +248,7 @@ export function buildOptimisticMessage({
   return {
     id: pendingId,
     clientId: pendingId,
+    clientMessageId: pendingId,
     pending: false,
     sendFailed: false,
     role,
@@ -285,4 +259,49 @@ export function buildOptimisticMessage({
     createdAtIso,
     ...extra,
   }
+}
+
+/**
+ * Direct Firestore send with silent outbox: persist first, clear outbox on success,
+ * leave outbox for background retry if the write fails or the app closes mid-flight.
+ */
+export function runDirectSendWithOutbox({
+  upsertChatOutbox,
+  deliverChatOutbox: deliverOutbox,
+  outboxEntry,
+  runSend,
+  inFlightMap,
+}) {
+  upsertChatOutbox(outboxEntry)
+  const clientId = String(outboxEntry?.clientId || '').trim()
+  const conversationId = normalizeConversationId(outboxEntry?.threadId) || String(outboxEntry?.threadId || '').trim()
+  if (conversationId && clientId) {
+    void upsertLocalChatMessage(conversationId, {
+      id: clientId,
+      clientId,
+      clientMessageId: clientId,
+      text: outboxEntry.text,
+      sender: outboxEntry.sender,
+      role: outboxEntry.sender,
+      status: 'pending',
+      pending: true,
+      createdAtIso: outboxEntry.createdAtIso || new Date().toISOString(),
+    })
+  }
+  if (clientId) touchOutboxSending(clientId)
+  const writePromise = Promise.resolve().then(runSend)
+  if (inFlightMap && clientId) inFlightMap.set(clientId, writePromise)
+  return writePromise
+    .then((serverId) => {
+      const sid = typeof serverId === 'string' ? serverId : String(serverId?.serverId || '').trim()
+      if (sid && clientId) deliverOutbox(clientId, sid)
+      return sid
+    })
+    .catch((err) => {
+      if (clientId) touchOutboxSendFailed(clientId)
+      throw err
+    })
+    .finally(() => {
+      if (inFlightMap && clientId) inFlightMap.delete(clientId)
+    })
 }

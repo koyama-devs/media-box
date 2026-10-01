@@ -1,61 +1,54 @@
-/** Persist unsent chat text/stickers so reload can recover (no File blobs). */
+/** Persistent outbox queue — reliable delivery (LINE-style). */
 
-const OUTBOX_KEY = 'hana-chat-outbox-v1'
-const ARCHIVE_KEY = 'hana-chat-archive-v1'
-const OUTBOX_MAX = 40
-const ARCHIVE_MAX = 1000
-
-function normalizeGuestKey(value) {
-  const key = String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '')
-  if (key === 'gabu' || key === 'gabriel') return 'gabusan'
-  return key
-}
+import {
+    conversationIdForGuestUser,
+    guestUserIdFromConversationId,
+    normalizeConversationId,
+} from './chat/chatIdentity.js'
+import { isOutboxEntryDue, markOutboxFailed, markOutboxPending, markOutboxSending } from './chat/chatOutboxWorker.js'
+import {
+    listArchiveEntriesSync,
+    listOutboxEntriesSync,
+    persistArchiveEntriesSync,
+    persistOutboxEntriesSync,
+} from './storage/outboxStore.js'
 
 function canonicalizeOutboxThreadId(threadId = '', guestKey = '') {
   const raw = String(threadId || '').trim()
-  const key = normalizeGuestKey(guestKey)
-  if (key) return `guest-${key}`
-  const match = raw.match(/^guest-([a-z0-9_-]+)$/i)
-  if (match) return `guest-${normalizeGuestKey(match[1])}`
+  const fromGuestKey = conversationIdForGuestUser(guestKey)
+  if (fromGuestKey) return fromGuestKey
+  const fromThread = guestUserIdFromConversationId(raw)
+  if (fromThread) return conversationIdForGuestUser(fromThread)
   return raw
 }
 
-function safeParse(raw) {
-  try {
-    const data = JSON.parse(raw)
-    return Array.isArray(data) ? data : []
-  } catch {
-    return []
-  }
-}
-
-export function listChatOutbox() {
-  if (typeof window === 'undefined') return []
-  try {
-    return safeParse(window.localStorage.getItem(OUTBOX_KEY))
-  } catch {
-    return []
-  }
+function persistOutboxRows(rows) {
+  if (typeof window === 'undefined') return
+  persistOutboxEntriesSync(rows)
 }
 
 function listChatArchive() {
   if (typeof window === 'undefined') return []
-  try {
-    return safeParse(window.localStorage.getItem(ARCHIVE_KEY))
-  } catch {
-    return []
-  }
+  return listArchiveEntriesSync()
+}
+
+export function listChatOutbox() {
+  if (typeof window === 'undefined') return []
+  return listOutboxEntriesSync()
 }
 
 export function listChatOutboxForThread(threadId, guestKey = '') {
   const tid = String(threadId || '').trim()
   const target = canonicalizeOutboxThreadId(tid, guestKey)
+  const targetNorm = normalizeConversationId(target || tid)
   if (!tid && !target) return []
   return listChatOutbox().filter((entry) => {
     const storedThread = String(entry?.threadId || '').trim()
     const storedGuestKey = String(entry?.guestKey || '').trim()
     const storedCanonical = canonicalizeOutboxThreadId(storedThread, storedGuestKey)
+    const storedNorm = normalizeConversationId(storedCanonical || storedThread)
     if (!storedCanonical && !storedThread) return false
+    if (targetNorm && storedNorm && storedNorm === targetNorm) return true
     return storedCanonical === target || storedThread === tid || storedThread === target
   })
 }
@@ -80,7 +73,7 @@ export function upsertChatOutbox(entry) {
   if (!clientId || !resolvedThreadId || !hasPayload) return
   try {
     const next = listChatOutbox().filter((row) => String(row?.clientId || '') !== clientId)
-    next.push({
+    next.push(markOutboxPending({
       clientId,
       threadId: resolvedThreadId,
       serverId: String(entry.serverId || '').slice(0, 128),
@@ -106,8 +99,8 @@ export function upsertChatOutbox(entry) {
           }
         : null,
       createdAtIso: String(entry.createdAtIso || new Date().toISOString()),
-    })
-    window.localStorage.setItem(OUTBOX_KEY, JSON.stringify(next.slice(-OUTBOX_MAX)))
+    }))
+    persistOutboxRows(next)
   } catch {
     /* quota / private mode */
   }
@@ -123,10 +116,46 @@ export function removeChatOutbox(clientId) {
     if (removed) {
       const archive = listChatArchive().filter((row) => String(row?.clientId || '') !== id)
       archive.push({ ...removed, serverId: removed.serverId || '' })
-      window.localStorage.setItem(ARCHIVE_KEY, JSON.stringify(archive.slice(-ARCHIVE_MAX)))
+      persistArchiveEntriesSync(archive)
     }
     const next = rows.filter((row) => String(row?.clientId || '') !== id)
-    window.localStorage.setItem(OUTBOX_KEY, JSON.stringify(next))
+    persistOutboxRows(next)
+  } catch {
+    /* ignore */
+  }
+}
+
+export function listChatOutboxDue(nowMs = Date.now()) {
+  return listChatOutbox().filter((entry) => {
+    const status = String(entry?.status || 'pending')
+    if (status === 'sent') return false
+    return isOutboxEntryDue(entry, nowMs)
+  })
+}
+
+export function touchOutboxSending(clientId) {
+  if (typeof window === 'undefined') return
+  const id = String(clientId || '').trim()
+  if (!id) return
+  try {
+    const next = listChatOutbox().map((row) => (
+      String(row?.clientId || '') === id ? markOutboxSending(row) : row
+    ))
+    persistOutboxRows(next)
+  } catch {
+    /* ignore */
+  }
+}
+
+export function touchOutboxSendFailed(clientId) {
+  if (typeof window === 'undefined') return
+  const id = String(clientId || '').trim()
+  if (!id) return
+  try {
+    const next = listChatOutbox().map((row) => (
+      String(row?.clientId || '') === id ? markOutboxFailed(row) : row
+    ))
+    persistOutboxRows(next)
   } catch {
     /* ignore */
   }
@@ -161,7 +190,7 @@ export function markChatOutboxSent(clientId, serverId) {
         ? { ...row, serverId: sid, sentAtIso: new Date().toISOString() }
         : row
     ))
-    window.localStorage.setItem(OUTBOX_KEY, JSON.stringify(next))
+    persistOutboxRows(next)
   } catch {
     /* ignore */
   }
@@ -202,9 +231,9 @@ export function purgeChatDeliveryEntry(clientId) {
   if (!id || typeof window === 'undefined') return
   try {
     const outbox = listChatOutbox().filter((row) => String(row?.clientId || '') !== id)
-    window.localStorage.setItem(OUTBOX_KEY, JSON.stringify(outbox))
+    persistOutboxRows(outbox)
     const archive = listChatArchive().filter((row) => String(row?.clientId || '') !== id)
-    window.localStorage.setItem(ARCHIVE_KEY, JSON.stringify(archive))
+    persistArchiveEntriesSync(archive)
   } catch {
     /* ignore */
   }

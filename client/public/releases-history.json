@@ -1,6 +1,15 @@
 {
-  "updatedAt": "2026-09-30T06:11:15.841Z",
+  "updatedAt": "2026-10-01T02:31:20.166Z",
   "releases": [
+    {
+      "version": "muox3w98-yah7of",
+      "notes": "LINE-style chat: Dexie hana-chat-v2, outbox retry, hana_{guest} conversation ids, merge by clientMessageId, delivery/read cursors, E2E green.",
+      "builtAt": "2026-10-01T02:31:20.005Z",
+      "previousVersion": null,
+      "previousHostingVersionId": null,
+      "hostingVersionId": null,
+      "recordedAt": "2026-10-01T02:31:20.164Z"
+    },
     {
       "version": "munpivv2-obn6ms",
       "notes": "fix guest-side delay for Hana typing and messages: canonical thread listeners, no resubscribe on channel switch",
@@ -351,15 +360,6 @@
       "previousHostingVersionId": "a6e8729928d66e1f",
       "hostingVersionId": "95e9b7ab9b881e05",
       "recordedAt": "2026-09-20T15:01:52.878Z"
-    },
-    {
-      "version": "mu9xg36g-hu1gnj",
-      "notes": "チャット送信整合性修正：ローカルに出た未送信バブルは outbox から復元したときも「送信中」扱いにし、サーバー確認前は未送信状態を維持。再送は pending/failed の両方で動作し、再読込後もメッセージが消えないように修正。",
-      "builtAt": "2026-09-20T14:44:17.972Z",
-      "previousVersion": "mu9x0nwl-9ico85",
-      "previousHostingVersionId": "b90a828dab60f508",
-      "hostingVersionId": "a6e8729928d66e1f",
-      "recordedAt": "2026-09-20T14:44:18.338Z"
     }
   ]
 }

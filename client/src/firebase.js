@@ -43,7 +43,13 @@ import {
     uploadBytes,
     uploadBytesResumable,
 } from 'firebase/storage'
-import { collectAccessLogPayload } from './accessLog'
+import { collectAccessLogPayload } from './accessLog.js'
+import {
+    conversationIdForGuestUser,
+    firestoreThreadId,
+    humanChatThreadIdForUserKey,
+    normalizeConversationId
+} from './chat/chatIdentity.js'
 import {
     applyPokeWorldAction,
     applyPokeWorldAdopt,
@@ -62,7 +68,15 @@ import {
     tokyoZukanYmd,
     worldDuoCared,
     worldRole
-} from './pokeZukan'
+} from './pokeZukan.js'
+
+export {
+    conversationIdForGuestUser,
+    firestoreThreadId,
+    humanChatThreadIdForUserKey,
+    humanUserKeyFromChatThreadId,
+    normalizeConversationId
+} from './chat/chatIdentity.js'
 
 const firebaseConfig = {
   apiKey: 'AIzaSyBrzxY4sc2BC_5y1ymax08DkHbVoEKDo-8',
@@ -1559,35 +1573,15 @@ export function subscribeToAuthUser(onChange) {
  */
 export function ensureGuestChatId(guestKey = 'guest') {
   const profile = getGuestProfile(guestKey)
-  if (profile) {
-    const id = `guest-${profile.key}`
-    try {
-      localStorage.setItem(`${GUEST_CHAT_ID_KEY}:${profile.key}`, id)
-      localStorage.setItem(ACTIVE_GUEST_KEY_STORAGE, profile.key)
-    } catch {
-      /* ignore */
-    }
-    return id
-  }
-
-  const storageKey = `${GUEST_CHAT_ID_KEY}:${guestKey || 'guest'}`
+  const key = normalizeAccountKey(profile?.key || guestKey || 'guest')
+  const id = humanChatThreadIdForUserKey(key)
   try {
-    const existing = localStorage.getItem(storageKey) || localStorage.getItem(GUEST_CHAT_ID_KEY)
-    if (existing && /^[a-zA-Z0-9_-]{8,128}$/.test(existing)) {
-      localStorage.setItem(storageKey, existing)
-      return existing
-    }
-    const id = globalThis.crypto?.randomUUID?.()
-      || `g-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
-    localStorage.setItem(storageKey, id)
-    return id
+    localStorage.setItem(`${GUEST_CHAT_ID_KEY}:${key}`, id)
+    if (profile?.key) localStorage.setItem(ACTIVE_GUEST_KEY_STORAGE, profile.key)
   } catch {
-    if (!ensureGuestChatId._fallback) {
-      ensureGuestChatId._fallback = globalThis.crypto?.randomUUID?.()
-        || `g-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
-    }
-    return ensureGuestChatId._fallback
+    /* ignore */
   }
+  return id
 }
 
 export function guestLabelFromUid(uid) {
@@ -1815,6 +1809,7 @@ function serializeChatMessage(id, data) {
       : (data?.createdAt?.toDate?.()?.toISOString?.() || null),
     createdAtIso: data?.createdAtIso ? String(data.createdAtIso) : null,
     clientId: data?.clientId ? String(data.clientId).slice(0, 64) : null,
+    clientMessageId: data?.clientId ? String(data.clientId).slice(0, 64) : null,
     editedAt: data?.editedAt?.toDate?.()?.toISOString?.() || data?.editedAtIso || null,
     deleted,
     reactions: normalizeChatReactions(data?.reactions),
@@ -3083,8 +3078,9 @@ export async function stampPokeFoil(threadId, speciesId) {
  * Ephemeral typing heartbeat. It deliberately does not touch `updatedAt`, so
  * typing never reorders the inbox or changes unread-message state.
  */
-export async function setChatTyping(threadId, role, typing = true) {
-  if (!threadId || (role !== 'guest' && role !== 'hana')) return
+export async function setChatTyping(threadId, role, typing = true, guestKey = '') {
+  const fsThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
+  if (!fsThreadId || (role !== 'guest' && role !== 'hana')) return
   const nowIso = new Date().toISOString()
   const patch = role === 'hana'
     ? {
@@ -3095,7 +3091,7 @@ export async function setChatTyping(threadId, role, typing = true) {
         guestTypingAt: typing ? serverTimestamp() : null,
         guestTypingAtIso: typing ? nowIso : null,
       }
-  await setDoc(doc(db, CHAT_THREADS_COLLECTION, threadId), patch, { merge: true })
+  await setDoc(doc(db, CHAT_THREADS_COLLECTION, fsThreadId), patch, { merge: true })
 }
 
 /**
@@ -3198,69 +3194,56 @@ export function formatChatTimestamp(iso) {
  * @param {{ sender: string, createdAt?: string|null }} message
  * @param {{ hanaLastReadAt?: string|null, guestLastReadAt?: string|null }|null} thread
  * @param {'guest'|'hana'} viewer
- * @returns {'sent'|'read'|null}
+ * @returns {'sent'|'delivered'|'read'|null}
  */
 export function getMessageDeliveryStatus(message, thread, viewer) {
   if (!message || (viewer !== 'guest' && viewer !== 'hana')) return null
   if (message.sender !== viewer) return null
-  if (!message.createdAt) return 'sent'
-  const readAt = viewer === 'guest' ? thread?.hanaLastReadAt : thread?.guestLastReadAt
+  const createdIso = message.createdAtIso || message.createdAt
+  if (!createdIso) return 'sent'
+  const createdMs = Date.parse(createdIso) || 0
+  const msgId = String(message.id || message.clientId || '')
+
+  const partnerReadId = viewer === 'guest' ? thread?.hanaLastReadMessageId : thread?.guestLastReadMessageId
+  const partnerReadIso = viewer === 'guest'
+    ? (thread?.hanaLastReadAtIso || thread?.hanaLastReadAt)
+    : (thread?.guestLastReadAtIso || thread?.guestLastReadAt)
+  const partnerDeliveredId = viewer === 'guest'
+    ? thread?.hanaLastDeliveredMessageId
+    : thread?.guestLastDeliveredMessageId
+  const partnerDeliveredIso = viewer === 'guest'
+    ? thread?.hanaLastDeliveredAtIso
+    : thread?.guestLastDeliveredAtIso
+
   const unreadFlag = viewer === 'guest' ? thread?.unreadByHana : thread?.unreadByGuest
-  // Partner cleared unread for this thread → treat own bubbles as read.
-  // (Avoids cross-device clock skew making lastReadAt look "before" the message.)
   if (unreadFlag === false) return 'read'
-  // Never infer read from a stale timestamp while the current unread flag is
-  // true or has not hydrated yet. The conservative state is still sent.
-  if (unreadFlag !== false) return 'sent'
-  if (readAt) {
-    const readMs = new Date(readAt).getTime()
-    const createdMs = new Date(message.createdAt).getTime()
-    // Generous skew: phones/laptops often differ by more than a couple seconds.
-    if (!Number.isNaN(readMs) && !Number.isNaN(createdMs) && readMs + 120_000 >= createdMs) {
-      return 'read'
-    }
+
+  if (partnerReadId && msgId && partnerReadId === msgId) return 'read'
+  if (partnerReadIso && createdMs) {
+    const readMs = Date.parse(partnerReadIso) || 0
+    if (!Number.isNaN(readMs) && readMs + 120_000 >= createdMs) return 'read'
   }
+
+  if (partnerDeliveredId && msgId && partnerDeliveredId === msgId) return 'delivered'
+  if (partnerDeliveredIso && createdMs) {
+    const delMs = Date.parse(partnerDeliveredIso) || 0
+    if (!Number.isNaN(delMs) && delMs + 120_000 >= createdMs) return 'delivered'
+  }
+
+  if (unreadFlag !== false) return 'sent'
   return 'sent'
 }
 
 export function deliveryStatusLabel(status) {
   if (status === 'read') return '既読'
+  if (status === 'delivered') return '配信済'
   if (status === 'sent') return '送信済'
   if (status === 'sending') return '送信中'
   if (status === 'failed') return '未送信'
   return ''
 }
 
-function reactionRowScore(message) {
-  let score = 0
-  for (const counts of Object.values(message?.reactions || {})) {
-    score += reactionTotal(counts)
-  }
-  return score
-}
-
-function preferMessageRow(existing, candidate) {
-  if (!existing) return candidate
-  if (!candidate) return existing
-  const scoreA = reactionRowScore(existing)
-  const scoreB = reactionRowScore(candidate)
-  if (scoreB !== scoreA) return scoreB > scoreA ? candidate : existing
-  const existingTime = Date.parse(existing.createdAtIso || existing.createdAt || '') || 0
-  const messageTime = Date.parse(candidate.createdAtIso || candidate.createdAt || '') || 0
-  return messageTime >= existingTime ? candidate : existing
-}
-
-/** Union message lists — keep the row with richer reactions (flower fill after reopen). */
-export function mergeChatMessageLists(...lists) {
-  const byId = new Map()
-  for (const list of lists) {
-    for (const row of list || []) {
-      if (!row?.id) continue
-      byId.set(row.id, preferMessageRow(byId.get(row.id), row))
-    }
-  }
-  return sortChatMessages([...byId.values()])
-}
+export { mergeChatMessageLists } from './chat/chatMerge.js'
 
 function rowsFromMessageSnap(snap) {
   const byClientId = new Map()
@@ -3286,18 +3269,12 @@ function mergeLiveMessageRows(isoRows, legacyRows) {
   return sortChatMessages([...byId.values()]).slice(-CHAT_MESSAGE_LIVE_LIMIT)
 }
 
-/** Sync resolve when guestKey or guest-{key} is already known (live subscribe). */
+/** Firestore `chatThreads` document id for reads/writes. */
 export function resolveCanonicalChatThreadIdSync(threadId = '', guestKey = '') {
-  const rawId = String(threadId || '').trim()
-  let key = normalizeAccountKey(guestKey)
-  if (!key && rawId) {
-    const canonicalMatch = rawId.match(/^guest-([a-z0-9_-]+)$/i)
-    if (canonicalMatch) key = normalizeAccountKey(canonicalMatch[1])
-  }
-  if (key) return `guest-${key}`
-  if (rawId && rawId.startsWith('guest-')) return rawId
-  if (rawId && !/^guest-/i.test(rawId)) return ''
-  return rawId
+  const logical = normalizeConversationId(threadId)
+    || conversationIdForGuestUser(guestKey)
+  if (!logical) return ''
+  return firestoreThreadId(logical)
 }
 
 /**
@@ -3309,26 +3286,20 @@ export async function resolveCanonicalChatThreadId(threadId = '', guestKey = '')
   const sync = resolveCanonicalChatThreadIdSync(threadId, guestKey)
   if (sync) return sync
   const rawId = String(threadId || '').trim()
+  if (!rawId || rawId.startsWith('guest-')) return sync
   let key = normalizeAccountKey(guestKey)
-  if (!key && rawId) {
+  if (!key) {
     try {
       const snap = await getDoc(doc(db, CHAT_THREADS_COLLECTION, rawId))
       if (snap.exists()) {
         const data = snap.data() || {}
         key = normalizeAccountKey(data.guestKey || '')
-        if (!key) {
-          const label = String(data.guestLabel || '').trim()
-          const profile = getGuestProfile(label)
-          if (profile?.key) key = normalizeAccountKey(profile.key)
-        }
       }
     } catch {
-      /* Keep the supplied id when metadata cannot be read. */
+      /* ignore */
     }
   }
-  if (key) return `guest-${key}`
-  if (rawId && rawId.startsWith('guest-')) return rawId
-  return rawId
+  return humanChatThreadIdForUserKey(key)
 }
 
 /** Live chat bubbles stay at newest 300 — do not raise this for media/search. */
@@ -3381,35 +3352,12 @@ function attachChatMessageListeners(activeThreadId, onData, onError) {
 }
 
 export function subscribeChatMessages(threadId, onData, onError, guestKey = '') {
-  if (!threadId) {
+  const activeThreadId = resolveCanonicalChatThreadIdSync(threadId, guestKey)
+  if (!activeThreadId) {
     onData?.([])
     return () => {}
   }
-  const syncThreadId = resolveCanonicalChatThreadIdSync(threadId, guestKey)
-  if (syncThreadId) {
-    return attachChatMessageListeners(syncThreadId, onData, onError)
-  }
-
-  let stopped = false
-  let unsub = () => {}
-
-  void (async () => {
-    let activeThreadId = ''
-    try {
-      activeThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
-    } catch (error) {
-      if (!stopped) onError?.(error)
-      return
-    }
-    if (stopped || !activeThreadId) return
-    unsub = attachChatMessageListeners(activeThreadId, onData, onError)
-    if (stopped) unsub()
-  })()
-
-  return () => {
-    stopped = true
-    unsub()
-  }
+  return attachChatMessageListeners(activeThreadId, onData, onError)
 }
 
 export async function fetchChatMessages(threadId, guestKey = '') {
@@ -4294,10 +4242,15 @@ export async function sendChatMessage({
   }
 
   const role = sender === 'hana' ? 'hana' : 'guest'
-  const canonicalThreadId =
-    resolveCanonicalChatThreadIdSync(threadId, guestKey)
-    || (await resolveCanonicalChatThreadId(threadId, guestKey))
-  if (!canonicalThreadId) return null
+  let canonicalThreadId = resolveCanonicalChatThreadIdSync(threadId, guestKey)
+  if (!canonicalThreadId) {
+    canonicalThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
+  }
+  if (!canonicalThreadId) {
+    const error = new Error('送信先のユーザー（guestKey）が未確定です。')
+    error.code = 'chat/invalid-thread'
+    throw error
+  }
   const threadRef = doc(db, CHAT_THREADS_COLLECTION, canonicalThreadId)
   const messagesRef = collection(threadRef, 'messages')
   const nowIso = String(createdAtIso || '').trim() || new Date().toISOString()
@@ -4376,6 +4329,12 @@ export async function sendChatMessage({
   // A stable document id makes retries idempotent. Repeating the same clientId
   // updates one message instead of creating duplicate visible bubbles.
   const messageRef = safeClientId ? doc(messagesRef, safeClientId) : doc(messagesRef)
+  if (safeClientId) {
+    const existingSnap = await getDoc(messageRef)
+    if (existingSnap.exists()) {
+      return messageRef.id
+    }
+  }
   const batch = writeBatch(db)
   batch.set(messageRef, payload)
   batch.set(
@@ -4546,23 +4505,48 @@ export async function toggleChatReaction(args) {
   return reactToChatMessage({ ...args, mode: args?.mode || 'toggle' })
 }
 
-export async function markThreadRead(threadId, reader, guestKey = '') {
+export async function markThreadRead(threadId, reader, guestKey = '', options = {}) {
   threadId = await resolveCanonicalChatThreadId(threadId, guestKey)
   if (!threadId) return
   const nowIso = new Date().toISOString()
+  const lastMessageId = String(options.lastMessageId || '').trim().slice(0, 128)
   const patch = reader === 'hana'
     ? {
         unreadByHana: false,
         unreadCountHana: 0,
         hanaLastReadAt: serverTimestamp(),
         hanaLastReadAtIso: nowIso,
+        ...(lastMessageId ? { hanaLastReadMessageId: lastMessageId } : {}),
       }
     : {
         unreadByGuest: false,
         unreadCountGuest: 0,
         guestLastReadAt: serverTimestamp(),
         guestLastReadAtIso: nowIso,
+        ...(lastMessageId ? { guestLastReadMessageId: lastMessageId } : {}),
       }
+  await setDoc(doc(db, CHAT_THREADS_COLLECTION, threadId), patch, { merge: true })
+}
+
+/** Partner device synced messages — update delivered cursor (no per-message writes). */
+export async function markThreadDelivered(threadId, viewer, guestKey = '', options = {}) {
+  threadId = await resolveCanonicalChatThreadId(threadId, guestKey)
+  if (!threadId) return
+  const lastMessageId = String(options.lastMessageId || '').trim().slice(0, 128)
+  const lastIso = String(options.lastMessageIso || '').trim() || new Date().toISOString()
+  if (!lastMessageId) return
+  const patch = viewer === 'hana'
+    ? {
+        guestLastDeliveredMessageId: lastMessageId,
+        guestLastDeliveredAtIso: lastIso,
+      }
+    : viewer === 'guest'
+      ? {
+          hanaLastDeliveredMessageId: lastMessageId,
+          hanaLastDeliveredAtIso: lastIso,
+        }
+      : null
+  if (!patch) return
   await setDoc(doc(db, CHAT_THREADS_COLLECTION, threadId), patch, { merge: true })
 }
 
@@ -4591,34 +4575,9 @@ async function deleteAllDocsInCollection(collectionRef) {
   }
 }
 
-/** Fold fullwidth ASCII + case for Test1 / T1 / TESTx style junk (not normal sentences). */
-function normalizeAsciiTestMessageKey(text) {
-  let s = String(text || '').trim()
-  if (!s) return ''
-  try {
-    s = s.normalize('NFKC')
-  } catch {
-    /* ignore */
-  }
-  return s.replace(/[\uFF01-\uFF5E]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0)).toLowerCase()
-}
+import { isTestChatMessageText } from './chat/testMessageText.js'
 
-/** Dev/test junk only (Test1, Testx, T1, test11, テスト, …) — not normal sentences. */
-export function isTestChatMessageText(text) {
-  const raw = String(text || '').trim()
-  if (!raw || raw.length > 48) return false
-  if (/^テスト\d*$/u.test(raw)) return true
-  const t = normalizeAsciiTestMessageKey(raw)
-  if (!t) return false
-  if (t === 'test') return true
-  if (/^test\d+$/.test(t)) return true
-  if (/^testx\d*$/.test(t)) return true
-  if (/^test[_-]?\d+$/.test(t)) return true
-  if (/^test[a-z]\d*$/.test(t) && t.length <= 12) return true
-  if (/^t\d+$/.test(t)) return true
-  if (/^tx\d*$/.test(t) && t.length <= 8) return true
-  return false
-}
+export { isTestChatMessageText }
 
 function chatMessageBodyForPurgeTest(data) {
   const text = String(data?.text || '').trim()

@@ -2,6 +2,12 @@ import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, use
 import { createPortal, flushSync } from 'react-dom'
 import { setAppUnreadBadge } from './appBadge'
 import hanachanArt from './assets/hanachan.svg'
+import { bootstrapConversationRowsSync } from './chat/chatBootstrap.js'
+import { newestMessageId, notifyPartnerMessagesDelivered } from './chat/chatDeliverySync.js'
+import { mergeMessagesByClientId } from './chat/chatMerge.js'
+import { startChatOutboxWorker } from './chat/chatOutboxWorker.js'
+import { ensureChatStorageReady } from './chat/chatStorageInit.js'
+import { useConversationBootstrap } from './chat/useConversationBootstrap.js'
 import ChatAvatar from './ChatAvatar'
 import { CHAT_CARD_SHARE_EVENT, CHAT_CLOSE_EVENT } from './chatCardShare'
 import {
@@ -18,7 +24,16 @@ import ChatImageLightbox from './ChatImageLightbox'
 import { collectMessageSearchHits, normalizeMessageSearchQuery } from './chatMessageSearch'
 import ChatNatsuFireworks from './ChatNatsuFireworks'
 import { playChatNotifySound, unlockChatNotifySound } from './chatNotifySound'
-import { listChatOutboxForThread } from './chatOutbox'
+import {
+  deliverChatOutbox,
+  listChatOutboxDue,
+  listChatOutboxForThread,
+  listChatRecoveryForThread,
+  outboxEntryToLocalMessage,
+  purgeChatDeliveryEntry,
+  resolveRetryableOutboxEntry,
+  upsertChatOutbox,
+} from './chatOutbox'
 import ChatPokeZukan, { PokeZukanChip } from './ChatPokeZukan'
 import {
   applyChatMessageSnapshot,
@@ -26,6 +41,7 @@ import {
   CHAT_UPLOAD_TIMEOUT_MS,
   nextChatPendingId,
   nextStickerPendingId,
+  runDirectSendWithOutbox,
   saveThreadMessageCache,
   withChatTimeout
 } from './chatSendPipeline'
@@ -68,8 +84,12 @@ import {
   getFirebaseErrorMessage,
   getGuestProfile,
   getMessageDeliveryStatus,
+  humanChatThreadIdForUserKey,
+  humanUserKeyFromChatThreadId,
   isChatAudioAttachment,
+  isTestChatMessageText,
   listGuestProfiles,
+  markThreadDelivered,
   markThreadRead,
   mergeChatMessageLists,
   messageEditWindowMsFromMinutes,
@@ -874,6 +894,7 @@ export default function HanaChat({
   const deletingIdsRef = useRef(new Set())
   /** In-flight sendChatMessage promises keyed by clientId (survives UI timeout). */
   const sendInFlightRef = useRef(new Map())
+  const deliveredSeenRef = useRef(new Map())
   const retryFailedSendRef = useRef(async () => {})
   /** Never leave composer icons dimmed if a send hangs. */
   const busyWatchdogRef = useRef(0)
@@ -910,26 +931,19 @@ export default function HanaChat({
     saveThreadMessageCache(id, merged)
   }, [])
 
-  const showThreadMessages = useCallback((threadId, relatedIds = []) => {
+  const showThreadMessages = useCallback((threadId, relatedIds = [], guestUserId = '') => {
     if (!threadId) {
       setHanaMessages([])
       return
     }
-    const ids = [threadId, ...relatedIds].filter(Boolean)
-    for (const id of ids) {
-      const cached = messageCacheRef.current.get(id)
-      if (Array.isArray(cached) && cached.length > 0) {
-        stashThreadMessagesInCache(threadId, cached)
-        setHanaMessages(messageCacheRef.current.get(threadId) || cached)
-        return
-      }
-    }
-    const cached = messageCacheRef.current.get(threadId)
-    if (Array.isArray(cached) && cached.length > 0) {
-      setHanaMessages(cached)
-      return
-    }
-    setHanaMessages([])
+    const rows = bootstrapConversationRowsSync({
+      conversationId: threadId,
+      relatedIds,
+      memoryCache: messageCacheRef.current,
+      guestUserId,
+    })
+    stashThreadMessagesInCache(threadId, rows)
+    setHanaMessages(rows)
   }, [stashThreadMessagesInCache])
 
   const pinChatListToLatest = useCallback(() => {
@@ -1112,19 +1126,48 @@ export default function HanaChat({
     const fromThread = String(thread?.guestKey || '').trim().toLowerCase()
     if (fromThread) return fromThread
     const known = String(activeThreadId).match(/^guest-([a-z0-9_-]+)$/i)
-    return known ? known[1].toLowerCase() : ''
+    return known ? known[1].toLowerCase() : humanUserKeyFromChatThreadId(activeThreadId)
   }, [actingAsOwner, activeThreadId, threads, ownerGuestRoster])
+
+  useEffect(() => {
+    if (hidden || !actingAsOwner || !activeThreadId) return
+    if (String(activeThreadId).startsWith('guest-')) return
+    const canon = humanChatThreadIdForUserKey(ownerActiveGuestKey)
+    if (canon && canon !== activeThreadId) {
+      showThreadMessages(canon, [activeThreadId, canon].filter(Boolean))
+      setActiveThreadId(canon)
+    }
+  }, [hidden, actingAsOwner, activeThreadId, ownerActiveGuestKey, showThreadMessages])
 
   const guestOnHuman = !actingAsOwner && channel === 'human'
   const guestOnHumanRef = useRef(guestOnHuman)
   guestOnHumanRef.current = guestOnHuman
-  /** Same thread id as message subscribe — typing + unread must not watch a legacy UUID. */
+  /** One login user → one thread (`guest-{key}`). Never subscribe/type on legacy UUIDs. */
   const guestLiveThreadId = !actingAsOwner
-    ? (guestProfile?.key ? `guest-${guestProfile.key}` : guestChatId)
+    ? (humanChatThreadIdForUserKey(guestProfile?.key || guestKey)
+      || (String(guestChatId || '').match(/^(guest-|hana_)/) ? guestChatId : ''))
     : ''
   const ownerLiveThreadId = actingAsOwner
-    ? (ownerActiveGuestKey ? `guest-${ownerActiveGuestKey}` : (activeThreadId || ''))
+    ? humanChatThreadIdForUserKey(ownerActiveGuestKey)
     : ''
+  const activeLiveConversationId = actingAsOwner ? ownerLiveThreadId : guestLiveThreadId
+  const activeLiveGuestUserId = actingAsOwner
+    ? ownerActiveGuestKey
+    : (guestProfile?.key || guestKey || '')
+
+  useConversationBootstrap({
+    enabled: !hidden && Boolean(activeLiveConversationId),
+    conversationId: activeLiveConversationId,
+    guestUserId: activeLiveGuestUserId,
+    memoryCache: messageCacheRef.current,
+    onRows: (rows) => {
+      if (!rows.length || !activeLiveConversationId) return
+      stashThreadMessagesInCache(activeLiveConversationId, rows)
+      setHanaMessages((prev) => mergeMessagesByClientId(prev, rows))
+    },
+    onHydrated: () => setMessagesHydrated(true),
+  })
+
   const typingGuestKeyRef = useRef('')
   typingGuestKeyRef.current = actingAsOwner
     ? (ownerActiveGuestKey || '')
@@ -1842,11 +1885,21 @@ export default function HanaChat({
           stashThreadMessagesInCache(liveThreadId, merged)
           return merged
         })
+        notifyPartnerMessagesDelivered({
+          threadId: liveThreadId,
+          viewer: 'guest',
+          guestKey: guestKey || guestProfile?.key || '',
+          rows: filtered,
+          deliveredSeenRef,
+          markDelivered: markThreadDelivered,
+        })
         setMessagesHydrated(true)
         setError('')
         // Advance 既読 on every live snapshot while the guest chat is open.
         if (openRef.current && document.visibilityState === 'visible') {
-          markThreadRead(liveThreadId, 'guest', guestKey).catch(() => {})
+          markThreadRead(liveThreadId, 'guest', guestKey, {
+            lastMessageId: newestMessageId(filtered),
+          }).catch(() => {})
         }
       },
       (err) => setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。'),
@@ -1877,11 +1930,11 @@ export default function HanaChat({
   }, [hidden, actingAsOwner, guestKey, guestChatId, guestThreadLabel])
 
   useEffect(() => {
-    if (hidden || !actingAsOwner || !activeThreadId) {
-      if (actingAsOwner && !activeThreadId) setHanaMessages([])
+    const listenThreadId = ownerLiveThreadId
+    if (hidden || !actingAsOwner || !listenThreadId) {
+      if (actingAsOwner && !listenThreadId) setHanaMessages([])
       return undefined
     }
-    const listenThreadId = ownerLiveThreadId || activeThreadId
     let cancelled = false
     const unsub = subscribeChatMessages(
       listenThreadId,
@@ -1899,9 +1952,19 @@ export default function HanaChat({
           stashThreadMessagesInCache(listenThreadId, merged)
           return merged
         })
+        notifyPartnerMessagesDelivered({
+          threadId: listenThreadId,
+          viewer: 'hana',
+          guestKey: ownerActiveGuestKey || '',
+          rows: filtered,
+          deliveredSeenRef,
+          markDelivered: markThreadDelivered,
+        })
         setMessagesHydrated(true)
         if (openRef.current && document.visibilityState === 'visible') {
-          markThreadRead(listenThreadId, 'hana', ownerActiveGuestKey).catch(() => {})
+          markThreadRead(listenThreadId, 'hana', ownerActiveGuestKey, {
+            lastMessageId: newestMessageId(filtered),
+          }).catch(() => {})
         }
         setError('')
       },
@@ -1928,8 +1991,105 @@ export default function HanaChat({
     return undefined
   }, [hidden, actingAsOwner, ownerActiveGuestKey, activeThreadId, ownerActiveGuestLabel])
 
-  // Human sends go straight to Firestore; listener is source of truth (no outbox replay).
+  // Direct send in UI; outbox only for durability + retry when Firestore write fails.
+  useEffect(() => {
+    if (hidden) return undefined
+    const threadId = actingAsOwner
+      ? (ownerLiveThreadId || activeThreadId)
+      : (guestOnHuman ? guestLiveThreadId : '')
+    if (!threadId) return undefined
+    const recoveryGuestKey = actingAsOwner
+      ? ownerActiveGuestKey
+      : (guestProfile?.key || guestKey || '')
+    const entries = listChatRecoveryForThread(threadId, recoveryGuestKey)
+    if (!entries.length) return undefined
 
+    setHanaMessages((prev) => {
+      const existing = new Set(
+        (prev || []).flatMap((m) => [String(m.id || ''), String(m.clientId || '')]),
+      )
+      const extras = []
+      for (const entry of entries) {
+        const body = String(entry?.text || entry?.sticker || '').trim()
+        if (isTestChatMessageText(body) && !String(entry?.serverId || '').trim()) {
+          purgeChatDeliveryEntry(entry.clientId)
+          continue
+        }
+        if (existing.has(String(entry.clientId || ''))) continue
+        const local = outboxEntryToLocalMessage(entry)
+        if (local) extras.push({ ...local, pending: false, sendFailed: false })
+      }
+      if (!extras.length) return prev
+      return sortChatMessages([...(prev || []), ...extras])
+    })
+
+    const timer = window.setTimeout(() => {
+      for (const entry of entries) {
+        const id = String(entry.clientId || '')
+        if (!id || sendInFlightRef.current.has(id)) continue
+        const body = String(entry?.text || entry?.sticker || '').trim()
+        if (isTestChatMessageText(body) && !String(entry?.serverId || '').trim()) continue
+        void retryFailedSendRef.current(id)
+      }
+    }, 700)
+    return () => window.clearTimeout(timer)
+  }, [
+    hidden,
+    actingAsOwner,
+    activeThreadId,
+    guestChatId,
+    guestKey,
+    guestOnHuman,
+    guestProfile?.key,
+    ownerActiveGuestKey,
+    ownerLiveThreadId,
+    guestLiveThreadId,
+  ])
+
+  useEffect(() => {
+    const onOnline = () => {
+      const threadId = actingAsOwner
+        ? (ownerLiveThreadId || activeThreadId)
+        : (guestOnHuman ? guestLiveThreadId : '')
+      if (!threadId) return
+      const guestKeyForOutbox = actingAsOwner
+        ? ownerActiveGuestKey
+        : (guestProfile?.key || guestKey || '')
+      for (const entry of listChatOutboxForThread(threadId, guestKeyForOutbox)) {
+        const id = String(entry?.clientId || '')
+        if (!id || sendInFlightRef.current.has(id)) continue
+        void retryFailedSendRef.current(id)
+      }
+    }
+    window.addEventListener('online', onOnline)
+    return () => window.removeEventListener('online', onOnline)
+  }, [
+    actingAsOwner,
+    activeThreadId,
+    guestKey,
+    guestOnHuman,
+    guestProfile?.key,
+    ownerActiveGuestKey,
+    ownerLiveThreadId,
+    guestLiveThreadId,
+  ])
+
+  useEffect(() => {
+    void ensureChatStorageReady()
+  }, [])
+
+  useEffect(() => {
+    if (hidden) return undefined
+    return startChatOutboxWorker({
+      flush: () => {
+        for (const entry of listChatOutboxDue()) {
+          const id = String(entry?.clientId || '')
+          if (!id || sendInFlightRef.current.has(id)) continue
+          void retryFailedSendRef.current(id)
+        }
+      },
+    })
+  }, [hidden])
 
   const requestOwnerAssist = useCallback(async (message, { force = false } = {}) => {
     if (!actingAsOwner || !message?.id) return
@@ -2155,6 +2315,7 @@ export default function HanaChat({
           threadId,
           reader,
           actingAsOwner ? ownerActiveGuestKey : guestKey,
+          { lastMessageId: newestMessageId(hanaMessages) },
         ).catch(() => {})
       }
     }
@@ -2179,7 +2340,7 @@ export default function HanaChat({
 
   const sharedThreadPins = useMemo(() => {
     if (!(actingAsOwner || guestOnHuman)) return []
-    const threadId = actingAsOwner ? (ownerLiveThreadId || activeThreadId) : guestLiveThreadId
+    const threadId = actingAsOwner ? ownerLiveThreadId : guestLiveThreadId
     const list = Array.isArray(activeThreadMeta?.pinnedMessages)
       ? activeThreadMeta.pinnedMessages
       : []
@@ -2199,7 +2360,7 @@ export default function HanaChat({
   // Run once per open thread — not on every threads[] presence/typing snapshot.
   useEffect(() => {
     if (!open || !(actingAsOwner || guestOnHuman)) return undefined
-    const threadId = actingAsOwner ? (ownerLiveThreadId || activeThreadId) : guestLiveThreadId
+    const threadId = actingAsOwner ? ownerLiveThreadId : guestLiveThreadId
     if (!threadId) return undefined
     const guestKeyForPins = actingAsOwner
       ? String(ownerActiveGuestKey || '').trim().toLowerCase()
@@ -2478,7 +2639,7 @@ export default function HanaChat({
   useEffect(() => {
     if (hidden) return undefined
     const role = actingAsOwner ? 'hana' : 'guest'
-    const threadId = actingAsOwner ? (ownerLiveThreadId || activeThreadId) : guestLiveThreadId
+    const threadId = actingAsOwner ? ownerLiveThreadId : guestLiveThreadId
     // Guest: presence while using the app. Owner: while inbox is open on a thread.
     if (!threadId) return undefined
     if (actingAsOwner && !open) return undefined
@@ -2497,7 +2658,7 @@ export default function HanaChat({
       window.clearInterval(timer)
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [hidden, open, actingAsOwner, activeThreadId, guestChatId])
+  }, [hidden, open, actingAsOwner, ownerLiveThreadId, guestLiveThreadId])
 
   const partnerPresence = useMemo(() => {
     if (actingAsOwner) {
@@ -2539,7 +2700,7 @@ export default function HanaChat({
   }, [open, myPresenceMode])
 
   const applyMyPresenceStatus = async (mode) => {
-    const threadId = actingAsOwner ? (ownerLiveThreadId || activeThreadId) : guestLiveThreadId
+    const threadId = actingAsOwner ? ownerLiveThreadId : guestLiveThreadId
     const role = actingAsOwner ? 'hana' : 'guest'
     try {
       await setChatProfileStatus(sessionProfile.id, mode)
@@ -4007,7 +4168,7 @@ export default function HanaChat({
     if (!window.confirm('このメッセージを削除しますか？')) return
     setError('')
     const messageId = String(message.serverId || message.id || '').trim()
-    const threadId = actingAsOwner ? (ownerLiveThreadId || activeThreadId) : guestLiveThreadId
+    const threadId = actingAsOwner ? ownerLiveThreadId : guestLiveThreadId
 
     // AI channel: local only.
     if (!actingAsOwner && !guestOnHuman) {
@@ -4130,18 +4291,34 @@ export default function HanaChat({
         handleLocalEffect(burst)
       }
 
-      await sendChatMessage({
-        threadId,
-        text: label,
-        sender: role,
-        sticker: id,
-        clientId: pendingId,
-        createdAtIso: nowIso,
-        ...guestMeta,
+      await runDirectSendWithOutbox({
+        upsertChatOutbox,
+        deliverChatOutbox,
+        outboxEntry: {
+          clientId: pendingId,
+          threadId,
+          text: label,
+          sender: role,
+          sticker: id,
+          createdAtIso: nowIso,
+          ...guestMeta,
+        },
+        inFlightMap: sendInFlightRef.current,
+        runSend: () => sendChatMessage({
+          threadId,
+          text: label,
+          sender: role,
+          sticker: id,
+          clientId: pendingId,
+          createdAtIso: nowIso,
+          ...guestMeta,
+        }),
       })
       if (!actingAsOwner) setChannel('human')
     } catch (err) {
-      setHanaMessages((prev) => prev.filter((m) => m.id !== pendingId))
+      setHanaMessages((prev) => prev.map((m) => (
+        m.id === pendingId ? { ...m, sendFailed: true, pending: false } : m
+      )))
       setError(getFirebaseErrorMessage(err) || 'スタンプを送れませんでした。')
     } finally {
       scrollToLatestRef.current()
@@ -4219,6 +4396,14 @@ export default function HanaChat({
     setOpen(true)
     setError('')
     try {
+      upsertChatOutbox({
+        clientId: pendingId,
+        threadId,
+        text: caption,
+        sender: role,
+        createdAtIso: new Date().toISOString(),
+        ...guestMeta,
+      })
       flushSync(() => {
         setHanaMessages((prev) => [
           ...prev,
@@ -4264,18 +4449,37 @@ export default function HanaChat({
             }
           : m
       )))
-      await sendChatMessage({
-        threadId,
-        text: caption,
-        sender: role,
-        ...(imageUrl ? { imageUrl } : {}),
-        fileKind: uploaded.kind,
-        fileName: uploaded.fileName,
-        fileMime: uploaded.fileMime,
-        fileSize: uploaded.fileSize,
-        clientId: pendingId,
-        createdAtIso: new Date().toISOString(),
-        ...guestMeta,
+      const sentIso = new Date().toISOString()
+      await runDirectSendWithOutbox({
+        upsertChatOutbox,
+        deliverChatOutbox,
+        outboxEntry: {
+          clientId: pendingId,
+          threadId,
+          text: caption,
+          sender: role,
+          imageUrl,
+          fileKind: uploaded.kind,
+          fileName: uploaded.fileName,
+          fileMime: uploaded.fileMime,
+          fileSize: uploaded.fileSize,
+          createdAtIso: sentIso,
+          ...guestMeta,
+        },
+        inFlightMap: sendInFlightRef.current,
+        runSend: () => sendChatMessage({
+          threadId,
+          text: caption,
+          sender: role,
+          ...(imageUrl ? { imageUrl } : {}),
+          fileKind: uploaded.kind,
+          fileName: uploaded.fileName,
+          fileMime: uploaded.fileMime,
+          fileSize: uploaded.fileSize,
+          clientId: pendingId,
+          createdAtIso: sentIso,
+          ...guestMeta,
+        }),
       })
       if (imageUrl) {
         setHanaMessages((prev) => prev.map((m) => (
@@ -4428,19 +4632,33 @@ export default function HanaChat({
       ])
       scrollToLatestRef.current()
 
-      await sendChatMessage({
-        threadId,
-        text: described.text,
-        sender: role,
-        effect: described.effect,
-        effectEmoji: described.effectEmoji,
-        clientId: pendingId,
-        createdAtIso: nowIso,
-        ...guestMeta,
+      await runDirectSendWithOutbox({
+        upsertChatOutbox,
+        deliverChatOutbox,
+        outboxEntry: {
+          clientId: pendingId,
+          threadId,
+          text: described.text,
+          sender: role,
+          effect: described.effect,
+          effectEmoji: described.effectEmoji,
+          createdAtIso: nowIso,
+          ...guestMeta,
+        },
+        inFlightMap: sendInFlightRef.current,
+        runSend: () => sendChatMessage({
+          threadId,
+          text: described.text,
+          sender: role,
+          effect: described.effect,
+          effectEmoji: described.effectEmoji,
+          clientId: pendingId,
+          createdAtIso: nowIso,
+          ...guestMeta,
+        }),
       })
       if (!actingAsOwner) setChannel('human')
     } catch (err) {
-      sendInFlightRef.current.delete(pendingId)
       setHanaMessages((prev) => prev.map((m) => (
         m.id === pendingId
           ? { ...m, pending: false, sendFailed: true }
@@ -4711,7 +4929,121 @@ export default function HanaChat({
     notifyAction('リマインダーをセットしました')
   }
 
-  const retryFailedSend = useCallback(async () => {}, [])
+  const retryFailedSend = useCallback(async (messageId) => {
+    const mid = String(messageId || '').trim()
+    if (!mid) return
+    const guestKeyForSend = actingAsOwner ? ownerActiveGuestKey || '' : (guestProfile?.key || guestKey || '')
+    let threadId = actingAsOwner
+      ? (ownerLiveThreadId || activeThreadId || '')
+      : (guestProfile?.key ? `guest-${guestProfile.key}` : (guestChatId || ensureGuestChatId(guestKey || 'guest')))
+    if (!threadId) return
+
+    resolveRetryableOutboxEntry({
+      threadId,
+      guestKey: guestKeyForSend,
+      clientId: mid,
+      messageId: mid,
+      messages: hanaMessages || [],
+    })
+
+    const outboxRow = listChatOutboxForThread(threadId, guestKeyForSend)
+      .find((row) => String(row?.clientId || '') === mid)
+    if (!outboxRow) return
+
+    const clientId = String(outboxRow.clientId || mid)
+    if (!clientId || sendInFlightRef.current.has(clientId)) return
+
+    const body = String(outboxRow.text || outboxRow.sticker || '').trim()
+    if (isTestChatMessageText(body)) {
+      purgeChatDeliveryEntry(clientId)
+      return
+    }
+
+    threadId = resolveCanonicalChatThreadIdSync(threadId, guestKeyForSend)
+      || (await resolveCanonicalChatThreadId(threadId, guestKeyForSend))
+      || threadId
+
+    const sender = outboxRow.sender === 'hana' ? 'hana' : 'guest'
+    const text = String(outboxRow.text || '').trim()
+    const guestMeta = sender === 'guest'
+      ? {
+          guestLabel: guestThreadLabel,
+          guestKey: guestProfile?.key || guestKey || '',
+        }
+      : {
+          guestLabel: ownerActiveGuestLabel,
+          guestKey: ownerActiveGuestKey || '',
+        }
+
+    const mediaPayload = {
+      ...(outboxRow.imageUrl && !String(outboxRow.imageUrl).startsWith('blob:')
+        ? { imageUrl: outboxRow.imageUrl }
+        : {}),
+      ...(outboxRow.fileUrl && !String(outboxRow.fileUrl).startsWith('blob:')
+        ? { fileUrl: outboxRow.fileUrl }
+        : {}),
+      ...(outboxRow.fileKind ? { fileKind: outboxRow.fileKind } : {}),
+      ...(outboxRow.fileName ? { fileName: outboxRow.fileName } : {}),
+      ...(outboxRow.fileMime ? { fileMime: outboxRow.fileMime } : {}),
+      ...(outboxRow.fileSize ? { fileSize: outboxRow.fileSize } : {}),
+      ...(Array.isArray(outboxRow.attachments) && outboxRow.attachments.length
+        && outboxRow.attachments.every((item) => item?.url && !String(item.url).startsWith('blob:'))
+        ? { attachments: outboxRow.attachments }
+        : {}),
+    }
+
+    try {
+      await runDirectSendWithOutbox({
+        upsertChatOutbox,
+        deliverChatOutbox,
+        outboxEntry: {
+          ...outboxRow,
+          clientId,
+          threadId,
+          text,
+          sender,
+        },
+        inFlightMap: sendInFlightRef.current,
+        runSend: () => sendChatMessage({
+          threadId,
+          text,
+          sender,
+          clientId,
+          sticker: outboxRow.sticker || undefined,
+          effect: outboxRow.effect || undefined,
+          effectEmoji: outboxRow.effectEmoji || undefined,
+          replyTo: outboxRow.replyTo || null,
+          createdAtIso: outboxRow.createdAtIso || new Date().toISOString(),
+          ...guestMeta,
+          ...mediaPayload,
+        }),
+      })
+      setHanaMessages((prev) => prev.map((m) => (
+        (m.id === mid || m.clientId === clientId)
+          ? { ...m, sendFailed: false, pending: false }
+          : m
+      )))
+    } catch (err) {
+      setHanaMessages((prev) => prev.map((m) => (
+        (m.id === mid || m.clientId === clientId)
+          ? { ...m, sendFailed: true, pending: false }
+          : m
+      )))
+      setError(getFirebaseErrorMessage(err) || '送信に失敗しました。')
+    }
+  }, [
+    actingAsOwner,
+    activeThreadId,
+    guestChatId,
+    guestKey,
+    guestProfile?.key,
+    guestThreadLabel,
+    guestLiveThreadId,
+    hanaMessages,
+    ownerActiveGuestKey,
+    ownerActiveGuestLabel,
+    ownerLiveThreadId,
+  ])
   retryFailedSendRef.current = retryFailedSend
 
   const handleSend = async (event) => {
@@ -4771,7 +5103,7 @@ export default function HanaChat({
     try {
       if (pendingEditId) {
         if (actingAsOwner || guestOnHuman) {
-          const threadId = actingAsOwner ? (ownerLiveThreadId || activeThreadId) : guestLiveThreadId
+          const threadId = actingAsOwner ? ownerLiveThreadId : guestLiveThreadId
           await updateChatMessage({ threadId, messageId: pendingEditId, text })
         } else {
           setAiMessages((prev) => prev.map((m) => (
@@ -4794,16 +5126,17 @@ export default function HanaChat({
           }
           return
         }
-        // Always prefer canonical guest-{key} when known so reopen finds the send.
-        const canonId = ownerActiveGuestKey ? `guest-${ownerActiveGuestKey}` : ''
-        const threadId = canonId || activeThreadId
-        if (threadId !== activeThreadId) {
-          showThreadMessages(threadId, [activeThreadId, canonId].filter(Boolean))
-          setActiveThreadId(threadId)
+        const effectiveThreadId = ownerLiveThreadId
+        if (!effectiveThreadId) {
+          setError('返信する相手（ユーザーID）が未確定です。')
+          setDraft(text)
+          draftRef.current = text
+          if (queued.length) {
+            composerAttachRef.current = queued
+            setComposerAttach(queued)
+          }
+          return
         }
-        const effectiveThreadId = resolveCanonicalChatThreadIdSync(threadId, ownerActiveGuestKey || '')
-          || (await resolveCanonicalChatThreadId(threadId, ownerActiveGuestKey || ''))
-          || threadId
         if (effectiveThreadId !== activeThreadId) {
           showThreadMessages(effectiveThreadId, [activeThreadId, effectiveThreadId].filter(Boolean))
           setActiveThreadId(effectiveThreadId)
@@ -4837,7 +5170,17 @@ export default function HanaChat({
           },
         ])
         scrollToLatestRef.current()
-        void (async () => {
+        upsertChatOutbox({
+          clientId: pendingId,
+          threadId: effectiveThreadId,
+          text: sendText,
+          sender: 'hana',
+          guestKey: ownerActiveGuestKey || '',
+          guestLabel: ownerActiveGuestLabel,
+          replyTo: replySnapshot,
+          createdAtIso: nowIso,
+        })
+        const commitOwnerSend = async () => {
           try {
             const uploadedList = queued.length ? await (async () => {
               const out = []
@@ -4860,19 +5203,37 @@ export default function HanaChat({
                 m.id === pendingId ? { ...m, ...mediaFields } : m
               )))
             }
-            await sendChatMessage({
-              threadId: effectiveThreadId,
-              text: sendText,
-              sender: 'hana',
-              clientId: pendingId,
-              replyTo: pendingReply,
-              createdAtIso: nowIso,
-              guestKey: ownerActiveGuestKey || '',
-              guestLabel: ownerActiveGuestLabel,
-              ...mediaFields,
+            await runDirectSendWithOutbox({
+              upsertChatOutbox,
+              deliverChatOutbox,
+              outboxEntry: {
+                clientId: pendingId,
+                threadId: effectiveThreadId,
+                text: sendText,
+                sender: 'hana',
+                guestKey: ownerActiveGuestKey || '',
+                guestLabel: ownerActiveGuestLabel,
+                replyTo: replySnapshot,
+                createdAtIso: nowIso,
+                ...mediaFields,
+              },
+              inFlightMap: sendInFlightRef.current,
+              runSend: () => sendChatMessage({
+                threadId: effectiveThreadId,
+                text: sendText,
+                sender: 'hana',
+                clientId: pendingId,
+                replyTo: pendingReply,
+                createdAtIso: nowIso,
+                guestKey: ownerActiveGuestKey || '',
+                guestLabel: ownerActiveGuestLabel,
+                ...mediaFields,
+              }),
             })
           } catch (err) {
-            setHanaMessages((prev) => prev.filter((m) => m.id !== pendingId))
+            setHanaMessages((prev) => prev.map((m) => (
+              m.id === pendingId ? { ...m, sendFailed: true, pending: false } : m
+            )))
             setError(getFirebaseErrorMessage(err) || '送信に失敗しました。')
           } finally {
             for (const item of queued) {
@@ -4880,18 +5241,17 @@ export default function HanaChat({
             }
             scrollToLatestRef.current()
           }
-        })()
+        }
+        if (queued.length) {
+          void commitOwnerSend()
+        } else {
+          await commitOwnerSend()
+        }
       } else if (queued.length || channel === 'human' || wantsHumanHana(text)) {
         if (channel !== 'human') {
           switchToHuman(HUMAN_SWITCH_INTENT)
         }
-        let threadId = guestProfile?.key
-          ? `guest-${guestProfile.key}`
-          : ensureGuestChatId(guestKey || 'guest')
-        threadId = resolveCanonicalChatThreadIdSync(threadId, guestProfile?.key || guestKey || '')
-          || (!guestProfile?.key
-            ? await resolveCanonicalChatThreadId(threadId, guestKey || '')
-            : threadId)
+        let threadId = guestLiveThreadId || ensureGuestChatId(guestKey || 'guest')
         if (guestChatId !== threadId) setGuestChatId(threadId)
         if (!actingAsOwner) saveChannel(threadId, 'human')
         const pendingId = nextChatPendingId('msg')
@@ -4924,7 +5284,17 @@ export default function HanaChat({
         ])
         scrollToLatestRef.current()
         setChannel('human')
-        void (async () => {
+        upsertChatOutbox({
+          clientId: pendingId,
+          threadId,
+          text: sendText,
+          sender: 'guest',
+          guestLabel: guestThreadLabel,
+          guestKey: guestProfile?.key || guestKey || '',
+          replyTo: replySnapshot,
+          createdAtIso: nowIso,
+        })
+        const commitGuestSend = async () => {
           try {
             const uploadedList = queued.length ? await (async () => {
               const out = []
@@ -4947,19 +5317,37 @@ export default function HanaChat({
                 m.id === pendingId ? { ...m, ...mediaFields } : m
               )))
             }
-            await sendChatMessage({
-              threadId,
-              text: sendText,
-              sender: 'guest',
-              guestLabel: guestThreadLabel,
-              guestKey: guestProfile?.key || guestKey || '',
-              clientId: pendingId,
-              replyTo: pendingReply,
-              createdAtIso: nowIso,
-              ...mediaFields,
+            await runDirectSendWithOutbox({
+              upsertChatOutbox,
+              deliverChatOutbox,
+              outboxEntry: {
+                clientId: pendingId,
+                threadId,
+                text: sendText,
+                sender: 'guest',
+                guestLabel: guestThreadLabel,
+                guestKey: guestProfile?.key || guestKey || '',
+                replyTo: replySnapshot,
+                createdAtIso: nowIso,
+                ...mediaFields,
+              },
+              inFlightMap: sendInFlightRef.current,
+              runSend: () => sendChatMessage({
+                threadId,
+                text: sendText,
+                sender: 'guest',
+                guestLabel: guestThreadLabel,
+                guestKey: guestProfile?.key || guestKey || '',
+                clientId: pendingId,
+                replyTo: pendingReply,
+                createdAtIso: nowIso,
+                ...mediaFields,
+              }),
             })
           } catch (err) {
-            setHanaMessages((prev) => prev.filter((m) => m.id !== pendingId))
+            setHanaMessages((prev) => prev.map((m) => (
+              m.id === pendingId ? { ...m, sendFailed: true, pending: false } : m
+            )))
             setError(getFirebaseErrorMessage(err) || '送信に失敗しました。')
           } finally {
             for (const item of queued) {
@@ -4967,7 +5355,12 @@ export default function HanaChat({
             }
             scrollToLatestRef.current()
           }
-        })()
+        }
+        if (queued.length) {
+          void commitGuestSend()
+        } else {
+          await commitGuestSend()
+        }
       } else {
         const history = aiMessages
           .filter((m) => !m.deleted && m.id !== INTRO_ID && m.kind !== 'human-switch' && m.kind !== 'intro')
@@ -5165,6 +5558,7 @@ export default function HanaChat({
         onClick={toggleChatOpen}
         aria-expanded={open}
         aria-controls="hana-chat-panel"
+        data-testid="hana-chat-launcher"
         title={open ? 'チャットを閉じる' : 'はなちゃんと話す'}
       >
         <img src={hanachanArt} alt="" className="hana-chat-launcher-art" />
@@ -5969,7 +6363,7 @@ export default function HanaChat({
                       aria-label="ピンを外す"
                       onClick={() => {
                         if (actingAsOwner || guestOnHuman) {
-                          const threadId = actingAsOwner ? (ownerLiveThreadId || activeThreadId) : guestLiveThreadId
+                          const threadId = actingAsOwner ? ownerLiveThreadId : guestLiveThreadId
                           if (!threadId) return
                           // Drop local copies too so merge UI does not bring the pin back.
                           setPins(unpinChatMessageEverywhere(pin.messageId))
@@ -6336,6 +6730,7 @@ export default function HanaChat({
               <textarea
                 ref={inputRef}
                 id="hana-chat-input"
+                data-testid="hana-chat-input"
                 rows={1}
                 value={draft}
                 onChange={(event) => {

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { resetOutboxStoreForTests } from './storage/outboxStore.js'
+
 const store = new Map()
 const fakeLocalStorage = {
   getItem(key) {
@@ -29,6 +31,7 @@ const {
 
 test('outbox recovery keeps pending bubble for canonical guest thread', () => {
   store.clear()
+  resetOutboxStoreForTests()
   const entry = {
     clientId: 'pending-msg-1',
     threadId: 'guest-hiro',
@@ -55,6 +58,7 @@ test('outbox recovery keeps pending bubble for canonical guest thread', () => {
 
 test('retry lookup falls back to outbox when live messages list is empty', () => {
   store.clear()
+  resetOutboxStoreForTests()
   upsertChatOutbox({
     clientId: 'pending-msg-2',
     threadId: 'guest-zen',
@@ -79,6 +83,7 @@ test('retry lookup falls back to outbox when live messages list is empty', () =>
 test('reload lookup matches legacy thread ids for every guest identity', () => {
   for (const [index, guestKey] of ['hiro', 'zen', 'gabusan', 'gabu'].entries()) {
     store.clear()
+    resetOutboxStoreForTests()
     upsertChatOutbox({
       clientId: `pending-msg-${index + 3}`,
       threadId: 'legacy-random-thread',
@@ -97,6 +102,7 @@ test('reload lookup matches legacy thread ids for every guest identity', () => {
 
 test('pending outbox exists even when the channel preference was not persisted', () => {
   store.clear()
+  resetOutboxStoreForTests()
   upsertChatOutbox({
     clientId: 'pending-before-channel-save',
     threadId: 'guest-zen',
@@ -111,6 +117,7 @@ test('pending outbox exists even when the channel preference was not persisted',
 
 test('admin-deleted server copy drops archived outbox so reload does not replay', () => {
   store.clear()
+  resetOutboxStoreForTests()
   upsertChatOutbox({
     clientId: 'pending-deleted',
     threadId: 'guest-gabusan',
@@ -127,6 +134,7 @@ test('admin-deleted server copy drops archived outbox so reload does not replay'
 
 test('pending test junk is dropped when absent from server snapshot', () => {
   store.clear()
+  resetOutboxStoreForTests()
   upsertChatOutbox({
     clientId: 'pending-testx',
     threadId: 'guest-gabusan',
@@ -142,6 +150,7 @@ test('pending test junk is dropped when absent from server snapshot', () => {
 
 test('successful write stays durable until the server snapshot confirms it', () => {
   store.clear()
+  resetOutboxStoreForTests()
   upsertChatOutbox({
     clientId: 'pending-confirmation',
     threadId: 'guest-gabusan',
