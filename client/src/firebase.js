@@ -3081,7 +3081,10 @@ export async function stampPokeFoil(threadId, speciesId) {
  * typing never reorders the inbox or changes unread-message state.
  */
 export async function setChatTyping(threadId, role, typing = true, guestKey = '') {
-  const fsThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
+  let fsThreadId = resolveCanonicalChatThreadIdSync(threadId, guestKey)
+  if (!fsThreadId) {
+    fsThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
+  }
   if (!fsThreadId || (role !== 'guest' && role !== 'hana')) return
   const nowIso = new Date().toISOString()
   const patch = role === 'hana'
@@ -3094,6 +3097,31 @@ export async function setChatTyping(threadId, role, typing = true, guestKey = ''
         guestTypingAtIso: typing ? nowIso : null,
       }
   await setDoc(doc(db, CHAT_THREADS_COLLECTION, fsThreadId), patch, { merge: true })
+}
+
+/** Live partner typing heartbeat (does not depend on thread list merge). */
+export function subscribeChatPartnerTyping(threadId, viewerRole, guestKey, onTypingAt) {
+  const raw = String(threadId || '').trim()
+  const fsThreadId = /^guest-[a-z0-9_-]+$/i.test(raw)
+    ? raw
+    : resolveCanonicalChatThreadIdSync(threadId, guestKey)
+  if (!fsThreadId || (viewerRole !== 'guest' && viewerRole !== 'hana')) {
+    onTypingAt?.(null)
+    return () => {}
+  }
+  return onSnapshot(
+    doc(db, CHAT_THREADS_COLLECTION, fsThreadId),
+    (snap) => {
+      if (!snap.exists()) {
+        onTypingAt?.(null)
+        return
+      }
+      const row = serializeChatThread(snap.id, snap.data())
+      const iso = viewerRole === 'hana' ? row?.guestTypingAt : row?.hanaTypingAt
+      onTypingAt?.(iso || null)
+    },
+    () => onTypingAt?.(null),
+  )
 }
 
 /**

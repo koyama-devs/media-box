@@ -4,7 +4,7 @@ import { setAppUnreadBadge } from './appBadge'
 import hanachanArt from './assets/hanachan.svg'
 import { bootstrapConversationRowsSync } from './chat/chatBootstrap.js'
 import { newestMessageId, notifyPartnerMessagesDelivered } from './chat/chatDeliverySync.js'
-import { normalizeConversationId } from './chat/chatIdentity.js'
+import { firestoreThreadId, normalizeConversationId } from './chat/chatIdentity.js'
 import { mergeMessagesByClientId } from './chat/chatMerge.js'
 import { startChatOutboxWorker } from './chat/chatOutboxWorker.js'
 import { ensureChatStorageReady } from './chat/chatStorageInit.js'
@@ -113,6 +113,7 @@ import {
   subscribeChatAccounts,
   subscribeChatMessages,
   subscribeChatProfiles,
+  subscribeChatPartnerTyping,
   subscribeChatThreads,
   subscribeOwnChatThread,
   subscribeWeightGarden,
@@ -374,6 +375,9 @@ function pinnedMessagesEqual(a, b) {
 function threadSnapshotEqualForUi(prev, next, ignoreKeys) {
   if (prev === next) return true
   if (!prev || !next || prev.id !== next.id) return false
+  // Partner typing indicators must never be swallowed by echo suppression.
+  if (prev.hanaTypingAt !== next.hanaTypingAt) return false
+  if (prev.guestTypingAt !== next.guestTypingAt) return false
   const ignore = ignoreKeys instanceof Set
     ? ignoreKeys
     : new Set(Array.isArray(ignoreKeys) ? ignoreKeys : [ignoreKeys])
@@ -1088,6 +1092,7 @@ export default function HanaChat({
       item.threadId === activeThreadId
       || item.canonicalId === activeThreadId
       || item.thread?.id === activeThreadId
+      || (item.guestKey && humanChatThreadIdForUserKey(item.guestKey) === activeThreadId)
     ))
     if (rosterEntry?.guestKey) return String(rosterEntry.guestKey).trim().toLowerCase()
     const thread = threads.find((entry) => entry.id === activeThreadId)
@@ -2397,7 +2402,9 @@ export default function HanaChat({
     ownThread?.id,
   ])
 
-  const typingThreadId = actingAsOwner ? ownerLiveThreadId : guestLiveThreadId
+  const typingThreadId = actingAsOwner
+    ? (ownerLiveThreadId || activeThreadId)
+    : (guestLiveThreadId || guestChatId)
   const typingRole = actingAsOwner ? 'hana' : 'guest'
   const typingEligible = Boolean(
     open
@@ -2466,8 +2473,17 @@ export default function HanaChat({
     }
 
     const pulseIfDraft = () => {
+      if (
+        typingStateRef.current.threadId !== typingThreadId
+        || typingStateRef.current.role !== typingRole
+      ) {
+        typingStateRef.current = {
+          threadId: typingThreadId,
+          role: typingRole,
+          lastPulseAt: typingStateRef.current.lastPulseAt,
+        }
+      }
       const state = typingStateRef.current
-      if (state.threadId !== typingThreadId || state.role !== typingRole) return
       if (!draftHasText()) {
         stopCurrent()
         typingStateRef.current = { threadId: typingThreadId, role: typingRole, lastPulseAt: 0 }
@@ -2524,6 +2540,12 @@ export default function HanaChat({
     }
   }, [typingEligible, typingRole, typingThreadId])
 
+  useEffect(() => {
+    if (!typingEligible) return undefined
+    typingNudgeRef.current()
+    return undefined
+  }, [draft, typingEligible])
+
   useEffect(() => () => {
     window.clearTimeout(typingPulseTimerRef.current)
     window.clearTimeout(typingStopTimerRef.current)
@@ -2548,16 +2570,46 @@ export default function HanaChat({
     return () => { delete document.documentElement.dataset.hanaChatOpen }
   }, [open])
 
+  const [partnerTypingAtIso, setPartnerTypingAtIso] = useState(null)
+  const partnerTypingThreadId = actingAsOwner
+    ? (ownerLiveThreadId || activeThreadId)
+    : (guestLiveThreadId || guestChatId)
+  const partnerTypingGuestKey = actingAsOwner
+    ? (ownerActiveGuestKey || humanUserKeyFromChatThreadId(activeThreadId || ownerLiveThreadId))
+    : (guestProfile?.key || guestKey || '')
+  const partnerFirestoreThreadId = useMemo(() => {
+    const logical = normalizeConversationId(partnerTypingThreadId) || partnerTypingThreadId
+    return firestoreThreadId(logical)
+      || resolveCanonicalChatThreadIdSync(partnerTypingThreadId, partnerTypingGuestKey)
+  }, [partnerTypingThreadId, partnerTypingGuestKey])
+
+  useEffect(() => {
+    if (!open || (!actingAsOwner && !guestOnHuman) || !partnerFirestoreThreadId) {
+      setPartnerTypingAtIso(null)
+      return undefined
+    }
+    const viewerRole = actingAsOwner ? 'hana' : 'guest'
+    return subscribeChatPartnerTyping(
+      partnerFirestoreThreadId,
+      viewerRole,
+      partnerTypingGuestKey,
+      setPartnerTypingAtIso,
+    )
+  }, [
+    open,
+    actingAsOwner,
+    guestOnHuman,
+    partnerFirestoreThreadId,
+    partnerTypingGuestKey,
+  ])
+
   const [partnerTyping, setPartnerTyping] = useState(false)
   useEffect(() => {
     if (!open || (!actingAsOwner && !guestOnHuman)) {
       setPartnerTyping(false)
       return undefined
     }
-    const value = actingAsOwner
-      ? activeThreadMeta?.guestTypingAt
-      : activeThreadMeta?.hanaTypingAt
-    const at = Date.parse(String(value || ''))
+    const at = Date.parse(String(partnerTypingAtIso || ''))
     if (!Number.isFinite(at)) {
       setPartnerTyping(false)
       return undefined
@@ -2570,7 +2622,7 @@ export default function HanaChat({
     setPartnerTyping(true)
     const timer = window.setTimeout(() => setPartnerTyping(false), remaining)
     return () => window.clearTimeout(timer)
-  }, [open, actingAsOwner, guestOnHuman, activeThreadMeta?.guestTypingAt, activeThreadMeta?.hanaTypingAt])
+  }, [open, actingAsOwner, guestOnHuman, partnerTypingAtIso])
 
 
   const partnerTypingLabel = actingAsOwner
@@ -6159,6 +6211,8 @@ export default function HanaChat({
 
           <div
             className={`hana-chat-typing${partnerTyping ? ' is-visible' : ''}`}
+            data-testid="hana-chat-partner-typing"
+            data-partner-typing-at={partnerTypingAtIso || ''}
             aria-live="polite"
             aria-hidden={!partnerTyping}
           >
