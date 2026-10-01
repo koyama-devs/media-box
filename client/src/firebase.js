@@ -50,6 +50,7 @@ import {
     humanChatThreadIdForUserKey,
     normalizeConversationId
 } from './chat/chatIdentity.js'
+import { mergeChatMessageLists, preferMessageRow } from './chat/chatMerge.js'
 import {
     applyPokeWorldAction,
     applyPokeWorldAdopt,
@@ -77,6 +78,7 @@ export {
     humanUserKeyFromChatThreadId,
     normalizeConversationId
 } from './chat/chatIdentity.js'
+export { mergeChatMessageLists } from './chat/chatMerge.js'
 
 const firebaseConfig = {
   apiKey: 'AIzaSyBrzxY4sc2BC_5y1ymax08DkHbVoEKDo-8',
@@ -3242,8 +3244,6 @@ export function deliveryStatusLabel(status) {
   if (status === 'failed') return '未送信'
   return ''
 }
-
-export { mergeChatMessageLists } from './chat/chatMerge.js'
 
 function rowsFromMessageSnap(snap) {
   const byClientId = new Map()

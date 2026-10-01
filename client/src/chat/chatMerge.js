@@ -100,7 +100,7 @@ function rowIsInFlight(message) {
   )
 }
 
-function preferMessageRow(existing, candidate) {
+export function preferMessageRow(existing, candidate) {
   if (!existing) return candidate
   if (!candidate) return existing
   const pendingA = rowIsInFlight(existing)
