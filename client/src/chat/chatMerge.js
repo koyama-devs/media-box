@@ -2,6 +2,8 @@
  * Merge local + server messages by stable clientMessageId (never by text/timestamp).
  */
 
+import { logTransportTransition } from './chatDebug.js'
+
 export function clientMessageKey(message) {
   const cid = String(message?.clientMessageId || message?.clientId || '').trim()
   if (cid) return cid
@@ -17,7 +19,32 @@ function sortChatRows(rows = []) {
   })
 }
 
+/** UI/server-confirmed outbound row — stale cache/outbox must not downgrade transport. */
+function messageConfirmedOnServer(message) {
+  if (!message || message.pending || message.sendFailed) return false
+  if (String(message.serverId || '').trim()) return true
+  const id = String(message.id || '').trim()
+  const cid = String(message.clientId || message.clientMessageId || '').trim()
+  if (id && cid && id !== cid) return true
+  if (message.status === 'sent') return true
+  return false
+}
+
 function mergeStatus(local, remote) {
+  if (messageConfirmedOnServer(local) && remote) {
+    const remoteInFlight = remote.pending || remote.sendFailed
+      || remote.status === 'pending' || remote.status === 'sending' || remote.status === 'failed'
+    if (remoteInFlight) {
+      return {
+        pending: false,
+        sendFailed: false,
+        status: local.status || 'sent',
+        serverId: local.serverId || remote.serverId || remote.id,
+        id: local.id || remote.id,
+        clientId: local.clientId || remote.clientId || clientMessageKey(local),
+      }
+    }
+  }
   const remoteSent = remote?.serverId || (!remote?.pending && !remote?.sendFailed && remote?.id)
   const localPending = local?.pending || local?.sendFailed
     || local?.status === 'pending' || local?.status === 'failed' || local?.status === 'sending'
@@ -44,7 +71,7 @@ function mergeStatus(local, remote) {
  * @param {object[]} localRows
  * @param {object[]} remoteRows — Firestore snapshot (authoritative when present)
  */
-export function mergeMessagesByClientId(localRows = [], remoteRows = []) {
+export function mergeMessagesByClientId(localRows = [], remoteRows = [], mergeSource = '', conversationId = '') {
   const map = new Map()
   for (const message of localRows) {
     const key = clientMessageKey(message)
@@ -55,9 +82,17 @@ export function mergeMessagesByClientId(localRows = [], remoteRows = []) {
     const key = clientMessageKey(message)
     if (!key) continue
     const prev = map.get(key)
-    map.set(key, prev
+    const next = prev
       ? { ...prev, ...message, ...mergeStatus(prev, message) }
-      : message)
+      : message
+    map.set(key, next)
+    if (mergeSource) {
+      if (!prev) {
+        logTransportTransition(mergeSource, conversationId, null, next)
+      } else {
+        logTransportTransition(mergeSource, conversationId, prev, next)
+      }
+    }
   }
   return sortChatRows([...map.values()])
 }

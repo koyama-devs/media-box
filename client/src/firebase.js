@@ -4398,6 +4398,16 @@ export async function sendChatMessage({
     { merge: true },
   )
   await batch.commit()
+  try {
+    const { chatLogEvent } = await import('./chat/chatDebug.js')
+    chatLogEvent('FIREBASE SEND', {
+      clientMessageId: safeClientId || messageRef.id,
+      conversationId: canonicalThreadId,
+      status: 'committed',
+    })
+  } catch {
+    /* debug optional */
+  }
   return messageRef.id
 }
 
@@ -4566,6 +4576,16 @@ export async function markThreadRead(threadId, reader, guestKey = '', options = 
         ...(lastMessageId ? { guestLastReadMessageId: lastMessageId } : {}),
       }
   await setDoc(doc(db, CHAT_THREADS_COLLECTION, threadId), patch, { merge: true })
+  try {
+    const { chatLogEvent } = await import('./chat/chatDebug.js')
+    chatLogEvent('READ ACK', {
+      clientMessageId: lastMessageId,
+      conversationId: threadId,
+      detail: `reader=${reader}`,
+    })
+  } catch {
+    /* debug optional */
+  }
 }
 
 /** Partner device synced messages — update delivered cursor (no per-message writes). */
@@ -4588,6 +4608,16 @@ export async function markThreadDelivered(threadId, viewer, guestKey = '', optio
       : null
   if (!patch) return
   await setDoc(doc(db, CHAT_THREADS_COLLECTION, threadId), patch, { merge: true })
+  try {
+    const { chatLogEvent } = await import('./chat/chatDebug.js')
+    chatLogEvent('DELIVERY ACK', {
+      clientMessageId: lastMessageId,
+      conversationId: threadId,
+      detail: `viewer=${viewer}`,
+    })
+  } catch {
+    /* debug optional */
+  }
 }
 
 /** Unread message count for launcher / thread chips (falls back to 1 if only the boolean flag is set). */

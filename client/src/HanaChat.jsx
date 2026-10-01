@@ -3,6 +3,7 @@ import { createPortal, flushSync } from 'react-dom'
 import { setAppUnreadBadge } from './appBadge'
 import hanachanArt from './assets/hanachan.svg'
 import { bootstrapConversationRowsSync } from './chat/chatBootstrap.js'
+import { logTransportTransition } from './chat/chatDebug.js'
 import { newestMessageId, notifyPartnerMessagesDelivered } from './chat/chatDeliverySync.js'
 import { firestoreThreadId, normalizeConversationId } from './chat/chatIdentity.js'
 import { mergeMessagesByClientId } from './chat/chatMerge.js'
@@ -908,7 +909,7 @@ export default function HanaChat({
     const threadKey = logicalId
     if (rows.length) {
       stashThreadMessagesInCache(logicalId, rows)
-      setHanaMessages(rows)
+      setHanaMessages((prev) => mergeMessagesByClientId(prev, rows, 'CACHE MERGE', logicalId))
       openHumanThreadRef.current = threadKey
       return
     }
@@ -1158,10 +1159,20 @@ export default function HanaChat({
     guestUserId: activeLiveGuestUserId,
     relatedIds: bootstrapRelatedIds,
     memoryCache: messageCacheRef.current,
-    onRows: (rows) => {
+    onRows: (rows, meta) => {
       if (!rows.length || !activeLiveConversationId) return
+      const loadSource = meta?.phase === 'server'
+        ? 'REALTIME SNAPSHOT'
+        : meta?.phase === 'idb' || meta?.phase === 'sync'
+          ? 'IDB LOAD'
+          : 'CACHE MERGE'
       stashThreadMessagesInCache(activeLiveConversationId, rows)
-      setHanaMessages((prev) => mergeMessagesByClientId(prev, rows))
+      setHanaMessages((prev) => mergeMessagesByClientId(
+        prev,
+        rows,
+        loadSource,
+        activeLiveConversationId,
+      ))
     },
     onHydrated: () => setMessagesHydrated(true),
   })
@@ -1997,13 +2008,20 @@ export default function HanaChat({
         const cid = String(m.clientId || m.id || '')
         const entry = outboxByClient.get(cid)
         if (!entry || String(entry?.serverId || '').trim()) return m
+        if (String(m.serverId || '').trim()) return m
+        const id = String(m.id || '').trim()
+        const clientId = String(m.clientId || m.clientMessageId || '').trim()
+        if (id && clientId && id !== clientId) return m
+        if (m.status === 'sent' && !m.pending && !m.sendFailed) return m
+        const inFlight = m.pending || m.sendFailed
+          || m.status === 'sending' || m.status === 'pending' || m.status === 'failed'
+        if (!inFlight) return m
         const local = outboxEntryToLocalMessage(entry)
         if (!local) return m
-        if (!m.pending && !m.sendFailed && m.status !== 'sending') {
-          patchedAny = true
-          return { ...m, ...local }
-        }
-        return m
+        patchedAny = true
+        const next = { ...m, ...local }
+        logTransportTransition('OUTBOX RECOVERY', threadId, m, next)
+        return next
       })
       for (const entry of entries) {
         const body = String(entry?.text || entry?.sticker || '').trim()

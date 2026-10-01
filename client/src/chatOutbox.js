@@ -1,5 +1,6 @@
 /** Persistent outbox queue — reliable delivery (LINE-style). */
 
+import { chatLogEvent } from './chat/chatDebug.js'
 import {
     conversationIdForGuestUser,
     guestUserIdFromConversationId,
@@ -101,6 +102,11 @@ export function upsertChatOutbox(entry) {
       createdAtIso: String(entry.createdAtIso || new Date().toISOString()),
     }))
     persistOutboxRows(next)
+    chatLogEvent('OUTBOX SAVE', {
+      clientMessageId: clientId,
+      conversationId: resolvedThreadId,
+      status: String(entry.serverId || '').trim() ? 'sent' : 'pending',
+    })
   } catch {
     /* quota / private mode */
   }

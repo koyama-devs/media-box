@@ -3,18 +3,24 @@
  * Firestore listener is source of truth; outbox only covers in-flight/failed writes.
  */
 
+import {
+    chatLogEvent,
+    chatLogStatus,
+    chatTransportStatus,
+    logTransportListDiff,
+} from './chat/chatDebug.js'
 import { normalizeConversationId } from './chat/chatIdentity.js'
 import { mergeChatMessageLists, mergeMessagesByClientId, mergeServerWithOutboxPending } from './chat/chatMerge.js'
-import { newClientMessageId } from './chat/clientMessageId.js'
 import { ensureChatStorageReady } from './chat/chatStorageInit.js'
+import { newClientMessageId } from './chat/clientMessageId.js'
 import { isTestChatMessageText } from './chat/testMessageText.js'
 import {
-  deliverChatOutbox,
-  reconcileChatDeliveryStorage,
-  reconcileChatOutboxWithMessages,
-  removeChatOutbox,
-  touchOutboxSendFailed,
-  touchOutboxSending,
+    deliverChatOutbox,
+    reconcileChatDeliveryStorage,
+    reconcileChatOutboxWithMessages,
+    removeChatOutbox,
+    touchOutboxSendFailed,
+    touchOutboxSending,
 } from './chatOutbox.js'
 import { saveConversationSyncState } from './storage/conversationStore.js'
 import { loadThreadMessagesSync, saveThreadMessagesSync, upsertLocalChatMessage } from './storage/messageStore.js'
@@ -134,6 +140,7 @@ export function applyChatMessageSnapshot({
       lastSyncedAt: Date.now(),
     })
   }
+  logTransportListDiff('REALTIME SNAPSHOT', cacheId, previous, merged)
   return merged
 }
 
@@ -160,7 +167,8 @@ export function applyServerIdToMessage(message, { pendingId, serverId, clientId,
   if (!key) return message
   if (message.id !== key && message.clientId !== key) return message
   const cid = String(clientId || pendingId || '').trim()
-  return {
+  const before = chatTransportStatus(message)
+  const next = {
     ...message,
     ...extra,
     id: serverId,
@@ -168,8 +176,15 @@ export function applyServerIdToMessage(message, { pendingId, serverId, clientId,
     pending: false,
     sendFailed: false,
     uploading: false,
+    status: extra.status || 'sent',
     clientId: cid,
   }
+  chatLogStatus('SERVER ACK', {
+    clientMessageId: cid,
+    from: before,
+    to: chatTransportStatus(next),
+  })
+  return next
 }
 
 export function mapMessagesWithServerId(messages, { pendingId, serverId, clientId, extra = {} }) {
@@ -246,7 +261,7 @@ export function buildOptimisticMessage({
   extra = {},
 }) {
   const role = sender === 'hana' ? 'hana' : 'guest'
-  return {
+  const row = {
     id: pendingId,
     clientId: pendingId,
     clientMessageId: pendingId,
@@ -262,6 +277,12 @@ export function buildOptimisticMessage({
     createdAtIso,
     ...extra,
   }
+  chatLogStatus('CREATE', {
+    clientMessageId: pendingId,
+    from: '(none)',
+    to: chatTransportStatus(row),
+  })
+  return row
 }
 
 /** Local-first send: persist to memory/IndexedDB queue, then paint bubble immediately. */
@@ -302,13 +323,30 @@ export function runDirectSendWithOutbox({
     }
     void ensureChatStorageReady().then(() => upsertLocalChatMessage(conversationId, localRow))
   }
-  if (clientId) touchOutboxSending(clientId)
+  if (clientId) {
+    touchOutboxSending(clientId)
+    chatLogStatus('STATUS UPDATE', {
+      clientMessageId: clientId,
+      conversationId,
+      from: 'pending',
+      to: 'sending',
+    })
+    chatLogEvent('FIREBASE SEND', { clientMessageId: clientId, conversationId, status: 'sending' })
+  }
   const writePromise = Promise.resolve().then(runSend)
   if (inFlightMap && clientId) inFlightMap.set(clientId, writePromise)
   return writePromise
     .then((serverId) => {
       const sid = typeof serverId === 'string' ? serverId : String(serverId?.serverId || '').trim()
-      if (sid && clientId) deliverOutbox(clientId, sid)
+      if (sid && clientId) {
+        deliverOutbox(clientId, sid)
+        chatLogStatus('SERVER ACK', {
+          clientMessageId: clientId,
+          conversationId,
+          from: 'sending',
+          to: 'sent',
+        })
+      }
       return sid
     })
     .catch((err) => {
