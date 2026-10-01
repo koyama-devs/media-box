@@ -2,8 +2,12 @@ import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, use
 import { createPortal, flushSync } from 'react-dom'
 import { setAppUnreadBadge } from './appBadge'
 import hanachanArt from './assets/hanachan.svg'
-import { bootstrapConversationRowsSync } from './chat/chatBootstrap.js'
+import {
+  bootstrapConversationRowsAsync,
+  bootstrapConversationRowsSync,
+} from './chat/chatBootstrap.js'
 import { newestMessageId, notifyPartnerMessagesDelivered } from './chat/chatDeliverySync.js'
+import { normalizeConversationId } from './chat/chatIdentity.js'
 import { mergeMessagesByClientId } from './chat/chatMerge.js'
 import { startChatOutboxWorker } from './chat/chatOutboxWorker.js'
 import { ensureChatStorageReady } from './chat/chatStorageInit.js'
@@ -543,11 +547,23 @@ function saveAiMessages(guestId, messages) {
   }
 }
 
+function channelPreferenceAliases(guestId = '') {
+  const id = String(guestId || '').trim()
+  if (!id) return []
+  const aliases = new Set([id])
+  const fromSorted = id.match(/^hana_([a-z0-9_-]+)$/i)
+  if (fromSorted) aliases.add(`guest-${fromSorted[1]}`)
+  const fromLegacy = id.match(/^guest-([a-z0-9_-]+)$/i)
+  if (fromLegacy) aliases.add(`hana_${fromLegacy[1]}`)
+  return [...aliases]
+}
+
 function loadChannel(guestId) {
   try {
-    return window.localStorage.getItem(storageKey(CHANNEL_PREFIX, guestId)) === 'human'
-      ? 'human'
-      : 'ai'
+    const human = channelPreferenceAliases(guestId).some(
+      (alias) => window.localStorage.getItem(storageKey(CHANNEL_PREFIX, alias)) === 'human',
+    )
+    return human ? 'human' : 'ai'
   } catch {
     return 'ai'
   }
@@ -555,9 +571,28 @@ function loadChannel(guestId) {
 
 function saveChannel(guestId, channel) {
   try {
-    window.localStorage.setItem(storageKey(CHANNEL_PREFIX, guestId), channel)
+    channelPreferenceAliases(guestId).forEach((alias) => {
+      window.localStorage.setItem(storageKey(CHANNEL_PREFIX, alias), channel)
+    })
   } catch {
     /* ignore */
+  }
+}
+
+function readInitialGuestChannel(guestKey = '') {
+  try {
+    const key = String(guestKey || window.localStorage.getItem('media-share-lite-guest') || '')
+      .trim()
+      .toLowerCase()
+    if (!key || key === 'hana') return 'ai'
+    const profile = getGuestProfile(key)
+    if (!profile?.key && !key) return 'ai'
+    const conversationId = humanChatThreadIdForUserKey(profile?.key || key)
+    if (!conversationId) return 'ai'
+    const pending = listChatOutboxForThread(conversationId, profile?.key || key).length > 0
+    return pending ? 'human' : loadChannel(conversationId)
+  } catch {
+    return 'ai'
   }
 }
 
@@ -755,7 +790,7 @@ export default function HanaChat({
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [channel, setChannel] = useState('ai') // ai | human (guest only)
+  const [channel, setChannel] = useState(() => readInitialGuestChannel(inputGuestKey)) // ai | human (guest only)
   const [aiMessages, setAiMessages] = useState(() => defaultIntroMessages(getGuestProfile(inputGuestKey)))
   const [hanaMessages, setHanaMessages] = useState([])
   /** True after first Firestore snapshot for the open human thread. */
@@ -931,8 +966,10 @@ export default function HanaChat({
     saveThreadMessageCache(id, merged)
   }, [])
 
+  const openHumanThreadRef = useRef('')
   const showThreadMessages = useCallback((threadId, relatedIds = [], guestUserId = '') => {
     if (!threadId) {
+      openHumanThreadRef.current = ''
       setHanaMessages([])
       return
     }
@@ -942,8 +979,18 @@ export default function HanaChat({
       memoryCache: messageCacheRef.current,
       guestUserId,
     })
-    stashThreadMessagesInCache(threadId, rows)
-    setHanaMessages(rows)
+    const threadKey = String(threadId).trim()
+    if (rows.length) {
+      stashThreadMessagesInCache(threadId, rows)
+      setHanaMessages(rows)
+      openHumanThreadRef.current = threadKey
+      return
+    }
+    // Never wipe in-flight bubbles on an empty bootstrap for the same open thread.
+    if (openHumanThreadRef.current !== threadKey) {
+      openHumanThreadRef.current = threadKey
+      setHanaMessages([])
+    }
   }, [stashThreadMessagesInCache])
 
   const pinChatListToLatest = useCallback(() => {
@@ -1167,6 +1214,36 @@ export default function HanaChat({
     },
     onHydrated: () => setMessagesHydrated(true),
   })
+
+  useEffect(() => {
+    if (!open || actingAsOwner || !guestOnHuman || !guestLiveThreadId) return undefined
+    let cancelled = false
+    const relatedIds = [
+      guestChatId,
+      guestProfile?.key ? `guest-${guestProfile.key}` : '',
+    ].filter(Boolean)
+    void bootstrapConversationRowsAsync({
+      conversationId: guestLiveThreadId,
+      relatedIds,
+      memoryCache: messageCacheRef.current,
+      guestUserId: guestProfile?.key || guestKey || '',
+    }).then((rows) => {
+      if (cancelled || !rows.length) return
+      stashThreadMessagesInCache(guestLiveThreadId, rows)
+      setHanaMessages((prev) => mergeMessagesByClientId(prev, rows))
+      setMessagesHydrated(true)
+    })
+    return () => { cancelled = true }
+  }, [
+    open,
+    actingAsOwner,
+    guestOnHuman,
+    guestLiveThreadId,
+    guestChatId,
+    guestProfile?.key,
+    guestKey,
+    stashThreadMessagesInCache,
+  ])
 
   const typingGuestKeyRef = useRef('')
   typingGuestKeyRef.current = actingAsOwner
@@ -5264,24 +5341,27 @@ export default function HanaChat({
               sender: pendingReply.sender || pendingReply.role,
             }
           : null
-        setHanaMessages((prev) => [
-          ...prev,
-          {
-            id: pendingId,
-            clientId: pendingId,
-            pending: false,
-            sendFailed: false,
-            uploading: false,
-            role: 'guest',
-            sender: 'guest',
-            text: sendText,
-            rawText: sendText,
-            createdAt: nowIso,
-            createdAtIso: nowIso,
-            ...localMedia,
-            replyTo: replySnapshot,
-          },
-        ])
+        const optimisticRow = {
+          id: pendingId,
+          clientId: pendingId,
+          pending: false,
+          sendFailed: false,
+          uploading: false,
+          role: 'guest',
+          sender: 'guest',
+          text: sendText,
+          rawText: sendText,
+          createdAt: nowIso,
+          createdAtIso: nowIso,
+          ...localMedia,
+          replyTo: replySnapshot,
+        }
+        setHanaMessages((prev) => {
+          const next = [...prev, optimisticRow]
+          const cacheId = normalizeConversationId(threadId) || threadId
+          if (cacheId) saveThreadMessageCache(cacheId, next)
+          return next
+        })
         scrollToLatestRef.current()
         setChannel('human')
         upsertChatOutbox({
@@ -6433,6 +6513,7 @@ export default function HanaChat({
             <div className="hana-chat-suggest">
               <button
                 type="button"
+                data-testid="hana-chat-human-mode"
                 onClick={() => switchToHuman(HUMAN_SWITCH_INTENT)}
               >
                 本物のはなと話したい

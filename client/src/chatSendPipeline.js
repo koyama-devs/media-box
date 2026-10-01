@@ -6,6 +6,7 @@
 import { normalizeConversationId } from './chat/chatIdentity.js'
 import { mergeChatMessageLists, mergeServerWithOutboxPending } from './chat/chatMerge.js'
 import { newClientMessageId } from './chat/clientMessageId.js'
+import { ensureChatStorageReady } from './chat/chatStorageInit.js'
 import { isTestChatMessageText } from './chat/testMessageText.js'
 import {
   deliverChatOutbox,
@@ -276,7 +277,7 @@ export function runDirectSendWithOutbox({
   const clientId = String(outboxEntry?.clientId || '').trim()
   const conversationId = normalizeConversationId(outboxEntry?.threadId) || String(outboxEntry?.threadId || '').trim()
   if (conversationId && clientId) {
-    void upsertLocalChatMessage(conversationId, {
+    const localRow = {
       id: clientId,
       clientId,
       clientMessageId: clientId,
@@ -286,7 +287,8 @@ export function runDirectSendWithOutbox({
       status: 'pending',
       pending: true,
       createdAtIso: outboxEntry.createdAtIso || new Date().toISOString(),
-    })
+    }
+    void ensureChatStorageReady().then(() => upsertLocalChatMessage(conversationId, localRow))
   }
   if (clientId) touchOutboxSending(clientId)
   const writePromise = Promise.resolve().then(runSend)

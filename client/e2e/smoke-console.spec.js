@@ -44,9 +44,12 @@ test.describe('Smoke — console errors & chat open', () => {
     const pageErrors = []
     page.on('pageerror', (err) => pageErrors.push(String(err)))
 
+    await page.addInitScript(() => {
+      window.localStorage.setItem('media-share-lite-auth', 'true')
+      window.localStorage.setItem('media-share-lite-role', 'owner')
+      window.localStorage.setItem('media-share-lite-guest', 'hana')
+    })
     await page.goto('/')
-    await page.locator('#password').fill('hana')
-    await page.locator('form.login-form button[type="submit"]').click()
     await expect(page.locator('#password')).toHaveCount(0, { timeout: 25_000 })
 
     await page.getByTestId('hana-chat-launcher').click({ force: true })

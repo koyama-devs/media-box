@@ -164,7 +164,10 @@ export function saveThreadMessagesSync(conversationId, messages) {
   if (!id) return
   const slice = (messages || []).slice(-300)
   threadMemory.set(id, slice)
-  void saveThreadMessages(id, slice)
+  void import('../chat/chatStorageInit.js')
+    .then((mod) => mod.ensureChatStorageReady())
+    .then(() => saveThreadMessages(id, slice))
+    .catch(() => {})
 }
 
 export async function upsertLocalChatMessage(conversationId, message) {
