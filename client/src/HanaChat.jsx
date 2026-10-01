@@ -892,15 +892,19 @@ export default function HanaChat({
       setHanaMessages([])
       return
     }
+    const logicalId = normalizeConversationId(
+      humanChatThreadIdForUserKey(guestUserId || humanUserKeyFromChatThreadId(threadId))
+      || threadId,
+    )
     const rows = bootstrapConversationRowsSync({
-      conversationId: threadId,
+      conversationId: logicalId,
       relatedIds,
       memoryCache: messageCacheRef.current,
       guestUserId,
     })
-    const threadKey = String(threadId).trim()
+    const threadKey = logicalId
     if (rows.length) {
-      stashThreadMessagesInCache(threadId, rows)
+      stashThreadMessagesInCache(logicalId, rows)
       setHanaMessages(rows)
       openHumanThreadRef.current = threadKey
       return
@@ -1875,7 +1879,10 @@ export default function HanaChat({
           }).catch(() => {})
         }
       },
-      (err) => setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。'),
+      (err) => {
+        // Offline / listener error: keep IndexedDB paint; do not clear bubbles.
+        setError(getFirebaseErrorMessage(err) || 'メッセージの読み込みに失敗しました。')
+      },
       guestProfile?.key || guestKey || '',
     )
     return unsub
@@ -4021,25 +4028,32 @@ export default function HanaChat({
     const relatedIds = localMatches.map((t) => t.id).filter(Boolean)
     const openId = canon || localMatches[0]?.id || threadId
     if (!openId) return
+    const logicalId = normalizeConversationId(
+      humanChatThreadIdForUserKey(key) || openId,
+    )
     saveOwnerActiveGuestKey(key)
     if (openId !== activeThreadId) {
-      showThreadMessages(openId, [...relatedIds, threadId, canon].filter(Boolean))
+      showThreadMessages(
+        logicalId,
+        [...relatedIds, threadId, canon, openId].filter(Boolean),
+        key,
+      )
       setMessagesHydrated(false)
       setShowSummerFx(false)
       setActiveThreadId(openId)
     }
     const loadToken = ++ownerThreadLoadRef.current
-    void fetchChatMessages(openId, key).then((rows) => {
+    void fetchChatMessages(logicalId, key).then((rows) => {
       if (loadToken !== ownerThreadLoadRef.current) return
       setHanaMessages((prev) => {
         const merged = applyChatMessageSnapshot({
           serverRows: rows,
           previous: prev,
           deletingIds: deletingIdsRef.current,
-          threadId: openId,
+          threadId: logicalId,
           guestKey: key,
         })
-        stashThreadMessagesInCache(openId, merged)
+        stashThreadMessagesInCache(logicalId, merged)
         return merged
       })
       setMessagesHydrated(true)

@@ -3,7 +3,9 @@ import {
     bootstrapConversationRowsAsync,
     bootstrapConversationRowsSync,
 } from './chatBootstrap.js'
+import { normalizeConversationId } from './chatIdentity.js'
 import { mergeMessagesByClientId } from './chatMerge.js'
+import { syncConversationMessagesFromServer } from './chatSync.js'
 
 /**
  * Local-first conversation open: IndexedDB → UI, then Firestore listener merges (in parent).
@@ -26,8 +28,9 @@ export function useConversationBootstrap({
   useEffect(() => {
     if (!enabled || !conversationId) return undefined
     let cancelled = false
+    const logicalId = normalizeConversationId(conversationId) || conversationId
     const syncRows = bootstrapConversationRowsSync({
-      conversationId,
+      conversationId: logicalId,
       relatedIds,
       memoryCache,
       guestUserId,
@@ -36,15 +39,23 @@ export function useConversationBootstrap({
       onRowsRef.current?.(syncRows, { phase: 'sync' })
     }
     void bootstrapConversationRowsAsync({
-      conversationId,
+      conversationId: logicalId,
       relatedIds,
       memoryCache,
       guestUserId,
-    }).then((asyncRows) => {
+    }).then(async (asyncRows) => {
       if (cancelled) return
-      const merged = mergeMessagesByClientId(syncRows, asyncRows)
-      if (merged.length) onRowsRef.current?.(merged, { phase: 'idb' })
-      onHydratedRef.current?.()
+      const localMerged = mergeMessagesByClientId(syncRows, asyncRows)
+      if (localMerged.length) onRowsRef.current?.(localMerged, { phase: 'idb' })
+      const serverMerged = await syncConversationMessagesFromServer({
+        conversationId: logicalId,
+        guestUserId,
+        previousUiRows: localMerged,
+      })
+      if (!cancelled && serverMerged.length) {
+        onRowsRef.current?.(serverMerged, { phase: 'server' })
+      }
+      if (!cancelled) onHydratedRef.current?.()
     })
     return () => { cancelled = true }
   }, [enabled, conversationId, guestUserId, relatedKey])
