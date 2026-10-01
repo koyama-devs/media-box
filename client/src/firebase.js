@@ -4294,7 +4294,9 @@ export async function sendChatMessage({
   }
 
   const role = sender === 'hana' ? 'hana' : 'guest'
-  const canonicalThreadId = await resolveCanonicalChatThreadId(threadId, guestKey)
+  const canonicalThreadId =
+    resolveCanonicalChatThreadIdSync(threadId, guestKey)
+    || (await resolveCanonicalChatThreadId(threadId, guestKey))
   if (!canonicalThreadId) return null
   const threadRef = doc(db, CHAT_THREADS_COLLECTION, canonicalThreadId)
   const messagesRef = collection(threadRef, 'messages')

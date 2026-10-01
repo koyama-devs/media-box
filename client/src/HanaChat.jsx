@@ -18,28 +18,15 @@ import ChatImageLightbox from './ChatImageLightbox'
 import { collectMessageSearchHits, normalizeMessageSearchQuery } from './chatMessageSearch'
 import ChatNatsuFireworks from './ChatNatsuFireworks'
 import { playChatNotifySound, unlockChatNotifySound } from './chatNotifySound'
-import {
-  deliverChatOutbox,
-  listChatOutboxForThread,
-  listChatRecoveryForThread,
-  outboxEntryToLocalMessage,
-  purgeChatDeliveryEntry,
-  resolveRetryableOutboxEntry,
-  upsertChatOutbox
-} from './chatOutbox'
+import { listChatOutboxForThread } from './chatOutbox'
 import ChatPokeZukan, { PokeZukanChip } from './ChatPokeZukan'
 import {
   applyChatMessageSnapshot,
   buildOptimisticMessage,
-  CHAT_SEND_TIMEOUT_MS,
   CHAT_UPLOAD_TIMEOUT_MS,
-  mapMessagesWithServerId,
   nextChatPendingId,
   nextStickerPendingId,
-  patchMessagesByPendingId,
-  runChatWrite,
   saveThreadMessageCache,
-  watchLateChatWrite,
   withChatTimeout
 } from './chatSendPipeline'
 import {
@@ -82,7 +69,6 @@ import {
   getGuestProfile,
   getMessageDeliveryStatus,
   isChatAudioAttachment,
-  isTestChatMessageText,
   listGuestProfiles,
   markThreadRead,
   mergeChatMessageLists,
@@ -94,6 +80,7 @@ import {
   resolveAccountKey,
   resolveAvatarSrc,
   resolveCanonicalChatThreadId,
+  resolveCanonicalChatThreadIdSync,
   resolveChatPresence,
   resolveGuestDisplayName,
   resolveSessionProfile,
@@ -1941,80 +1928,8 @@ export default function HanaChat({
     return undefined
   }, [hidden, actingAsOwner, ownerActiveGuestKey, activeThreadId, ownerActiveGuestLabel])
 
-  // Restore unsent text/stickers after reload so bubbles do not silently vanish.
-  useEffect(() => {
-    if (hidden) return undefined
-    const threadId = actingAsOwner
-      ? (ownerLiveThreadId || activeThreadId)
-      : (guestOnHuman ? guestLiveThreadId : '')
-    if (!threadId) return undefined
-    const recoveryGuestKey = actingAsOwner
-      ? ownerActiveGuestKey
-      : (guestProfile?.key || guestKey || '')
-    const entries = listChatRecoveryForThread(threadId, recoveryGuestKey)
-    const recoverable = []
-    for (const entry of entries) {
-      const body = String(entry?.text || entry?.sticker || '').trim()
-      const serverId = String(entry?.serverId || '').trim()
-      if (isTestChatMessageText(body) && !serverId) {
-        purgeChatDeliveryEntry(entry.clientId)
-        continue
-      }
-      recoverable.push(entry)
-    }
-    if (!recoverable.length) return undefined
+  // Human sends go straight to Firestore; listener is source of truth (no outbox replay).
 
-    setHanaMessages((prev) => {
-      const existing = new Set(
-        (prev || []).flatMap((m) => [String(m.id || ''), String(m.clientId || '')]),
-      )
-      const extras = []
-      for (const entry of recoverable) {
-        if (existing.has(String(entry.clientId || ''))) continue
-        const local = outboxEntryToLocalMessage(entry)
-        if (local) extras.push(local)
-      }
-      if (!extras.length) return prev
-      return sortChatMessages([...(prev || []), ...extras])
-    })
-
-    const timer = window.setTimeout(() => {
-      for (const entry of recoverable) {
-        const id = String(entry.clientId || '')
-        if (!id || sendInFlightRef.current.has(id)) continue
-        const body = String(entry?.text || entry?.sticker || '').trim()
-        if (isTestChatMessageText(body)) continue
-        void retryFailedSendRef.current(id)
-      }
-    }, 700)
-    return () => window.clearTimeout(timer)
-  }, [
-    hidden,
-    actingAsOwner,
-    activeThreadId,
-    guestChatId,
-    guestKey,
-    guestOnHuman,
-    guestProfile?.key,
-    ownerActiveGuestKey,
-  ])
-
-  useEffect(() => {
-    const onOnline = () => {
-      const retryQueue = (hanaMessages || []).filter((m) => {
-        if (!m) return false
-        const clientId = String(m.clientId || m.id || '')
-        if (!clientId) return false
-        if (sendInFlightRef.current.has(clientId)) return false
-        return Boolean(m.sendFailed || (m.pending && !m.serverId))
-      })
-      for (const message of retryQueue) {
-        void retryFailedSendRef.current(message.clientId || message.id)
-      }
-    }
-    window.addEventListener('online', onOnline)
-    return () => window.removeEventListener('online', onOnline)
-  }, [hanaMessages])
 
   const requestOwnerAssist = useCallback(async (message, { force = false } = {}) => {
     if (!actingAsOwner || !message?.id) return
@@ -3851,7 +3766,6 @@ export default function HanaChat({
   const resolveDelivery = useCallback((message) => {
     if (message.deleted) return null
     if (message.sendFailed) return 'failed'
-    if (message.pending || message.uploading) return 'sending'
     if (actingAsOwner || guestOnHuman) {
       const viewer = actingAsOwner ? 'hana' : 'guest'
       const sender = message.sender || (message.role === 'hana' ? 'hana' : 'guest')
@@ -4179,38 +4093,24 @@ export default function HanaChat({
       threadId = actingAsOwner
         ? activeThreadId
         : (guestProfile?.key ? `guest-${guestProfile.key}` : (guestChatId || ensureGuestChatId(guestKey || 'guest')))
-      const canonicalThreadId = !actingAsOwner && guestProfile?.key
-        ? threadId
-        : await resolveCanonicalChatThreadId(
-            threadId,
-            actingAsOwner ? ownerActiveGuestKey || '' : (guestProfile?.key || guestKey || ''),
-          )
-      if (canonicalThreadId && canonicalThreadId !== threadId) {
-        threadId = canonicalThreadId
-        if (!actingAsOwner) setGuestChatId(threadId)
-      }
+      const guestKeyForSend = actingAsOwner ? ownerActiveGuestKey || '' : (guestProfile?.key || guestKey || '')
+      threadId = resolveCanonicalChatThreadIdSync(threadId, guestKeyForSend)
+        || (!actingAsOwner && guestProfile?.key
+          ? threadId
+          : await resolveCanonicalChatThreadId(threadId, guestKeyForSend))
+        || threadId
       if (!actingAsOwner) {
-        if (!guestChatId) setGuestChatId(threadId)
+        if (guestChatId !== threadId) setGuestChatId(threadId)
         saveChannel(threadId, 'human')
         if (channel !== 'human') switchToHuman(HUMAN_SWITCH_INTENT)
       }
 
       const guestMeta = actingAsOwner
-        ? {}
+        ? { guestKey: ownerActiveGuestKey || '', guestLabel: ownerActiveGuestLabel }
         : {
             guestLabel: guestThreadLabel,
             guestKey: guestProfile?.key || guestKey || '',
           }
-      // Persist before paint so reload never loses the bubble.
-      upsertChatOutbox({
-        clientId: pendingId,
-        threadId,
-        text: label,
-        sender: role,
-        sticker: id,
-        createdAtIso: nowIso,
-        ...guestMeta,
-      })
 
       setHanaMessages((prev) => [
         ...prev,
@@ -4230,7 +4130,7 @@ export default function HanaChat({
         handleLocalEffect(burst)
       }
 
-      const writePromise = sendChatMessage({
+      await sendChatMessage({
         threadId,
         text: label,
         sender: role,
@@ -4239,66 +4139,9 @@ export default function HanaChat({
         createdAtIso: nowIso,
         ...guestMeta,
       })
-      const outcome = await runChatWrite({
-        clientId: pendingId,
-        writePromise,
-        timeoutMs: CHAT_SEND_TIMEOUT_MS,
-        inFlightMap: sendInFlightRef.current,
-      })
-      if (outcome.status === 'timeout') {
-        setHanaMessages((prev) => patchMessagesByPendingId(prev, pendingId, {
-          pending: true,
-          sendFailed: false,
-        }))
-        setError('')
-        watchLateChatWrite({
-          writePromise: outcome.writePromise,
-          clientId: pendingId,
-          pendingId,
-          inFlightMap: sendInFlightRef.current,
-          onServerId: (serverId) => {
-            setHanaMessages((prev) => mapMessagesWithServerId(prev, {
-              pendingId,
-              serverId,
-              clientId: pendingId,
-            }))
-          },
-          retryFn: (cid) => retryFailedSendRef.current?.(cid),
-        })
-        if (!actingAsOwner) setChannel('human')
-        return
-      }
-      if (outcome.serverId) {
-        setHanaMessages((prev) => mapMessagesWithServerId(prev, {
-          pendingId,
-          serverId: outcome.serverId,
-          clientId: pendingId,
-        }))
-      }
       if (!actingAsOwner) setChannel('human')
     } catch (err) {
-      sendInFlightRef.current.delete(pendingId)
-      setHanaMessages((prev) => prev.map((m) => (
-        m.id === pendingId
-          ? { ...m, pending: false, sendFailed: true }
-          : m
-      )))
-      if (threadId) {
-        upsertChatOutbox({
-          clientId: pendingId,
-          threadId,
-          text: label,
-          sender: role,
-          sticker: id,
-          createdAtIso: nowIso,
-          ...(actingAsOwner
-            ? {}
-            : {
-                guestLabel: guestThreadLabel,
-                guestKey: guestProfile?.key || guestKey || '',
-              }),
-        })
-      }
+      setHanaMessages((prev) => prev.filter((m) => m.id !== pendingId))
       setError(getFirebaseErrorMessage(err) || 'スタンプを送れませんでした。')
     } finally {
       scrollToLatestRef.current()
@@ -4382,8 +4225,8 @@ export default function HanaChat({
           {
             id: pendingId,
             clientId: pendingId,
-            pending: true,
-            uploading: true,
+            pending: false,
+            uploading: false,
             sendFailed: false,
             role,
             sender: role,
@@ -4421,7 +4264,7 @@ export default function HanaChat({
             }
           : m
       )))
-      const writePromise = sendChatMessage({
+      await sendChatMessage({
         threadId,
         text: caption,
         sender: role,
@@ -4431,87 +4274,14 @@ export default function HanaChat({
         fileMime: uploaded.fileMime,
         fileSize: uploaded.fileSize,
         clientId: pendingId,
-        createdAtIso: nowIso,
+        createdAtIso: new Date().toISOString(),
         ...guestMeta,
       })
-      sendInFlightRef.current.set(pendingId, writePromise)
-      let serverId = null
-      try {
-        serverId = await withChatTimeout(writePromise, CHAT_SEND_TIMEOUT_MS)
-      } catch (err) {
-        if (err?.code === 'chat/timeout') {
-          setHanaMessages((prev) => prev.map((m) => (
-            m.id === pendingId
-              ? { ...m, pending: true, sendFailed: false, uploading: false }
-              : m
-          )))
-          upsertChatOutbox({
-            clientId: pendingId,
-            threadId,
-            text: caption,
-            sender: role,
-            imageUrl,
-            fileKind: uploaded.kind,
-            fileName: uploaded.fileName,
-            fileMime: uploaded.fileMime,
-            fileSize: uploaded.fileSize,
-            createdAtIso: new Date().toISOString(),
-            ...guestMeta,
-          })
-          setError('')
-          writePromise.then((lateId) => {
-            if (!lateId) return
-            deliverChatOutbox(pendingId, lateId)
-            sendInFlightRef.current.delete(pendingId)
-            setHanaMessages((prev) => prev.map((m) => (
-              m.id === pendingId
-                ? {
-                    ...m,
-                    id: lateId,
-                    serverId: lateId,
-                    imageUrl: imageUrl || m.imageUrl,
-                    pending: false,
-                    sendFailed: false,
-                    uploading: false,
-                    clientId: pendingId,
-                  }
-                : m
-            )))
-          }).catch(() => {
-            sendInFlightRef.current.delete(pendingId)
-          })
-          window.setTimeout(() => {
-            void retryFailedSendRef.current?.(pendingId)
-          }, 1200)
-          if (!actingAsOwner) setChannel('human')
-          return
-        }
-        throw err
-      }
-      deliverChatOutbox(pendingId, serverId)
-      sendInFlightRef.current.delete(pendingId)
       if (imageUrl) {
-        await new Promise((resolve) => {
-          const img = new Image()
-          img.onload = () => resolve()
-          img.onerror = () => resolve()
-          img.src = imageUrl
-        })
+        setHanaMessages((prev) => prev.map((m) => (
+          m.id === pendingId ? { ...m, imageUrl: imageUrl || m.imageUrl } : m
+        )))
       }
-      setHanaMessages((prev) => prev.map((m) => (
-        m.id === pendingId
-          ? {
-              ...m,
-              imageUrl: imageUrl || m.imageUrl,
-              id: serverId || m.id,
-              serverId: serverId || m.serverId,
-              pending: false,
-              sendFailed: false,
-              uploading: false,
-              clientId: pendingId,
-            }
-          : m
-      )))
       URL.revokeObjectURL(localUrl)
       if (!actingAsOwner) setChannel('human')
     } catch (err) {
@@ -4637,23 +4407,13 @@ export default function HanaChat({
             guestKey: guestProfile?.key || guestKey || '',
           }
       const nowIso = new Date().toISOString()
-      upsertChatOutbox({
-        clientId: pendingId,
-        threadId,
-        text: described.text,
-        sender: role,
-        effect: described.effect,
-        effectEmoji: described.effectEmoji,
-        createdAtIso: nowIso,
-        ...guestMeta,
-      })
 
       setHanaMessages((prev) => [
         ...prev,
         {
           id: pendingId,
           clientId: pendingId,
-          pending: true,
+          pending: false,
           sendFailed: false,
           role,
           sender: role,
@@ -4668,7 +4428,7 @@ export default function HanaChat({
       ])
       scrollToLatestRef.current()
 
-      const writePromise = sendChatMessage({
+      await sendChatMessage({
         threadId,
         text: described.text,
         sender: role,
@@ -4678,63 +4438,6 @@ export default function HanaChat({
         createdAtIso: nowIso,
         ...guestMeta,
       })
-      sendInFlightRef.current.set(pendingId, writePromise)
-
-      let serverId = null
-      try {
-        serverId = await withChatTimeout(writePromise, CHAT_SEND_TIMEOUT_MS)
-      } catch (err) {
-        if (err?.code === 'chat/timeout') {
-          setHanaMessages((prev) => prev.map((m) => (
-            m.id === pendingId
-              ? { ...m, pending: true, sendFailed: false }
-              : m
-          )))
-          setError('')
-          writePromise.then((lateId) => {
-            if (!lateId) return
-            deliverChatOutbox(pendingId, lateId)
-            sendInFlightRef.current.delete(pendingId)
-            setHanaMessages((prev) => prev.map((m) => (
-              m.id === pendingId
-                ? {
-                    ...m,
-                    id: lateId,
-                    serverId: lateId,
-                    pending: false,
-                    sendFailed: false,
-                    clientId: pendingId,
-                  }
-                : m
-            )))
-          }).catch(() => {
-            sendInFlightRef.current.delete(pendingId)
-          })
-          window.setTimeout(() => {
-            void retryFailedSendRef.current?.(pendingId)
-          }, 1200)
-          if (!actingAsOwner) setChannel('human')
-          return
-        }
-        throw err
-      }
-
-      deliverChatOutbox(pendingId, serverId)
-      sendInFlightRef.current.delete(pendingId)
-      if (serverId) {
-        setHanaMessages((prev) => prev.map((m) => (
-          m.id === pendingId
-            ? {
-                ...m,
-                id: serverId,
-                serverId,
-                pending: false,
-                sendFailed: false,
-                clientId: pendingId,
-              }
-            : m
-        )))
-      }
       if (!actingAsOwner) setChannel('human')
     } catch (err) {
       sendInFlightRef.current.delete(pendingId)
@@ -5008,193 +4711,7 @@ export default function HanaChat({
     notifyAction('リマインダーをセットしました')
   }
 
-  const retryFailedSend = useCallback(async (messageId) => {
-    const mid = String(messageId || '').trim()
-    if (!mid) return
-    const local = resolveRetryableOutboxEntry({
-      threadId: actingAsOwner
-        ? (activeThreadId || '')
-        : (guestProfile?.key ? `guest-${guestProfile.key}` : (guestChatId || ensureGuestChatId(guestKey || 'guest'))),
-      guestKey: actingAsOwner ? ownerActiveGuestKey || '' : (guestProfile?.key || guestKey || ''),
-      clientId: mid,
-      messageId: mid,
-      messages: hanaMessages || [],
-    })
-    const shouldRetry = Boolean(local?.sendFailed || (local?.pending && !local?.serverId))
-    if (!shouldRetry) return
-    const clientId = String(local.clientId || local.id || '')
-    if (!clientId) return
-
-    let threadId = actingAsOwner
-      ? (activeThreadId || '')
-      : (guestProfile?.key ? `guest-${guestProfile.key}` : (guestChatId || ensureGuestChatId(guestKey || 'guest')))
-    if (!threadId) {
-      setError('送信先のチャットを選んでください。')
-      return
-    }
-    const canonicalThreadId = await resolveCanonicalChatThreadId(
-      threadId,
-      actingAsOwner ? ownerActiveGuestKey || '' : (guestProfile?.key || guestKey || ''),
-    )
-    if (canonicalThreadId && canonicalThreadId !== threadId) {
-      threadId = canonicalThreadId
-      if (!actingAsOwner) setGuestChatId(threadId)
-    }
-    if (!actingAsOwner && !guestChatId) setGuestChatId(threadId)
-
-    const sender = local.sender === 'hana' || local.role === 'hana' ? 'hana' : 'guest'
-    const text = String(local.rawText || local.text || '').trim()
-    const hasMediaPayload = Boolean(
-      local.imageUrl
-      || local.fileUrl
-      || local.sticker
-      || local.effect
-      || (Array.isArray(local.attachments) && local.attachments.length)
-    )
-    if (!text && !hasMediaPayload) return
-    if (isTestChatMessageText(text || local.sticker || '')) {
-      purgeChatDeliveryEntry(clientId)
-      setHanaMessages((prev) => prev.filter((m) => m.id !== mid && m.clientId !== clientId))
-      return
-    }
-
-    setError('')
-    setHanaMessages((prev) => prev.map((m) => (
-      (m.id === mid || m.clientId === clientId)
-        ? { ...m, pending: true, sendFailed: false, uploading: false }
-        : m
-    )))
-
-    const applySuccess = (serverId) => {
-      if (!serverId) return
-      deliverChatOutbox(clientId, serverId)
-      sendInFlightRef.current.delete(clientId)
-      setHanaMessages((prev) => mapMessagesWithServerId(prev, {
-        pendingId: mid,
-        serverId,
-        clientId,
-        extra: { uploading: false },
-      }))
-    }
-
-    const existing = sendInFlightRef.current.get(clientId)
-    if (existing) {
-      try {
-        const result = await withChatTimeout(existing, CHAT_SEND_TIMEOUT_MS)
-        const serverId = typeof result === 'string' ? result : result?.serverId
-        applySuccess(serverId)
-        setError('')
-      } catch (err) {
-        setHanaMessages((prev) => prev.map((m) => (
-          (m.id === mid || m.clientId === clientId)
-            ? { ...m, pending: true, sendFailed: false, uploading: false }
-            : m
-        )))
-        setError('')
-        if (err?.code === 'chat/timeout') {
-          window.setTimeout(() => {
-            void retryFailedSendRef.current?.(clientId)
-          }, 1200)
-        }
-      }
-      return
-    }
-
-    const guestMeta = sender === 'guest'
-      ? {
-          guestLabel: guestThreadLabel,
-          guestKey: guestProfile?.key || guestKey || '',
-        }
-      : {
-          guestLabel: ownerActiveGuestLabel,
-          guestKey: ownerActiveGuestKey || '',
-        }
-
-    const mediaPayload = {
-      ...(local.imageUrl && !String(local.imageUrl).startsWith('blob:')
-        ? { imageUrl: local.imageUrl }
-        : {}),
-      ...(local.fileUrl && !String(local.fileUrl).startsWith('blob:')
-        ? { fileUrl: local.fileUrl }
-        : {}),
-      ...(local.fileKind ? { fileKind: local.fileKind } : {}),
-      ...(local.fileName ? { fileName: local.fileName } : {}),
-      ...(local.fileMime ? { fileMime: local.fileMime } : {}),
-      ...(local.fileSize ? { fileSize: local.fileSize } : {}),
-      ...(Array.isArray(local.attachments) && local.attachments.length
-        && local.attachments.every((item) => item?.url && !String(item.url).startsWith('blob:'))
-        ? { attachments: local.attachments }
-        : {}),
-    }
-
-    upsertChatOutbox({
-      clientId,
-      threadId,
-      text,
-      sender,
-      sticker: local.sticker || '',
-      effect: local.effect || '',
-      effectEmoji: local.effectEmoji || '',
-      replyTo: local.replyTo || null,
-      createdAtIso: local.createdAtIso || local.createdAt || new Date().toISOString(),
-      ...guestMeta,
-      ...mediaPayload,
-    })
-
-    const writePromise = sendChatMessage({
-      threadId,
-      text,
-      sender,
-      clientId,
-      sticker: local.sticker || undefined,
-      effect: local.effect || undefined,
-      effectEmoji: local.effectEmoji || undefined,
-      replyTo: local.replyTo || null,
-      createdAtIso: local.createdAtIso || local.createdAt || '',
-      ...guestMeta,
-      ...mediaPayload,
-    })
-    sendInFlightRef.current.set(clientId, writePromise)
-
-    try {
-      const serverId = await withChatTimeout(writePromise, CHAT_SEND_TIMEOUT_MS)
-      applySuccess(serverId)
-      setError('')
-    } catch (err) {
-      if (err?.code === 'chat/timeout') {
-        setHanaMessages((prev) => prev.map((m) => (
-          (m.id === mid || m.clientId === clientId)
-            ? { ...m, pending: true, sendFailed: false, uploading: false }
-            : m
-        )))
-        setError('')
-        writePromise.then(applySuccess).catch(() => {
-          sendInFlightRef.current.delete(clientId)
-        })
-        window.setTimeout(() => {
-          void retryFailedSendRef.current?.(clientId)
-        }, 1200)
-        return
-      }
-      sendInFlightRef.current.delete(clientId)
-      setHanaMessages((prev) => prev.map((m) => (
-        (m.id === mid || m.clientId === clientId)
-          ? { ...m, pending: false, sendFailed: true, uploading: false }
-          : m
-      )))
-      setError(getFirebaseErrorMessage(err) || '送信に失敗しました。通信状況を確認して、少し待ってからもう一度お試しください。')
-    }
-  }, [
-    actingAsOwner,
-    activeThreadId,
-    guestChatId,
-    guestKey,
-    guestProfile?.key,
-    guestThreadLabel,
-    hanaMessages,
-    ownerActiveGuestKey,
-    ownerActiveGuestLabel,
-  ])
+  const retryFailedSend = useCallback(async () => {}, [])
   retryFailedSendRef.current = retryFailedSend
 
   const handleSend = async (event) => {
@@ -5284,13 +4801,13 @@ export default function HanaChat({
           showThreadMessages(threadId, [activeThreadId, canonId].filter(Boolean))
           setActiveThreadId(threadId)
         }
-        const canonicalThreadId = await resolveCanonicalChatThreadId(threadId, ownerActiveGuestKey || '')
-        const sendThreadId = canonicalThreadId || threadId
-        if (sendThreadId !== threadId) {
-          showThreadMessages(sendThreadId, [threadId, sendThreadId].filter(Boolean))
-          setActiveThreadId(sendThreadId)
+        const effectiveThreadId = resolveCanonicalChatThreadIdSync(threadId, ownerActiveGuestKey || '')
+          || (await resolveCanonicalChatThreadId(threadId, ownerActiveGuestKey || ''))
+          || threadId
+        if (effectiveThreadId !== activeThreadId) {
+          showThreadMessages(effectiveThreadId, [activeThreadId, effectiveThreadId].filter(Boolean))
+          setActiveThreadId(effectiveThreadId)
         }
-        const effectiveThreadId = sendThreadId
         const pendingId = nextChatPendingId('msg')
         pendingSendId = pendingId
         const localMedia = localMediaFieldsFromQueue(queued)
@@ -5301,23 +4818,14 @@ export default function HanaChat({
               sender: pendingReply.sender || pendingReply.role,
             }
           : null
-        upsertChatOutbox({
-          clientId: pendingId,
-          threadId: effectiveThreadId,
-          text: sendText,
-          sender: 'hana',
-          guestKey: ownerActiveGuestKey || '',
-          guestLabel: ownerActiveGuestLabel,
-          replyTo: replySnapshot,
-          createdAtIso: nowIso,
-        })
         setHanaMessages((prev) => [
           ...prev,
           {
             id: pendingId,
             clientId: pendingId,
-            pending: true,
+            pending: false,
             sendFailed: false,
+            uploading: false,
             role: 'hana',
             sender: 'hana',
             text: sendText,
@@ -5329,120 +4837,50 @@ export default function HanaChat({
           },
         ])
         scrollToLatestRef.current()
-
-        const writePromise = (async () => {
-          const uploadedList = queued.length ? await (async () => {
-            const out = []
-            for (const item of queued) {
-              const uploaded = await uploadChatAttachment(effectiveThreadId, item.file)
-              out.push({
-                url: uploaded.url,
-                kind: uploaded.kind,
-                fileName: uploaded.fileName,
-                fileMime: uploaded.fileMime,
-                fileSize: uploaded.fileSize,
-                voiceSkin: item.voiceSkin || '',
-              })
+        void (async () => {
+          try {
+            const uploadedList = queued.length ? await (async () => {
+              const out = []
+              for (const item of queued) {
+                const uploaded = await uploadChatAttachment(effectiveThreadId, item.file)
+                out.push({
+                  url: uploaded.url,
+                  kind: uploaded.kind,
+                  fileName: uploaded.fileName,
+                  fileMime: uploaded.fileMime,
+                  fileSize: uploaded.fileSize,
+                  voiceSkin: item.voiceSkin || '',
+                })
+              }
+              return out
+            })() : []
+            const mediaFields = uploadedMediaFields(uploadedList)
+            if (Object.keys(mediaFields).length) {
+              setHanaMessages((prev) => prev.map((m) => (
+                m.id === pendingId ? { ...m, ...mediaFields } : m
+              )))
             }
-            return out
-          })() : []
-          const mediaFields = uploadedMediaFields(uploadedList)
-          if (Object.keys(mediaFields).length) {
-            upsertChatOutbox({
-              clientId: pendingId,
+            await sendChatMessage({
               threadId: effectiveThreadId,
               text: sendText,
               sender: 'hana',
+              clientId: pendingId,
+              replyTo: pendingReply,
+              createdAtIso: nowIso,
               guestKey: ownerActiveGuestKey || '',
               guestLabel: ownerActiveGuestLabel,
-              replyTo: replySnapshot,
-              createdAtIso: nowIso,
               ...mediaFields,
             })
+          } catch (err) {
+            setHanaMessages((prev) => prev.filter((m) => m.id !== pendingId))
+            setError(getFirebaseErrorMessage(err) || '送信に失敗しました。')
+          } finally {
+            for (const item of queued) {
+              if (item.previewUrl) URL.revokeObjectURL(item.previewUrl)
+            }
+            scrollToLatestRef.current()
           }
-          const serverId = await sendChatMessage({
-            threadId: effectiveThreadId,
-            text: sendText,
-            sender: 'hana',
-            clientId: pendingId,
-            replyTo: pendingReply,
-            createdAtIso: nowIso,
-            guestKey: ownerActiveGuestKey || '',
-            guestLabel: ownerActiveGuestLabel,
-            ...mediaFields,
-          })
-          return { serverId, mediaFields }
         })()
-        sendInFlightRef.current.set(pendingId, writePromise)
-
-        const applyOwnerSuccess = ({ serverId, mediaFields }) => {
-          if (!serverId) return
-          deliverChatOutbox(pendingId, serverId)
-          sendInFlightRef.current.delete(pendingId)
-          setHanaMessages((prev) => prev.map((m) => (
-            m.id === pendingId
-              ? {
-                  ...m,
-                  ...mediaFields,
-                  id: serverId,
-                  serverId,
-                  pending: false,
-                  sendFailed: false,
-                  uploading: false,
-                  clientId: pendingId,
-                }
-              : m
-          )))
-          const cached = messageCacheRef.current.get(effectiveThreadId) || []
-          const withoutPending = cached.filter((m) => m.id !== pendingId && m.id !== serverId)
-          messageCacheRef.current.set(effectiveThreadId, [
-            ...withoutPending,
-            {
-              id: serverId,
-              clientId: pendingId,
-              role: 'hana',
-              sender: 'hana',
-              text: sendText,
-              rawText: sendText,
-              createdAt: nowIso,
-              createdAtIso: nowIso,
-              pending: false,
-              sendFailed: false,
-              ...mediaFields,
-              replyTo: replySnapshot,
-            },
-          ])
-        }
-
-        try {
-          const result = await withChatTimeout(
-            writePromise,
-            queued.length ? CHAT_UPLOAD_TIMEOUT_MS : CHAT_SEND_TIMEOUT_MS,
-          )
-          applyOwnerSuccess(result)
-        } catch (err) {
-          if (err?.code === 'chat/timeout') {
-            setHanaMessages((prev) => prev.map((m) => (
-              m.id === pendingId
-                ? { ...m, pending: true, sendFailed: false, uploading: false }
-                : m
-            )))
-            setError('')
-            writePromise.then(applyOwnerSuccess).catch(() => {
-              sendInFlightRef.current.delete(pendingId)
-            })
-            window.setTimeout(() => {
-              void retryFailedSendRef.current?.(pendingId)
-            }, 1200)
-            pendingSendId = ''
-          } else {
-            throw err
-          }
-        }
-        for (const item of queued) {
-          if (item.previewUrl) URL.revokeObjectURL(item.previewUrl)
-        }
-        scrollToLatestRef.current()
       } else if (queued.length || channel === 'human' || wantsHumanHana(text)) {
         if (channel !== 'human') {
           switchToHuman(HUMAN_SWITCH_INTENT)
@@ -5450,15 +4888,10 @@ export default function HanaChat({
         let threadId = guestProfile?.key
           ? `guest-${guestProfile.key}`
           : ensureGuestChatId(guestKey || 'guest')
-        const canonicalThreadId = actingAsOwner || !guestProfile?.key
-          ? await resolveCanonicalChatThreadId(
-              threadId,
-              guestProfile?.key || guestKey || '',
-            )
-          : threadId
-        if (canonicalThreadId && canonicalThreadId !== threadId) {
-          threadId = canonicalThreadId
-        }
+        threadId = resolveCanonicalChatThreadIdSync(threadId, guestProfile?.key || guestKey || '')
+          || (!guestProfile?.key
+            ? await resolveCanonicalChatThreadId(threadId, guestKey || '')
+            : threadId)
         if (guestChatId !== threadId) setGuestChatId(threadId)
         if (!actingAsOwner) saveChannel(threadId, 'human')
         const pendingId = nextChatPendingId('msg')
@@ -5471,23 +4904,14 @@ export default function HanaChat({
               sender: pendingReply.sender || pendingReply.role,
             }
           : null
-        upsertChatOutbox({
-          clientId: pendingId,
-          threadId,
-          text: sendText,
-          sender: 'guest',
-          guestLabel: guestThreadLabel,
-          guestKey: guestProfile?.key || guestKey || '',
-          replyTo: replySnapshot,
-          createdAtIso: nowIso,
-        })
         setHanaMessages((prev) => [
           ...prev,
           {
             id: pendingId,
             clientId: pendingId,
-            pending: true,
+            pending: false,
             sendFailed: false,
+            uploading: false,
             role: 'guest',
             sender: 'guest',
             text: sendText,
@@ -5499,102 +4923,51 @@ export default function HanaChat({
           },
         ])
         scrollToLatestRef.current()
-
-        const writePromise = (async () => {
-          const uploadedList = queued.length ? await (async () => {
-            const out = []
-            for (const item of queued) {
-              const uploaded = await uploadChatAttachment(threadId, item.file)
-              out.push({
-                url: uploaded.url,
-                kind: uploaded.kind,
-                fileName: uploaded.fileName,
-                fileMime: uploaded.fileMime,
-                fileSize: uploaded.fileSize,
-                voiceSkin: item.voiceSkin || '',
-              })
+        setChannel('human')
+        void (async () => {
+          try {
+            const uploadedList = queued.length ? await (async () => {
+              const out = []
+              for (const item of queued) {
+                const uploaded = await uploadChatAttachment(threadId, item.file)
+                out.push({
+                  url: uploaded.url,
+                  kind: uploaded.kind,
+                  fileName: uploaded.fileName,
+                  fileMime: uploaded.fileMime,
+                  fileSize: uploaded.fileSize,
+                  voiceSkin: item.voiceSkin || '',
+                })
+              }
+              return out
+            })() : []
+            const mediaFields = uploadedMediaFields(uploadedList)
+            if (Object.keys(mediaFields).length) {
+              setHanaMessages((prev) => prev.map((m) => (
+                m.id === pendingId ? { ...m, ...mediaFields } : m
+              )))
             }
-            return out
-          })() : []
-          const mediaFields = uploadedMediaFields(uploadedList)
-          if (Object.keys(mediaFields).length) {
-            upsertChatOutbox({
-              clientId: pendingId,
+            await sendChatMessage({
               threadId,
               text: sendText,
               sender: 'guest',
               guestLabel: guestThreadLabel,
               guestKey: guestProfile?.key || guestKey || '',
-              replyTo: replySnapshot,
+              clientId: pendingId,
+              replyTo: pendingReply,
               createdAtIso: nowIso,
               ...mediaFields,
             })
+          } catch (err) {
+            setHanaMessages((prev) => prev.filter((m) => m.id !== pendingId))
+            setError(getFirebaseErrorMessage(err) || '送信に失敗しました。')
+          } finally {
+            for (const item of queued) {
+              if (item.previewUrl) URL.revokeObjectURL(item.previewUrl)
+            }
+            scrollToLatestRef.current()
           }
-          const serverId = await sendChatMessage({
-            threadId,
-            text: sendText,
-            sender: 'guest',
-            guestLabel: guestThreadLabel,
-            guestKey: guestProfile?.key || guestKey || '',
-            clientId: pendingId,
-            replyTo: pendingReply,
-            createdAtIso: nowIso,
-            ...mediaFields,
-          })
-          return { serverId, mediaFields }
         })()
-        sendInFlightRef.current.set(pendingId, writePromise)
-
-        const applyGuestSuccess = ({ serverId, mediaFields }) => {
-          if (!serverId) return
-          deliverChatOutbox(pendingId, serverId)
-          sendInFlightRef.current.delete(pendingId)
-          setHanaMessages((prev) => prev.map((m) => (
-            m.id === pendingId
-              ? {
-                  ...m,
-                  ...mediaFields,
-                  id: serverId,
-                  serverId,
-                  pending: false,
-                  sendFailed: false,
-                  uploading: false,
-                  clientId: pendingId,
-                }
-              : m
-          )))
-        }
-
-        try {
-          const result = await withChatTimeout(
-            writePromise,
-            queued.length ? CHAT_UPLOAD_TIMEOUT_MS : CHAT_SEND_TIMEOUT_MS,
-          )
-          applyGuestSuccess(result)
-        } catch (err) {
-          if (err?.code === 'chat/timeout') {
-            setHanaMessages((prev) => prev.map((m) => (
-              m.id === pendingId
-                ? { ...m, pending: true, sendFailed: false, uploading: false }
-                : m
-            )))
-            setError('')
-            writePromise.then(applyGuestSuccess).catch(() => {
-              sendInFlightRef.current.delete(pendingId)
-            })
-            window.setTimeout(() => {
-              void retryFailedSendRef.current?.(pendingId)
-            }, 1200)
-            pendingSendId = ''
-          } else {
-            throw err
-          }
-        }
-        for (const item of queued) {
-          if (item.previewUrl) URL.revokeObjectURL(item.previewUrl)
-        }
-        setChannel('human')
-        scrollToLatestRef.current()
       } else {
         const history = aiMessages
           .filter((m) => !m.deleted && m.id !== INTRO_ID && m.kind !== 'human-switch' && m.kind !== 'intro')

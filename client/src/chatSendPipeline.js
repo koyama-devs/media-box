@@ -275,7 +275,7 @@ export function buildOptimisticMessage({
   return {
     id: pendingId,
     clientId: pendingId,
-    pending: true,
+    pending: false,
     sendFailed: false,
     role,
     sender: role,
