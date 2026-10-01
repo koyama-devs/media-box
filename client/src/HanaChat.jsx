@@ -70,7 +70,6 @@ import {
   broadcastChatEffect,
   CHAT_PRESENCE_MODES,
   CHAT_REACTION_EMOJIS,
-  chatWithHanachan,
   classifyChatAttachment,
   confirmJpTripArrived,
   consolidateGuestThreads,
@@ -151,7 +150,6 @@ import { POKE_ZUKAN_GUEST, tokyoZukanYmd, worldActiveMon } from './pokeZukan'
 import useComposerVoiceNote, { formatVoiceClock } from './useComposerVoiceNote'
 import { bindForegroundPush, ensureWebPush } from './webPush'
 
-const AI_HISTORY_PREFIX = 'hana-chat-ai-history-'
 const CHANNEL_PREFIX = 'hana-chat-channel-'
 const OWNER_SUGGEST_PREF_KEY = 'hana-chat-owner-suggest-enabled'
 /** Default guest selected in owner (real Hana) inbox. Password alias: gabu → gabusan. */
@@ -492,18 +490,6 @@ function readOwnerSuggestEnabled() {
   }
 }
 
-const INTRO_ID = 'welcome-intro'
-const HUMAN_SWITCH_NOTICE_ID = 'notice-human-switch'
-
-const HUMAN_SWITCH_QUOTA =
-  'はなちゃん、いま少しお休み中みたい。ここからははな本人に直接メッセージを送れるよ。'
-
-const HUMAN_SWITCH_INTENT =
-  'わかったよ。ここからははな本人に直接メッセージを送れるね。気軽に話しかけてみて。'
-
-const WANT_HUMAN_RE =
-  /(本物|本当|リアル).{0,6}はな|はな本人|はな(と|に).{0,8}(話|しゃべ|チャット)|人間のはな|実在のはな|real\s*hana|talk\s*to\s*hana|hana\s*(thật|that)|muốn\s*.{0,20}hana\s*thật|nói\s*chuyện\s*với\s*hana\s*thật|chủ\s*nhân|オーナーのはな/i
-
 /** Local chips for owner (real Hana) drafting help. */
 const OWNER_EXPRESSION_CHIPS = ['😊', '🌸', '🎶', '✨', 'わくわく', 'だいすき', 'おやすみ', 'がんばって']
 const OWNER_TOPIC_CHIPS = [
@@ -524,29 +510,6 @@ function storageKey(prefix, guestId) {
   return `${prefix}${guestId || 'default'}`
 }
 
-function loadAiMessages(guestId) {
-  try {
-    const raw = window.localStorage.getItem(storageKey(AI_HISTORY_PREFIX, guestId))
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed) || parsed.length === 0) return null
-    return parsed.filter((m) => m && !m.deleted && typeof m.text === 'string' && m.id)
-  } catch {
-    return null
-  }
-}
-
-function saveAiMessages(guestId, messages) {
-  try {
-    window.localStorage.setItem(
-      storageKey(AI_HISTORY_PREFIX, guestId),
-      JSON.stringify(messages.slice(-80)),
-    )
-  } catch {
-    /* ignore */
-  }
-}
-
 function channelPreferenceAliases(guestId = '') {
   const id = String(guestId || '').trim()
   if (!id) return []
@@ -556,17 +519,6 @@ function channelPreferenceAliases(guestId = '') {
   const fromLegacy = id.match(/^guest-([a-z0-9_-]+)$/i)
   if (fromLegacy) aliases.add(`hana_${fromLegacy[1]}`)
   return [...aliases]
-}
-
-function loadChannel(guestId) {
-  try {
-    const human = channelPreferenceAliases(guestId).some(
-      (alias) => window.localStorage.getItem(storageKey(CHANNEL_PREFIX, alias)) === 'human',
-    )
-    return human ? 'human' : 'ai'
-  } catch {
-    return 'ai'
-  }
 }
 
 function saveChannel(guestId, channel) {
@@ -579,43 +531,8 @@ function saveChannel(guestId, channel) {
   }
 }
 
-function readInitialGuestChannel(guestKey = '') {
-  try {
-    const key = String(guestKey || window.localStorage.getItem('media-share-lite-guest') || '')
-      .trim()
-      .toLowerCase()
-    if (!key || key === 'hana') return 'ai'
-    const profile = getGuestProfile(key)
-    if (!profile?.key && !key) return 'ai'
-    const conversationId = humanChatThreadIdForUserKey(profile?.key || key)
-    if (!conversationId) return 'ai'
-    const pending = listChatOutboxForThread(conversationId, profile?.key || key).length > 0
-    return pending ? 'human' : loadChannel(conversationId)
-  } catch {
-    return 'ai'
-  }
-}
-
-function defaultIntroMessages(profile) {
-  const callName = profile?.addressAs || profile?.displayName || ''
-  const greeting = callName
-    ? `こんにちは、${callName}！はなちゃんです。`
-    : 'こんにちは、はなちゃんです。'
-  return [
-    {
-      id: INTRO_ID,
-      role: 'hanachan',
-      text:
-        `${greeting}メディボックスのことや、ちょっとしたお話、なんでもどうぞ。\n\n` +
-        'まずははなちゃんとお話しできます。「本物のはなと話したい」と送ってくれれば、はな本人にもつながります。',
-      kind: 'intro',
-      createdAt: new Date().toISOString(),
-    },
-  ]
-}
-
-function wantsHumanHana(text) {
-  return WANT_HUMAN_RE.test(String(text || '').trim())
+function readInitialGuestChannel() {
+  return 'human'
 }
 
 const ACTIVE_GUEST_KEY_STORAGE = 'hana-chat-active-guest-key'
@@ -790,8 +707,7 @@ export default function HanaChat({
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [channel, setChannel] = useState(() => readInitialGuestChannel(inputGuestKey)) // ai | human (guest only)
-  const [aiMessages, setAiMessages] = useState(() => defaultIntroMessages(getGuestProfile(inputGuestKey)))
+  const [channel, setChannel] = useState(() => readInitialGuestChannel()) // guest: human-only
   const [hanaMessages, setHanaMessages] = useState([])
   /** True after first Firestore snapshot for the open human thread. */
   const [messagesHydrated, setMessagesHydrated] = useState(false)
@@ -1186,9 +1102,7 @@ export default function HanaChat({
     }
   }, [hidden, actingAsOwner, activeThreadId, ownerActiveGuestKey, showThreadMessages])
 
-  const guestOnHuman = !actingAsOwner && channel === 'human'
-  const guestOnHumanRef = useRef(guestOnHuman)
-  guestOnHumanRef.current = guestOnHuman
+  const guestOnHuman = !actingAsOwner
   /** One login user → one thread (`guest-{key}`). Never subscribe/type on legacy UUIDs. */
   const guestLiveThreadId = !actingAsOwner
     ? (humanChatThreadIdForUserKey(guestProfile?.key || guestKey)
@@ -1544,7 +1458,7 @@ export default function HanaChat({
       })
       return [...ids]
     }
-    // Guest: always watch the human thread so Hana's call rings even on AI channel.
+    // Guest: watch the human thread for calls and unread.
     return guestChatId ? [guestChatId] : []
   }, [actingAsOwner, threads, ownerGuestRoster, guestChatId])
 
@@ -1641,25 +1555,13 @@ export default function HanaChat({
       return
     }
     const id = ensureGuestChatId(guestKey || (actingAsOwner ? 'guest' : ''))
-    const stored = loadAiMessages(id)
-    const pendingChat = !actingAsOwner
-      && listChatOutboxForThread(id, guestProfile?.key || guestKey || '').length > 0
-    const savedChannel = pendingChat ? 'human' : loadChannel(id)
     setGuestChatId(id)
-    setAiMessages(stored?.length ? stored : defaultIntroMessages(guestProfile))
-    setChannel(savedChannel)
+    if (!actingAsOwner) {
+      setChannel('human')
+      saveChannel(id, 'human')
+    }
     setStorageReady(true)
   }, [hidden, guestKey, guestProfile, actingAsOwner])
-
-  useEffect(() => {
-    if (!storageReady || !guestChatId || actingAsOwner) return
-    saveAiMessages(guestChatId, aiMessages)
-  }, [aiMessages, guestChatId, actingAsOwner, storageReady])
-
-  useEffect(() => {
-    if (!storageReady || !guestChatId || actingAsOwner) return
-    saveChannel(guestChatId, channel)
-  }, [channel, guestChatId, actingAsOwner, storageReady])
 
   useEffect(() => {
     if (hidden || !actingAsOwner) {
@@ -1894,20 +1796,15 @@ export default function HanaChat({
       setShowSummerFx(false)
       return undefined
     }
-    if (!actingAsOwner && channel === 'ai') {
-      setMessagesHydrated(true)
-      return undefined
-    }
     setShowSummerFx(false)
     return undefined
-  }, [open, actingAsOwner, channel])
+  }, [open, actingAsOwner])
 
   useEffect(() => {
     if (!open) return undefined
-    if (!actingAsOwner && channel === 'ai') return undefined
     setMessagesHydrated(false)
     return undefined
-  }, [open, actingAsOwner, channel, activeThreadId, guestChatId])
+  }, [open, actingAsOwner, activeThreadId, guestChatId])
 
   // Only start chat summer décor after messages are hydrated and the list has painted.
   useEffect(() => {
@@ -1947,10 +1844,6 @@ export default function HanaChat({
       liveThreadId,
       (next) => {
         const filtered = next.filter((m) => !deletingIdsRef.current.has(m.id))
-        if (!guestOnHumanRef.current && filtered.some((message) => message.sender === 'hana')) {
-          saveChannel(liveThreadId, 'human')
-          setChannel('human')
-        }
         setHanaMessages((prev) => {
           const merged = applyChatMessageSnapshot({
             serverRows: filtered,
@@ -2299,11 +2192,10 @@ export default function HanaChat({
   }, [hidden, actingAsOwner, activeThreadId, hanaMessages, requestOwnerAssist])
 
   const messagesScrollKey = useMemo(() => {
-    const list = actingAsOwner || guestOnHuman ? hanaMessages : aiMessages
+    const list = hanaMessages
     const last = list[list.length - 1]
     // Ignore reaction-only updates — those should not yank the scroll position.
     return [
-      channel,
       activeThreadId || '',
       actingAsOwner ? '1' : '0',
       String(list.length),
@@ -2312,7 +2204,7 @@ export default function HanaChat({
       last?.editedAt || '',
       last?.deleted ? '1' : '0',
     ].join('\0')
-  }, [actingAsOwner, guestOnHuman, hanaMessages, aiMessages, channel, activeThreadId])
+  }, [actingAsOwner, hanaMessages, activeThreadId])
 
   useEffect(() => {
     if (!open) return undefined
@@ -2747,17 +2639,11 @@ export default function HanaChat({
         status: chatProfiles[ownerActiveGuestKey]?.status || activeThreadMeta?.guestStatus,
       }, Date.now())
     }
-    if (channel === 'ai') {
-      return resolveChatPresence({
-        onlineAt: new Date().toISOString(),
-        status: 'auto',
-      }, Date.now())
-    }
     return resolveChatPresence({
       onlineAt: activeThreadMeta?.hanaOnlineAt,
       status: chatProfiles[OWNER_PROFILE.key]?.status || activeThreadMeta?.hanaStatus,
     }, Date.now())
-  }, [actingAsOwner, channel, activeThreadMeta, activeThreadId, chatProfiles, ownerActiveGuestKey])
+  }, [actingAsOwner, activeThreadMeta, activeThreadId, chatProfiles, ownerActiveGuestKey])
 
   // Status is a profile-level setting (same on the main page and in every thread).
   const myPresenceMode = normalizeChatPresenceMode(
@@ -3203,30 +3089,7 @@ export default function HanaChat({
     else openChat()
   }
 
-  const switchToHuman = (noticeText) => {
-    setChannel('human')
-    if (noticeText) {
-      setAiMessages((prev) => {
-        if (prev.some((m) => m.id === HUMAN_SWITCH_NOTICE_ID || m.kind === 'human-switch')) {
-          return prev
-        }
-        return [
-          ...prev,
-          {
-            id: HUMAN_SWITCH_NOTICE_ID,
-            role: 'hanachan',
-            text: noticeText,
-            kind: 'human-switch',
-            createdAt: new Date().toISOString(),
-          },
-        ]
-      })
-    }
-  }
-
-  const visibleMessages = useMemo(() => {
-    if (!(actingAsOwner || guestOnHuman)) return aiMessages
-    return hanaMessages.map((m) => ({
+  const visibleMessages = useMemo(() => hanaMessages.map((m) => ({
       id: m.id,
       serverId: m.serverId || '',
       clientId: m.clientId || '',
@@ -3254,8 +3117,7 @@ export default function HanaChat({
       uploading: Boolean(m.uploading),
       kind: m.kind || '',
       callLog: m.callLog || null,
-    }))
-  }, [actingAsOwner, guestOnHuman, hanaMessages, aiMessages])
+    })), [hanaMessages])
 
   const messageSearchHits = useMemo(
     () => collectMessageSearchHits(visibleMessages, messageSearchQuery, translations),
@@ -4084,10 +3946,7 @@ export default function HanaChat({
       if (!activeThreadId) return hanachanArt
       return avatarSrcForProfile(ownerActiveGuestKey || 'guest', ownerActiveGuestLabel)
     }
-    if (channel === 'human') {
-      return avatarSrcForProfile(OWNER_PROFILE.key, OWNER_PROFILE.displayName)
-    }
-    return hanachanArt
+    return avatarSrcForProfile(OWNER_PROFILE.key, OWNER_PROFILE.displayName)
   })()
 
   const clearComposerExtras = () => {
@@ -4247,16 +4106,6 @@ export default function HanaChat({
     const messageId = String(message.serverId || message.id || '').trim()
     const threadId = actingAsOwner ? ownerLiveThreadId : guestLiveThreadId
 
-    // AI channel: local only.
-    if (!actingAsOwner && !guestOnHuman) {
-      setAiMessages((prev) => prev.filter((m) => m.id !== message.id))
-      if (editingId === message.id) {
-        setEditingId(null)
-        setDraft('')
-      }
-      return
-    }
-
     if (!threadId || !messageId) return
 
     // Optimistic: hide immediately; block snapshot from reviving until server confirms.
@@ -4340,7 +4189,7 @@ export default function HanaChat({
       if (!actingAsOwner) {
         if (guestChatId !== threadId) setGuestChatId(threadId)
         saveChannel(threadId, 'human')
-        if (channel !== 'human') switchToHuman(HUMAN_SWITCH_INTENT)
+        setChannel('human')
       }
 
       const guestMeta = actingAsOwner
@@ -4435,26 +4284,7 @@ export default function HanaChat({
     if (!actingAsOwner) {
       if (!guestChatId) setGuestChatId(threadId)
       saveChannel(threadId, 'human')
-      if (channel !== 'human') {
-        setChannel('human')
-        setAiMessages((prev) => {
-          if (prev.some((m) => m.id === HUMAN_SWITCH_NOTICE_ID || m.kind === 'human-switch')) {
-            return prev
-          }
-          return [
-            ...prev,
-            {
-              id: HUMAN_SWITCH_NOTICE_ID,
-              kind: 'human-switch',
-              role: 'hanachan',
-              sender: 'hanachan',
-              text: HUMAN_SWITCH_INTENT,
-              createdAt: new Date().toISOString(),
-              createdAtIso: new Date().toISOString(),
-            },
-          ]
-        })
-      }
+      setChannel('human')
     }
 
     const caption = [String(title || '').trim() || '曲カード', String(shareUrl || '').trim()]
@@ -4670,7 +4500,7 @@ export default function HanaChat({
       if (!actingAsOwner) {
         if (!guestChatId) setGuestChatId(threadId)
         saveChannel(threadId, 'human')
-        if (channel !== 'human') switchToHuman(HUMAN_SWITCH_INTENT)
+        setChannel('human')
       }
 
       broadcastChatEffect({
@@ -4769,21 +4599,6 @@ export default function HanaChat({
       }
     })
 
-    // Local AI channel: keep reactions in memory only.
-    if (!canUseReactions) {
-      setAiMessages(patchLocal)
-      if (keepKb) {
-        window.requestAnimationFrame(() => {
-          try {
-            inputRef.current?.focus({ preventScroll: true })
-          } catch {
-            inputRef.current?.focus()
-          }
-        })
-      }
-      return
-    }
-
     const guestCanon = guestProfile?.key ? `guest-${guestProfile.key}` : guestChatId
     const threadId = actingAsOwner ? activeThreadId : guestCanon
     const messageId = String(message.serverId || message.id || '').trim()
@@ -4829,7 +4644,7 @@ export default function HanaChat({
 
   const currentThreadId = actingAsOwner
     ? (ownerLiveThreadId || activeThreadId)
-    : (guestOnHuman ? guestLiveThreadId : 'ai')
+    : guestLiveThreadId
 
   const visiblePins = useMemo(() => {
     const byId = new Map()
@@ -4872,7 +4687,6 @@ export default function HanaChat({
     take(pins.filter((pin) => (
       !currentThreadId
       || pin.threadId === currentThreadId
-      || (!pin.threadId && currentThreadId === 'ai')
     )))
     return [...byId.values()]
   }, [
@@ -4899,7 +4713,7 @@ export default function HanaChat({
 
     if (actionId === 'pin') {
       if (actingAsOwner || guestOnHuman) {
-        if (!threadId || threadId === 'ai') {
+        if (!threadId) {
           notifyAction('ピン留めできません')
           return true
         }
@@ -5169,26 +4983,13 @@ export default function HanaChat({
     const pendingReply = replyTo
     const pendingEditId = editingId
     let pendingSendId = ''
-    // Only lock chrome for edit / AI reply — never for human Firestore sends.
-    const willUseAi = !pendingEditId && !actingAsOwner
-      && !queued.length
-      && channel === 'ai'
-      && !wantsHumanHana(text)
-    if (pendingEditId || willUseAi) beginComposerBusy(willUseAi ? 45_000 : 12_000)
+    if (pendingEditId) beginComposerBusy(12_000)
     clearComposerExtras()
 
     try {
       if (pendingEditId) {
-        if (actingAsOwner || guestOnHuman) {
-          const threadId = actingAsOwner ? ownerLiveThreadId : guestLiveThreadId
-          await updateChatMessage({ threadId, messageId: pendingEditId, text })
-        } else {
-          setAiMessages((prev) => prev.map((m) => (
-            m.id === pendingEditId
-              ? { ...m, text, editedAt: nowIso, deleted: false }
-              : m
-          )))
-        }
+        const threadId = actingAsOwner ? ownerLiveThreadId : guestLiveThreadId
+        await updateChatMessage({ threadId, messageId: pendingEditId, text })
         return
       }
 
@@ -5324,10 +5125,7 @@ export default function HanaChat({
         } else {
           await commitOwnerSend()
         }
-      } else if (queued.length || channel === 'human' || wantsHumanHana(text)) {
-        if (channel !== 'human') {
-          switchToHuman(HUMAN_SWITCH_INTENT)
-        }
+      } else {
         let threadId = guestLiveThreadId || ensureGuestChatId(guestKey || 'guest')
         if (guestChatId !== threadId) setGuestChatId(threadId)
         if (!actingAsOwner) saveChannel(threadId, 'human')
@@ -5441,63 +5239,6 @@ export default function HanaChat({
         } else {
           await commitGuestSend()
         }
-      } else {
-        const history = aiMessages
-          .filter((m) => !m.deleted && m.id !== INTRO_ID && m.kind !== 'human-switch' && m.kind !== 'intro')
-          .map((m) => ({
-            role: m.role === 'guest' ? 'user' : 'model',
-            text: m.text,
-          }))
-        const guestMsg = {
-          id: `g-${Date.now()}`,
-          role: 'guest',
-          text,
-          createdAt: nowIso,
-          replyTo: pendingReply
-            ? {
-                id: pendingReply.id,
-                text: pendingReply.text,
-                sender: pendingReply.sender || pendingReply.role,
-              }
-            : null,
-        }
-        setAiMessages((prev) => [...prev, guestMsg])
-        scrollToLatestRef.current()
-        const prompt = pendingReply
-          ? `（「${String(pendingReply.text).slice(0, 80)}」への返信）\n${text}`
-          : text
-        const data = await chatWithHanachan({
-          message: prompt,
-          history,
-          guestName: guestDisplayName,
-          addressAs: guestAddressAs,
-        })
-        if (data?.reason === 'quota') {
-          switchToHuman(HUMAN_SWITCH_QUOTA)
-          const threadId = guestProfile?.key ? `guest-${guestProfile.key}` : (guestChatId || ensureGuestChatId(guestKey || 'guest'))
-          if (guestChatId !== threadId) setGuestChatId(threadId)
-          await sendChatMessage({
-            threadId,
-            text,
-            sender: 'guest',
-            guestLabel: guestThreadLabel,
-            guestKey: guestProfile?.key || guestKey || '',
-            replyTo: pendingReply,
-          })
-          scrollToLatestRef.current()
-          return
-        }
-        const reply = String(data?.reply || '').trim()
-        setAiMessages((prev) => [
-          ...prev,
-          {
-            id: `h-${Date.now()}`,
-            role: 'hanachan',
-            text: reply || '……うまくお返事できなかったみたい。もう一度試してみてね。',
-            createdAt: new Date().toISOString(),
-          },
-        ])
-        scrollToLatestRef.current()
       }
     } catch (err) {
       console.error(err)
@@ -5515,40 +5256,11 @@ export default function HanaChat({
         setComposerAttach(queued)
       }
       const msg = getFirebaseErrorMessage(err) || ''
-      const looksQuota = /quota|credit|resource-exhausted|429/i.test(`${err?.code || ''} ${msg} ${err?.message || ''}`)
-      if (!actingAsOwner && channel === 'ai' && looksQuota && !pendingEditId) {
-        switchToHuman(HUMAN_SWITCH_QUOTA)
-        try {
-          const threadId = guestProfile?.key ? `guest-${guestProfile.key}` : (guestChatId || ensureGuestChatId(guestKey || 'guest'))
-          await sendChatMessage({
-            threadId,
-            text,
-            sender: 'guest',
-            guestLabel: guestThreadLabel,
-            guestKey: guestProfile?.key || guestKey || '',
-            replyTo: pendingReply,
-          })
-        } catch (sendErr) {
-          setError(getFirebaseErrorMessage(sendErr) || '送信に失敗しました。通信状況を確認して、少し待ってからもう一度お試しください。')
-        }
-      } else {
-        setError(
-          err?.code === 'chat/timeout'
-            ? ''
-            : (msg || '送信に失敗しました。通信状況を確認して、少し待ってからもう一度お試しください。'),
-        )
-        if (!actingAsOwner && channel === 'ai' && !pendingEditId) {
-          setAiMessages((prev) => [
-            ...prev,
-            {
-              id: `e-${Date.now()}`,
-              role: 'hanachan',
-              text: 'ごめんね、いま少し調子が悪いみたい。少ししてからまた話そうね。はな本人と話したいときは「本物のはなと話したい」と送ってね。',
-              createdAt: new Date().toISOString(),
-            },
-          ])
-        }
-      }
+      setError(
+        err?.code === 'chat/timeout'
+          ? ''
+          : (msg || '送信に失敗しました。通信状況を確認して、少し待ってからもう一度お試しください。'),
+      )
     } finally {
       endComposerBusy()
       window.setTimeout(() => setSpeaking(false), 600)
@@ -5582,12 +5294,8 @@ export default function HanaChat({
 
   const modeTitle = actingAsOwner
     ? (activeThreadId ? ownerActiveGuestLabel : 'はな')
-    : channel === 'human'
-      ? 'はな'
-      : 'はなちゃん'
-  const modeSub = actingAsOwner || channel === 'human'
-    ? ''
-    : 'はなちゃんとお話し中'
+    : 'はな'
+  const modeSub = ''
   const presenceLabel = partnerPresence.label
   const myStatusLabel = myPresence.label
 
@@ -5639,7 +5347,7 @@ export default function HanaChat({
         aria-expanded={open}
         aria-controls="hana-chat-panel"
         data-testid="hana-chat-launcher"
-        title={open ? 'チャットを閉じる' : 'はなちゃんと話す'}
+        title={open ? 'チャットを閉じる' : 'はなと話す'}
       >
         <img src={hanachanArt} alt="" className="hana-chat-launcher-art" />
         {unreadLauncher ? (
@@ -5723,35 +5431,7 @@ export default function HanaChat({
                   />
                 </svg>
               </button>
-            {!actingAsOwner && channel === 'human' ? (
-              <button
-                type="button"
-                className={`hana-chat-avatar is-back-ai${speaking ? ' is-speaking' : ''}`}
-                onClick={() => {
-                  if (partnerAvatarSrc) {
-                    setPreviewImage({
-                      src: partnerAvatarSrc,
-                      alt: (actingAsOwner ? ownerActiveGuestLabel : OWNER_PROFILE.displayName) || 'アバター',
-                    })
-                    return
-                  }
-                  setChannel('ai')
-                }}
-                title="アバターを拡大表示"
-                aria-label="アバターを拡大表示"
-              >
-                <ChatAvatar src={partnerAvatarSrc} profileId={actingAsOwner ? resolveAccountKey(ownerActiveGuestKey || 'guest') : OWNER_PROFILE.key} displayName={actingAsOwner ? ownerActiveGuestLabel : OWNER_PROFILE.displayName} />
-                <span
-                  className={`hana-chat-presence ${partnerPresence.className}`}
-                  title={presenceLabel}
-                  aria-hidden="true"
-                />
-                <span className="hana-chat-avatar-back-badge" aria-hidden="true">
-                  <img src={hanachanArt} alt="" />
-                </span>
-              </button>
-            ) : (
-              <div
+            <div
                 className={`hana-chat-avatar${speaking ? ' is-speaking' : ''}`}
                 role="button"
                 tabIndex={0}
@@ -5781,7 +5461,6 @@ export default function HanaChat({
                   aria-label={presenceLabel}
                 />
               </div>
-            )}
             </div>
             <div className="hana-chat-titles">
               {actingAsOwner ? (
@@ -6509,18 +6188,6 @@ export default function HanaChat({
             <span>{partnerTyping ? partnerTypingLabel : ''}</span>
           </div>
 
-          {!actingAsOwner && channel === 'ai' ? (
-            <div className="hana-chat-suggest">
-              <button
-                type="button"
-                data-testid="hana-chat-human-mode"
-                onClick={() => switchToHuman(HUMAN_SWITCH_INTENT)}
-              >
-                本物のはなと話したい
-              </button>
-            </div>
-          ) : null}
-
           {actingAsOwner && activeThreadId && ownerSuggestEnabled ? (
             <div className="hana-chat-suggest hana-chat-suggest--owner" aria-label="返信のヒント">
               <div className={`hana-chat-suggest-group${suggestPickerGroup === 'reply' ? ' is-open' : ''}`}>
@@ -6914,9 +6581,7 @@ export default function HanaChat({
                       ? '返信を書く…'
                       : actingAsOwner
                         ? 'ゲストに返信…'
-                        : channel === 'human'
-                          ? 'はなに送る…'
-                          : 'はなちゃんに話しかける…'
+                        : 'はなに送る…'
                 }
                 maxLength={2000}
                 disabled={actingAsOwner && !activeThreadId}
