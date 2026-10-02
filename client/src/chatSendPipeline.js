@@ -7,6 +7,7 @@ import {
     chatLogEvent,
     chatLogStatus,
     chatTransportStatus,
+    logChatLifecycle,
     logTransportListDiff,
 } from './chat/chatDebug.js'
 import { normalizeConversationId } from './chat/chatIdentity.js'
@@ -121,24 +122,35 @@ export function applyChatMessageSnapshot({
   const cachedRows = threadId && !filtered.length && !(previous || []).length
     ? loadThreadMessageCache(threadId)
     : []
-  const merged = filtered.length
-    ? mergeChatMessageLists(mergeServerMessagesWithPending(filtered, previous), previous)
-    : mergeServerMessagesWithPending(
-      mergeChatMessageLists(filtered, previous, cachedRows),
-      previous,
-    )
+  const cacheId = normalizeConversationId(threadId) || threadId
+  let merged
+  if (filtered.length) {
+    const serverMerged = mergeServerMessagesWithPending(filtered, previous)
+    merged = mergeMessagesByClientId(previous, serverMerged, 'REALTIME SNAPSHOT', cacheId)
+  } else if (cachedRows.length) {
+    merged = mergeMessagesByClientId(previous, cachedRows, 'IDB CACHE', cacheId)
+  } else {
+    merged = mergeMessagesByClientId(previous, [], 'REALTIME SNAPSHOT', cacheId)
+  }
   reconcileChatOutboxWithMessages(merged)
   if (threadId) {
     reconcileChatDeliveryStorage(merged, threadId, guestKey, isTestChatMessageText)
   }
-  const cacheId = normalizeConversationId(threadId) || threadId
   if (cacheId && merged.length) {
-    saveThreadMessageCache(cacheId, merged)
-    const newest = merged[merged.length - 1]
-    void saveConversationSyncState(cacheId, {
-      lastMessageId: String(newest?.id || newest?.clientId || ''),
-      lastSyncedAt: Date.now(),
-    })
+    const rowsToPersist = merged
+    const persist = () => {
+      saveThreadMessageCache(cacheId, rowsToPersist)
+      const newest = rowsToPersist[rowsToPersist.length - 1]
+      void saveConversationSyncState(cacheId, {
+        lastMessageId: String(newest?.id || newest?.clientId || ''),
+        lastSyncedAt: Date.now(),
+      })
+    }
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(persist, { timeout: 2000 })
+    } else {
+      Promise.resolve().then(persist)
+    }
   }
   logTransportListDiff('REALTIME SNAPSHOT', cacheId, previous, merged)
   return merged
@@ -282,16 +294,30 @@ export function buildOptimisticMessage({
     from: '(none)',
     to: chatTransportStatus(row),
   })
+  logChatLifecycle({
+    clientMessageId: pendingId,
+    event: 'CREATE',
+    statusBefore: 'none',
+    statusAfter: chatTransportStatus(row),
+    source: 'buildOptimisticMessage',
+  })
   return row
 }
 
-/** Local-first send: persist to memory/IndexedDB queue, then paint bubble immediately. */
+/** Local-first send: paint bubble first; IndexedDB is background persistence. */
 export function stageOptimisticOutgoingMessage(conversationId, message) {
   const cacheId = normalizeConversationId(conversationId) || String(conversationId || '').trim()
   if (!cacheId || !message) return message
-  const prev = loadThreadMessagesSync(cacheId)
-  const merged = mergeMessagesByClientId(prev, [message])
-  saveThreadMessageCache(cacheId, merged)
+  const persist = () => {
+    const prev = loadThreadMessagesSync(cacheId)
+    const merged = mergeMessagesByClientId(prev, [message])
+    saveThreadMessageCache(cacheId, merged)
+  }
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(persist, { timeout: 2000 })
+  } else {
+    Promise.resolve().then(persist)
+  }
   return message
 }
 
@@ -332,6 +358,14 @@ export function runDirectSendWithOutbox({
       to: 'sending',
     })
     chatLogEvent('FIREBASE SEND', { clientMessageId: clientId, conversationId, status: 'sending' })
+    logChatLifecycle({
+      clientMessageId: clientId,
+      conversationId,
+      event: 'FIREBASE_SEND_START',
+      statusBefore: 'sending',
+      statusAfter: 'sending',
+      source: 'runDirectSendWithOutbox',
+    })
   }
   const writePromise = Promise.resolve().then(runSend)
   if (inFlightMap && clientId) inFlightMap.set(clientId, writePromise)
@@ -345,6 +379,14 @@ export function runDirectSendWithOutbox({
           conversationId,
           from: 'sending',
           to: 'sent',
+        })
+        logChatLifecycle({
+          clientMessageId: clientId,
+          conversationId,
+          event: 'SERVER_ACK',
+          statusBefore: 'sending',
+          statusAfter: 'sent',
+          source: 'runDirectSendWithOutbox',
         })
       }
       return sid

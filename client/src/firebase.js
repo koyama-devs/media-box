@@ -50,7 +50,7 @@ import {
     humanChatThreadIdForUserKey,
     normalizeConversationId
 } from './chat/chatIdentity.js'
-import { preferMessageRow } from './chat/chatMerge.js'
+import { messageConfirmedOnServer, preferMessageRow } from './chat/chatMerge.js'
 import {
     applyPokeWorldAction,
     applyPokeWorldAdopt,
@@ -3238,11 +3238,15 @@ export function getMessageDeliveryStatus(message, thread, viewer) {
   if (!message || (viewer !== 'guest' && viewer !== 'hana')) return null
   if (message.sender !== viewer) return null
   if (message.sendFailed || message.status === 'failed') return 'failed'
-  if (message.pending || message.status === 'pending' || message.status === 'sending') return 'sending'
 
   const createdIso = message.createdAtIso || message.createdAt
   const createdMs = Date.parse(String(createdIso || '')) || 0
-  const msgId = String(message.id || message.clientId || message.clientMessageId || '').trim()
+  const msgId = String(
+    message.serverId || message.id || message.clientId || message.clientMessageId || '',
+  ).trim()
+
+  const inFlight = message.pending || message.status === 'pending' || message.status === 'sending'
+  if (inFlight && !messageConfirmedOnServer(message)) return 'sending'
 
   const partnerReadId = viewer === 'guest' ? thread?.hanaLastReadMessageId : thread?.guestLastReadMessageId
   const partnerReadIso = viewer === 'guest'

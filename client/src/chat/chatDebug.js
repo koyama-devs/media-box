@@ -85,6 +85,35 @@ export function logTransportTransition(source, conversationId, before, after) {
 }
 
 /** Compare two message lists by clientMessageId; log transport changes. */
+/** Grep-friendly lifecycle line: [CHAT][LIFECYCLE] cid=… event=… */
+export function logChatLifecycle({
+  clientMessageId = '',
+  conversationId = '',
+  event = '',
+  statusBefore = '',
+  statusAfter = '',
+  source = '',
+  detail = '',
+} = {}) {
+  if (!isChatDebugEnabled()) return
+  const cid = String(clientMessageId || '').trim()
+  const ev = String(event || '').trim()
+  if (!cid && !ev) return
+  const ts = new Date().toISOString()
+  const lines = [
+    '[CHAT][LIFECYCLE]',
+    cid ? `cid=${cid}` : null,
+    ev ? `event=${ev}` : null,
+    statusBefore ? `statusBefore=${statusBefore}` : null,
+    statusAfter ? `statusAfter=${statusAfter}` : null,
+    source ? `source=${source}` : null,
+    `timestamp=${ts}`,
+    conversationId ? `conversationId=${conversationId}` : null,
+    detail || null,
+  ].filter(Boolean)
+  console.info(lines.join('\n'))
+}
+
 export function logTransportListDiff(source, conversationId, beforeRows = [], afterRows = []) {
   if (!isChatDebugEnabled()) return
   const beforeMap = new Map()

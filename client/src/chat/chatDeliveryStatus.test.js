@@ -56,3 +56,16 @@ test('pending outbound shows sending', () => {
   }
   assert.equal(getMessageDeliveryStatus(message, {}, 'guest'), 'sending')
 })
+
+test('stale pending flag does not block sent UI after server confirm', () => {
+  const message = {
+    sender: 'hana',
+    id: 'abc',
+    clientId: 'abc',
+    serverId: 'abc',
+    pending: true,
+    status: 'sending',
+    createdAtIso: '2026-06-01T12:00:00.000Z',
+  }
+  assert.equal(getMessageDeliveryStatus(message, {}, 'hana'), 'sent')
+})

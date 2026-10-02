@@ -20,13 +20,13 @@ function sortChatRows(rows = []) {
 }
 
 /** UI/server-confirmed outbound row — stale cache/outbox must not downgrade transport. */
-function messageConfirmedOnServer(message) {
-  if (!message || message.pending || message.sendFailed) return false
+export function messageConfirmedOnServer(message) {
+  if (!message || message.sendFailed) return false
   if (String(message.serverId || '').trim()) return true
   const id = String(message.id || '').trim()
   const cid = String(message.clientId || message.clientMessageId || '').trim()
   if (id && cid && id !== cid) return true
-  if (message.status === 'sent') return true
+  if (message.status === 'sent' && !message.pending) return true
   return false
 }
 

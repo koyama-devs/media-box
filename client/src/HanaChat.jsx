@@ -886,7 +886,12 @@ export default function HanaChat({
     const prev = messageCacheRef.current.get(id)
     const merged = mergeChatMessageLists(rows, prev)
     messageCacheRef.current.set(id, merged)
-    saveThreadMessageCache(id, merged)
+    const persist = () => saveThreadMessageCache(id, merged)
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(persist, { timeout: 2000 })
+    } else {
+      Promise.resolve().then(persist)
+    }
   }, [])
 
   const openHumanThreadRef = useRef('')
@@ -1870,7 +1875,6 @@ export default function HanaChat({
             threadId: liveThreadId,
             guestKey: guestProfile?.key || guestKey || '',
           })
-          stashThreadMessagesInCache(liveThreadId, merged)
           return merged
         })
         notifyPartnerMessagesDelivered({
@@ -1883,12 +1887,6 @@ export default function HanaChat({
         })
         setMessagesHydrated(true)
         setError('')
-        // Advance 既読 on every live snapshot while the guest chat is open.
-        if (openRef.current && document.visibilityState === 'visible') {
-          markThreadRead(liveThreadId, 'guest', guestKey, {
-            lastMessageId: newestMessageId(filtered),
-          }).catch(() => {})
-        }
       },
       (err) => {
         // Offline / listener error: keep IndexedDB paint; do not clear bubbles.
@@ -1897,7 +1895,7 @@ export default function HanaChat({
       guestProfile?.key || guestKey || '',
     )
     return unsub
-  }, [hidden, actingAsOwner, guestLiveThreadId, guestKey, guestProfile?.key, stashThreadMessagesInCache])
+  }, [hidden, actingAsOwner, guestLiveThreadId, guestKey, guestProfile?.key])
 
   // Canonicalize/migrate legacy threads for EVERY guest using the same path.
   // We never switch the active UI back to a legacy UUID; Firestore migration
@@ -1932,17 +1930,13 @@ export default function HanaChat({
       (next) => {
         if (cancelled) return
         const filtered = next.filter((m) => !deletingIdsRef.current.has(m.id))
-        setHanaMessages((prev) => {
-          const merged = applyChatMessageSnapshot({
-            serverRows: filtered,
-            previous: prev,
-            deletingIds: deletingIdsRef.current,
-            threadId: listenThreadId,
-            guestKey: ownerActiveGuestKey || '',
-          })
-          stashThreadMessagesInCache(listenThreadId, merged)
-          return merged
-        })
+        setHanaMessages((prev) => applyChatMessageSnapshot({
+          serverRows: filtered,
+          previous: prev,
+          deletingIds: deletingIdsRef.current,
+          threadId: listenThreadId,
+          guestKey: ownerActiveGuestKey || '',
+        }))
         notifyPartnerMessagesDelivered({
           threadId: listenThreadId,
           viewer: 'hana',
@@ -1952,11 +1946,6 @@ export default function HanaChat({
           markDelivered: markThreadDelivered,
         })
         setMessagesHydrated(true)
-        if (openRef.current && document.visibilityState === 'visible') {
-          markThreadRead(listenThreadId, 'hana', ownerActiveGuestKey, {
-            lastMessageId: newestMessageId(filtered),
-          }).catch(() => {})
-        }
         setError('')
       },
       (err) => {
@@ -1969,7 +1958,7 @@ export default function HanaChat({
       cancelled = true
       unsub()
     }
-  }, [hidden, actingAsOwner, activeThreadId, ownerActiveGuestKey, ownerLiveThreadId, stashThreadMessagesInCache])
+  }, [hidden, actingAsOwner, activeThreadId, ownerActiveGuestKey, ownerLiveThreadId])
 
   useEffect(() => {
     if (hidden || !actingAsOwner || !ownerActiveGuestKey || !activeThreadId) return undefined
@@ -5163,17 +5152,15 @@ export default function HanaChat({
               sender: pendingReply.sender || pendingReply.role,
             }
           : null
-        const optimisticRow = stageOptimisticOutgoingMessage(
-          effectiveThreadId,
-          buildOptimisticMessage({
-            pendingId,
-            sender: 'hana',
-            text: sendText,
-            createdAtIso: nowIso,
-            extra: { ...localMedia, replyTo: replySnapshot },
-          }),
-        )
+        const optimisticRow = buildOptimisticMessage({
+          pendingId,
+          sender: 'hana',
+          text: sendText,
+          createdAtIso: nowIso,
+          extra: { ...localMedia, replyTo: replySnapshot },
+        })
         setHanaMessages((prev) => mergeMessagesByClientId(prev, [optimisticRow]))
+        stageOptimisticOutgoingMessage(effectiveThreadId, optimisticRow)
         scrollToLatestRef.current()
         upsertChatOutbox({
           clientId: pendingId,
@@ -5274,17 +5261,15 @@ export default function HanaChat({
               sender: pendingReply.sender || pendingReply.role,
             }
           : null
-        const optimisticRow = stageOptimisticOutgoingMessage(
-          threadId,
-          buildOptimisticMessage({
-            pendingId,
-            sender: 'guest',
-            text: sendText,
-            createdAtIso: nowIso,
-            extra: { ...localMedia, replyTo: replySnapshot },
-          }),
-        )
+        const optimisticRow = buildOptimisticMessage({
+          pendingId,
+          sender: 'guest',
+          text: sendText,
+          createdAtIso: nowIso,
+          extra: { ...localMedia, replyTo: replySnapshot },
+        })
         setHanaMessages((prev) => mergeMessagesByClientId(prev, [optimisticRow]))
+        stageOptimisticOutgoingMessage(threadId, optimisticRow)
         scrollToLatestRef.current()
         setChannel('human')
         upsertChatOutbox({
