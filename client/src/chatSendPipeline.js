@@ -5,16 +5,16 @@
 
 import { normalizeConversationId } from './chat/chatIdentity.js'
 import { mergeChatMessageLists, mergeMessagesByClientId, mergeServerWithOutboxPending } from './chat/chatMerge.js'
-import { newClientMessageId } from './chat/clientMessageId.js'
 import { ensureChatStorageReady } from './chat/chatStorageInit.js'
+import { newClientMessageId } from './chat/clientMessageId.js'
 import { isTestChatMessageText } from './chat/testMessageText.js'
 import {
-  deliverChatOutbox,
-  reconcileChatDeliveryStorage,
-  reconcileChatOutboxWithMessages,
-  removeChatOutbox,
-  touchOutboxSendFailed,
-  touchOutboxSending,
+    deliverChatOutbox,
+    reconcileChatDeliveryStorage,
+    reconcileChatOutboxWithMessages,
+    removeChatOutbox,
+    touchOutboxSendFailed,
+    touchOutboxSending,
 } from './chatOutbox.js'
 import { saveConversationSyncState } from './storage/conversationStore.js'
 import { loadThreadMessagesSync, saveThreadMessagesSync, upsertLocalChatMessage } from './storage/messageStore.js'
@@ -110,6 +110,8 @@ export function applyChatMessageSnapshot({
   deletingIds = new Set(),
   threadId = '',
   guestKey = '',
+  /** Live listener: skip sync IndexedDB so React can paint first (Android). */
+  skipPersist = false,
 }) {
   const filtered = (serverRows || []).filter((m) => !deletingIds.has(m.id))
   const cachedRows = threadId && !filtered.length && !(previous || []).length
@@ -126,7 +128,7 @@ export function applyChatMessageSnapshot({
     reconcileChatDeliveryStorage(merged, threadId, guestKey, isTestChatMessageText)
   }
   const cacheId = normalizeConversationId(threadId) || threadId
-  if (cacheId && merged.length) {
+  if (!skipPersist && cacheId && merged.length) {
     saveThreadMessageCache(cacheId, merged)
     const newest = merged[merged.length - 1]
     void saveConversationSyncState(cacheId, {
@@ -135,6 +137,26 @@ export function applyChatMessageSnapshot({
     })
   }
   return merged
+}
+
+/** Background cache write after live snapshot merge (same data, not on UI critical path). */
+export function persistThreadMessagesCache(threadId, merged) {
+  const cacheId = normalizeConversationId(threadId) || String(threadId || '').trim()
+  if (!cacheId || !Array.isArray(merged) || !merged.length) return
+  const rows = merged
+  const persist = () => {
+    saveThreadMessageCache(cacheId, rows)
+    const newest = rows[rows.length - 1]
+    void saveConversationSyncState(cacheId, {
+      lastMessageId: String(newest?.id || newest?.clientId || ''),
+      lastSyncedAt: Date.now(),
+    })
+  }
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(persist, { timeout: 2000 })
+  } else {
+    Promise.resolve().then(persist)
+  }
 }
 
 /** @deprecated Use applyChatMessageSnapshot — kept for call sites during migration. */
