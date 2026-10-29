@@ -1,5 +1,6 @@
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal, flushSync } from 'react-dom'
+import AkiLeaf, { AkiSusukiPlume, AkiTsukimiMoon } from './AkiLeaf'
 import { setAppUnreadBadge } from './appBadge'
 import hanachanArt from './assets/hanachan.svg'
 import { bootstrapConversationRowsSync } from './chat/chatBootstrap.js'
@@ -12,138 +13,138 @@ import { useConversationBootstrap } from './chat/useConversationBootstrap.js'
 import ChatAvatar from './ChatAvatar'
 import { CHAT_CARD_SHARE_EVENT, CHAT_CLOSE_EVENT } from './chatCardShare'
 import {
-  addChatReminder,
-  dueChatReminders,
-  loadAllLocalChatPins,
-  loadChatPins,
-  markChatReminderDone,
-  remindAtFromChoice,
-  toggleChatPin,
-  unpinChatMessageEverywhere
+    addChatReminder,
+    dueChatReminders,
+    loadAllLocalChatPins,
+    loadChatPins,
+    markChatReminderDone,
+    remindAtFromChoice,
+    toggleChatPin,
+    unpinChatMessageEverywhere
 } from './chatExtras'
 import ChatImageLightbox from './ChatImageLightbox'
 import { collectMessageSearchHits, normalizeMessageSearchQuery } from './chatMessageSearch'
 import ChatNatsuFireworks from './ChatNatsuFireworks'
 import { playChatNotifySound, unlockChatNotifySound } from './chatNotifySound'
 import {
-  deliverChatOutbox,
-  listChatOutboxDue,
-  listChatOutboxForThread,
-  listChatRecoveryForThread,
-  outboxEntryToLocalMessage,
-  purgeChatDeliveryEntry,
-  resolveRetryableOutboxEntry,
-  upsertChatOutbox,
+    deliverChatOutbox,
+    listChatOutboxDue,
+    listChatOutboxForThread,
+    listChatRecoveryForThread,
+    outboxEntryToLocalMessage,
+    purgeChatDeliveryEntry,
+    resolveRetryableOutboxEntry,
+    upsertChatOutbox,
 } from './chatOutbox'
 import ChatPokeZukan, { PokeZukanChip } from './ChatPokeZukan'
 import {
-  applyChatMessageSnapshot,
-  buildOptimisticMessage,
-  CHAT_UPLOAD_TIMEOUT_MS,
-  nextChatPendingId,
-  nextStickerPendingId,
-  runDirectSendWithOutbox,
-  saveThreadMessageCache,
-  stageOptimisticOutgoingMessage,
-  withChatTimeout
+    applyChatMessageSnapshot,
+    buildOptimisticMessage,
+    CHAT_UPLOAD_TIMEOUT_MS,
+    nextChatPendingId,
+    nextStickerPendingId,
+    runDirectSendWithOutbox,
+    saveThreadMessageCache,
+    stageOptimisticOutgoingMessage,
+    withChatTimeout
 } from './chatSendPipeline'
 import {
-  readDefaultReaction,
-  readEnterToSend,
-  readMessageSound,
-  readStickerSet,
-  readVoiceSkin,
-  writeDefaultReaction,
-  writeEnterToSend,
-  writeMessageSound,
-  writeStickerSet,
-  writeVoiceSkin,
+    readDefaultReaction,
+    readEnterToSend,
+    readMessageSound,
+    readStickerSet,
+    readVoiceSkin,
+    writeDefaultReaction,
+    writeEnterToSend,
+    writeMessageSound,
+    writeStickerSet,
+    writeVoiceSkin,
 } from './chatSettings'
 import { canMutateOwnMessage, useIsCoarsePointer } from './ChatSwipeBubble'
 import ChatWeightGarden, { WeightGardenChip } from './ChatWeightGarden'
 import EmotionMomentLayer, { EMOTION_MOMENTS, triggerEmotionMoment } from './EmotionMoment'
 import {
-  analyzeGuestMessageForOwner,
-  applyReactionLocally,
-  broadcastChatEffect,
-  CHAT_PRESENCE_MODES,
-  CHAT_REACTION_EMOJIS,
-  classifyChatAttachment,
-  confirmJpTripArrived,
-  consolidateGuestThreads,
-  DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
-  deleteChatMessage,
-  ensureChatThread,
-  ensureDefaultChatAccounts,
-  ensureGuestChatId,
-  ensureWeightGardenDefaults,
-  fetchChatMessages,
-  fetchChatThreadMediaItems,
-  formatChatFileSize,
-  formatChatTimestamp,
-  getChatMessageAttachments,
-  getFirebaseErrorMessage,
-  getGuestProfile,
-  getMessageDeliveryStatus,
-  humanChatThreadIdForUserKey,
-  humanUserKeyFromChatThreadId,
-  isChatAudioAttachment,
-  isTestChatMessageText,
-  listGuestProfiles,
-  markThreadDelivered,
-  markThreadRead,
-  mergeChatMessageLists,
-  messageEditWindowMsFromMinutes,
-  migrateLocalPinsToThread,
-  normalizeChatPresenceMode,
-  OWNER_PROFILE,
-  pulseChatPresence,
-  resolveAccountKey,
-  resolveAvatarSrc,
-  resolveCanonicalChatThreadId,
-  resolveCanonicalChatThreadIdSync,
-  resolveChatPresence,
-  resolveGuestDisplayName,
-  resolveSessionProfile,
-  sendChatMessage,
-  setChatPresenceStatus,
-  setChatProfileStatus,
-  setChatTyping,
-  sortChatMessages,
-  subscribeChatAccounts,
-  subscribeChatMessages,
-  subscribeChatProfiles,
-  subscribeChatPartnerTyping,
-  subscribeChatThreads,
-  subscribeOwnChatThread,
-  subscribeWeightGarden,
-  suggestHanaChat,
-  threadUnreadCount,
-  toggleChatReaction,
-  toggleThreadChatPin,
-  translateChatMessage,
-  unpinThreadChatMessage,
-  updateChatMessage,
-  uploadChatAttachment
+    analyzeGuestMessageForOwner,
+    applyReactionLocally,
+    broadcastChatEffect,
+    CHAT_PRESENCE_MODES,
+    CHAT_REACTION_EMOJIS,
+    classifyChatAttachment,
+    confirmJpTripArrived,
+    consolidateGuestThreads,
+    DEFAULT_MESSAGE_EDIT_WINDOW_MINUTES,
+    deleteChatMessage,
+    ensureChatThread,
+    ensureDefaultChatAccounts,
+    ensureGuestChatId,
+    ensureWeightGardenDefaults,
+    fetchChatMessages,
+    fetchChatThreadMediaItems,
+    formatChatFileSize,
+    formatChatTimestamp,
+    getChatMessageAttachments,
+    getFirebaseErrorMessage,
+    getGuestProfile,
+    getMessageDeliveryStatus,
+    humanChatThreadIdForUserKey,
+    humanUserKeyFromChatThreadId,
+    isChatAudioAttachment,
+    isTestChatMessageText,
+    listGuestProfiles,
+    markThreadDelivered,
+    markThreadRead,
+    mergeChatMessageLists,
+    messageEditWindowMsFromMinutes,
+    migrateLocalPinsToThread,
+    normalizeChatPresenceMode,
+    OWNER_PROFILE,
+    pulseChatPresence,
+    resolveAccountKey,
+    resolveAvatarSrc,
+    resolveCanonicalChatThreadId,
+    resolveCanonicalChatThreadIdSync,
+    resolveChatPresence,
+    resolveGuestDisplayName,
+    resolveSessionProfile,
+    sendChatMessage,
+    setChatPresenceStatus,
+    setChatProfileStatus,
+    setChatTyping,
+    sortChatMessages,
+    subscribeChatAccounts,
+    subscribeChatMessages,
+    subscribeChatPartnerTyping,
+    subscribeChatProfiles,
+    subscribeChatThreads,
+    subscribeOwnChatThread,
+    subscribeWeightGarden,
+    suggestHanaChat,
+    threadUnreadCount,
+    toggleChatReaction,
+    toggleThreadChatPin,
+    translateChatMessage,
+    unpinThreadChatMessage,
+    updateChatMessage,
+    uploadChatAttachment
 } from './firebase'
 import FlowerRainLayer, {
-  CHAT_PARTY_REACTION,
-  triggerFlowerRain,
-  triggerPartyBurst,
+    CHAT_PARTY_REACTION,
+    triggerFlowerRain,
+    triggerPartyBurst,
 } from './FlowerRain'
 import './hana-chat.css'
 import HanaCall from './HanaCall'
 import HanaChatMessageList, { EMPTY_CHAT_REACTIONS } from './HanaChatMessageList'
 import HanaSticker, {
-  stickerBurst,
-  stickerSetsForViewer,
-  suggestHanaStickers,
+    stickerBurst,
+    stickerSetsForViewer,
+    suggestHanaStickers,
 } from './HanaStickers'
 import HanaVoicePlayer, { VoiceSkinPicker } from './HanaVoicePlayer'
 import NatsuKingyo from './NatsuKingyo'
 import {
-  collectUnansweredOwnerAssistMessages,
-  ownerAssistShouldCollapse,
+    collectUnansweredOwnerAssistMessages,
+    ownerAssistShouldCollapse,
 } from './OwnerMessageAssist'
 import { POKE_ZUKAN_GUEST, tokyoZukanYmd, worldActiveMon } from './pokeZukan'
 import useComposerVoiceNote, { formatVoiceClock } from './useComposerVoiceNote'
@@ -5448,12 +5449,23 @@ export default function HanaChat({
           <div className="hana-chat-aki-decor" aria-hidden="true">
             {showSummerFx ? (
               <>
-                <span className="hana-chat-aki-moon" />
-                <span className="hana-chat-aki-leaf is-1" />
-                <span className="hana-chat-aki-leaf is-2" />
-                <span className="hana-chat-aki-leaf is-3" />
-                <span className="hana-chat-aki-leaf is-4" />
-                <span className="hana-chat-aki-susuki" />
+                <div className="hana-chat-aki-moon-wrap">
+                  <AkiTsukimiMoon uid="chat" size={36} />
+                </div>
+                <AkiSusukiPlume className="hana-chat-aki-susuki is-a" height={48} />
+                <AkiSusukiPlume className="hana-chat-aki-susuki is-b" height={40} />
+                <span className="hana-chat-aki-leaf is-1">
+                  <AkiLeaf variant="momiji" tone="crimson" size={18} />
+                </span>
+                <span className="hana-chat-aki-leaf is-2">
+                  <AkiLeaf variant="momiji" tone="scarlet" size={16} />
+                </span>
+                <span className="hana-chat-aki-leaf is-3">
+                  <AkiLeaf variant="ginkgo" tone="gold" size={17} />
+                </span>
+                <span className="hana-chat-aki-leaf is-4">
+                  <AkiLeaf variant="momiji" tone="amber" size={15} />
+                </span>
               </>
             ) : null}
           </div>

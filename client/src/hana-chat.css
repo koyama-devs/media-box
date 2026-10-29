@@ -9602,20 +9602,6 @@ html[data-site-theme='aki'] .hana-chat-panel {
   }
 }
 
-html[data-site-theme='aki'] .hana-chat-panel::before {
-  content: '月';
-  position: absolute;
-  top: 10px;
-  right: 14px;
-  z-index: 2;
-  font-family: 'Noto Serif JP', 'Yu Mincho', serif;
-  font-size: 0.78rem;
-  letter-spacing: 0.12em;
-  color: rgba(234, 179, 8, 0.42);
-  pointer-events: none;
-  text-shadow: 0 0 12px rgba(196, 30, 58, 0.3);
-}
-
 html[data-site-theme='aki'] .hana-chat-header {
   border-bottom: 1px solid rgba(234, 179, 8, 0.28) !important;
   background:
@@ -9701,66 +9687,67 @@ html[data-site-theme='aki'] .hana-chat-aki-decor {
   overflow: hidden;
 }
 
-html[data-site-theme='aki'] .hana-chat-aki-moon {
+html[data-site-theme='aki'] .hana-chat-aki-moon-wrap {
   position: absolute;
-  top: 12px;
-  right: 48px;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, #fffef5, #fde68a 55%, rgba(234, 179, 8, 0.4));
-  box-shadow: 0 0 24px rgba(253, 230, 138, 0.45);
-  opacity: 0.75;
+  top: 8px;
+  right: 52px;
+  opacity: 0.88;
+  filter: drop-shadow(0 0 14px rgba(255, 220, 160, 0.4));
+  animation: aki-moon-float 9s ease-in-out infinite;
 }
 
 html[data-site-theme='aki'] .hana-chat-aki-susuki {
   position: absolute;
-  bottom: 72px;
-  left: 6%;
-  width: 36px;
-  height: 52px;
-  background: linear-gradient(180deg, transparent 0%, rgba(250, 245, 239, 0.55) 35%, rgba(250, 245, 239, 0.35) 100%);
-  clip-path: polygon(50% 0%, 62% 100%, 38% 100%);
-  opacity: 0.35;
-  filter: blur(0.3px);
+  bottom: 68px;
+  opacity: 0.42;
+  animation: aki-susuki-sway 5.5s ease-in-out infinite;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+}
+
+html[data-site-theme='aki'] .hana-chat-aki-susuki.is-a {
+  left: 4%;
+}
+
+html[data-site-theme='aki'] .hana-chat-aki-susuki.is-b {
+  left: 11%;
+  animation-delay: -1.2s;
+  opacity: 0.32;
 }
 
 html[data-site-theme='aki'] .hana-chat-aki-leaf {
   position: absolute;
-  width: 10px;
-  height: 10px;
-  border-radius: 0 80% 0 80%;
-  opacity: 0.55;
+  display: block;
   animation: hana-aki-leaf-drift 18s linear infinite;
 }
 
+html[data-site-theme='aki'] .hana-chat-aki-leaf .aki-leaf-svg {
+  display: block;
+  filter: drop-shadow(0 1px 2px rgba(80, 20, 10, 0.35));
+}
+
 html[data-site-theme='aki'] .hana-chat-aki-leaf.is-1 {
-  left: 12%;
-  top: 28%;
-  background: #c41e3a;
+  left: 10%;
+  top: 26%;
   animation-duration: 16s;
 }
 
 html[data-site-theme='aki'] .hana-chat-aki-leaf.is-2 {
-  left: 68%;
-  top: 22%;
-  background: #ea580c;
+  left: 72%;
+  top: 20%;
   animation-duration: 20s;
   animation-delay: -4s;
 }
 
 html[data-site-theme='aki'] .hana-chat-aki-leaf.is-3 {
-  left: 42%;
-  top: 52%;
-  background: #eab308;
+  left: 44%;
+  top: 50%;
   animation-duration: 22s;
   animation-delay: -8s;
 }
 
 html[data-site-theme='aki'] .hana-chat-aki-leaf.is-4 {
-  left: 82%;
-  top: 62%;
-  background: #c41e3a;
+  left: 84%;
+  top: 58%;
   animation-duration: 19s;
   animation-delay: -2s;
 }
@@ -9771,10 +9758,10 @@ html[data-site-theme='aki'] .hana-chat-aki-leaf.is-4 {
     opacity: 0;
   }
   8% {
-    opacity: 0.55;
+    opacity: 0.75;
   }
   100% {
-    transform: translate(-24px, 120px) rotate(220deg);
-    opacity: 0.15;
+    transform: translate(-20px, 110px) rotate(280deg);
+    opacity: 0.18;
   }
 }

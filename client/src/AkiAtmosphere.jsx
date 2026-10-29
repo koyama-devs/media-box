@@ -1,33 +1,103 @@
+import { useMemo } from 'react'
 import { createPortal } from 'react-dom'
+import AkiLeaf, { AkiSusukiPlume, AkiTsukimiMoon } from './AkiLeaf'
 import './aki-atmosphere.css'
 
-const LEAVES = Array.from({ length: 14 }, (_, i) => ({
+const LEAF_TONES = ['crimson', 'scarlet', 'gold', 'amber']
+const LEAF_VARIANTS = ['momiji', 'momiji', 'momiji', 'ginkgo']
+
+const FALLING = Array.from({ length: 22 }, (_, i) => ({
   id: i,
-  left: `${(i * 7.1 + 3) % 96}%`,
-  delay: `${-(i * 1.3)}s`,
-  dur: `${13 + (i % 6) * 2.2}s`,
-  hue: i % 3,
+  left: `${(i * 5.7 + 2) % 98}%`,
+  delay: `${-(i * 1.05 + (i % 3) * 0.4)}s`,
+  dur: `${14 + (i % 7) * 2.4}s`,
+  sway: `${3 + (i % 5)}s`,
+  tone: LEAF_TONES[i % LEAF_TONES.length],
+  variant: LEAF_VARIANTS[i % LEAF_VARIANTS.length],
+  size: 16 + (i % 4) * 5,
+  drift: i % 2 === 0 ? 1 : -1,
 }))
 
+const SUSUKI = Array.from({ length: 18 }, (_, i) => ({
+  id: i,
+  left: `${(i * 5.8) % 100}%`,
+  height: 52 + (i % 5) * 14,
+  delay: `${-(i * 0.35)}s`,
+}))
+
+function prefersReducedMotion() {
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  } catch {
+    return false
+  }
+}
+
 export default function AkiAtmosphere({ active }) {
+  const reduced = useMemo(
+    () => (typeof window === 'undefined' ? false : prefersReducedMotion()),
+    [],
+  )
+
   if (!active || typeof document === 'undefined') return null
-  return createPortal(
-    <div className="aki-atmosphere" aria-hidden="true">
-      <div className="aki-atmosphere-sky" />
-      <div className="aki-atmosphere-moon" />
-      <div className="aki-atmosphere-susuki" />
-      {LEAVES.map((leaf) => (
-        <span
-          key={leaf.id}
-          className={`aki-leaf is-${leaf.hue}`}
-          style={{
-            left: leaf.left,
-            animationDuration: leaf.dur,
-            animationDelay: leaf.delay,
-          }}
-        />
-      ))}
-    </div>,
-    document.body,
+
+  const reducedClass = reduced ? ' is-reduced' : ''
+
+  return (
+    <>
+      {createPortal(
+        <div className={`aki-atmosphere aki-atmosphere--back${reducedClass}`} aria-hidden="true">
+          <div className="aki-atmosphere-sky" />
+          <div className="aki-atmosphere-dusk" />
+          <div className="aki-atmosphere-haze" />
+          <div className="aki-atmosphere-ground" />
+        </div>,
+        document.body,
+      )}
+
+      {createPortal(
+        <div className={`aki-atmosphere aki-atmosphere--moon${reducedClass}`} aria-hidden="true">
+          <div className="aki-atmosphere-moon-halo" />
+          <AkiTsukimiMoon className="aki-atmosphere-moon-svg" size={88} uid="site" />
+        </div>,
+        document.body,
+      )}
+
+      {createPortal(
+        <div className={`aki-atmosphere aki-atmosphere--front${reducedClass}`} aria-hidden="true">
+          <div className="aki-atmosphere-susuki-field">
+            {SUSUKI.map((plume) => (
+              <AkiSusukiPlume
+                key={plume.id}
+                className="aki-atmosphere-susuki-item"
+                height={plume.height}
+                style={{
+                  left: plume.left,
+                  animationDelay: plume.delay,
+                }}
+              />
+            ))}
+          </div>
+
+          {!reduced
+            ? FALLING.map((leaf) => (
+              <span
+                key={leaf.id}
+                className="aki-falling-leaf"
+                style={{
+                  left: leaf.left,
+                  animationDuration: `${leaf.dur}, ${leaf.sway}`,
+                  animationDelay: `${leaf.delay}, ${leaf.delay}`,
+                  '--aki-drift': leaf.drift,
+                }}
+              >
+                <AkiLeaf variant={leaf.variant} tone={leaf.tone} size={leaf.size} />
+              </span>
+            ))
+            : null}
+        </div>,
+        document.body,
+      )}
+    </>
   )
 }
