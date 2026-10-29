@@ -50,7 +50,7 @@ import {
     humanChatThreadIdForUserKey,
     normalizeConversationId
 } from './chat/chatIdentity.js'
-import { mergeChatMessageLists, preferMessageRow } from './chat/chatMerge.js'
+import { preferMessageRow } from './chat/chatMerge.js'
 import {
     applyPokeWorldAction,
     applyPokeWorldAdopt,
@@ -70,6 +70,7 @@ import {
     worldDuoCared,
     worldRole
 } from './pokeZukan.js'
+import { normalizeSiteThemeId } from './siteTheme.js'
 
 export {
     conversationIdForGuestUser,
@@ -5405,10 +5406,8 @@ export async function saveChatAppSettings(patch = {}) {
 }
 
 function normalizeSiteAppearance(data = {}) {
-  const raw = String(data?.themeId || '').trim()
-  const allowed = new Set(['default', 'natsu'])
   return {
-    themeId: allowed.has(raw) ? raw : 'default',
+    themeId: normalizeSiteThemeId(data?.themeId),
   }
 }
 
