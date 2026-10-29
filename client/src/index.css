@@ -125,3 +125,47 @@ html[data-site-theme='natsu'] #root {
   position: relative;
   z-index: 1;
 }
+
+/* ─── Autumn / 紅葉・月見 site theme ─── */
+html[data-site-theme='aki'] {
+  --bg-base: #1a1410;
+  --bg-elevated: #241a14;
+  --bg-surface: #2e2218;
+  --bg-surface-hover: #3a2a1e;
+  --border: rgba(234, 179, 8, 0.16);
+  --border-strong: rgba(196, 30, 58, 0.28);
+  --text-primary: #faf5ef;
+  --text-secondary: #c9b8a8;
+  --text-muted: #8a7968;
+  --blue-400: #fbbf24;
+  --blue-500: #f59e0b;
+  --blue-600: #d97706;
+  --blue-700: #b45309;
+  --blue-glow: rgba(234, 179, 8, 0.18);
+  --shadow-card: 0 24px 48px rgba(0, 0, 0, 0.48), 0 0 0 1px rgba(196, 30, 58, 0.08);
+  --shadow-glow: 0 0 48px rgba(234, 179, 8, 0.12);
+  --aki-maple: #c41e3a;
+  --aki-amber: #ea580c;
+  --aki-ginkgo: #eab308;
+  --aki-dusk: #1a1528;
+  --aki-earth: #2a1a14;
+}
+
+html[data-site-theme='aki'] body {
+  background:
+    radial-gradient(ellipse 50% 40% at 82% 8%, rgba(255, 220, 160, 0.2), transparent 55%),
+    radial-gradient(ellipse 65% 45% at 50% 100%, rgba(180, 60, 40, 0.15), transparent 58%),
+    radial-gradient(ellipse 35% 30% at 8% 22%, rgba(120, 50, 90, 0.1), transparent 50%),
+    linear-gradient(180deg, #1a1528 0%, #2a1820 40%, #1c1410 100%);
+}
+
+html[data-site-theme='aki'] body::before,
+html[data-site-theme='aki'] body::after {
+  content: none;
+  display: none;
+}
+
+html[data-site-theme='aki'] #root {
+  position: relative;
+  z-index: 1;
+}

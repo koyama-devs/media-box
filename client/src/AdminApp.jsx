@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import './Admin.css'
 import AdminHanaInbox from './AdminHanaInbox'
+import AkiAtmosphere from './AkiAtmosphere'
 import {
     ACCOUNT_IDLE_DAYS_NEVER,
     DEFAULT_ACCOUNT_IDLE_DAYS,
@@ -1233,6 +1234,7 @@ function AdminDashboard({ user }) {
   return (
     <div className="admin-root">
       <NatsuAtmosphere active={adminSiteThemeId === 'natsu'} />
+      <AkiAtmosphere active={adminSiteThemeId === 'aki'} />
       <div className="admin-shell">
         <header className="admin-appbar">
           <div className="admin-appbar-inner">

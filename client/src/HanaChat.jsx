@@ -5445,6 +5445,18 @@ export default function HanaChat({
               </>
             ) : null}
           </div>
+          <div className="hana-chat-aki-decor" aria-hidden="true">
+            {showSummerFx ? (
+              <>
+                <span className="hana-chat-aki-moon" />
+                <span className="hana-chat-aki-leaf is-1" />
+                <span className="hana-chat-aki-leaf is-2" />
+                <span className="hana-chat-aki-leaf is-3" />
+                <span className="hana-chat-aki-leaf is-4" />
+                <span className="hana-chat-aki-susuki" />
+              </>
+            ) : null}
+          </div>
           <header className="hana-chat-header" ref={headerRef}>
             <div className="hana-chat-header-lead">
               <button

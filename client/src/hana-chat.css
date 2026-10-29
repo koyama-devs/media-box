@@ -9544,3 +9544,237 @@ html[data-site-theme='natsu'] .hana-chat-list {
   background: rgba(225, 29, 72, 0.28);
   color: #ffe4e6;
 }
+
+/* Autumn / 紅葉・月見 — chat chrome */
+html[data-site-theme='aki'] .hana-chat {
+  --hana-petal: #c41e3a;
+  --hana-warm: #eab308;
+  --hana-cream: #faf5ef;
+  --hana-ink: #2a1a14;
+}
+
+html[data-site-theme='aki'] .hana-chat-fab,
+html[data-site-theme='aki'] .hana-chat-launcher .hana-chat-fab,
+html[data-site-theme='aki'] button.hana-chat-fab {
+  background: linear-gradient(145deg, #c41e3a 10%, #ea580c 45%, #eab308 90%) !important;
+  box-shadow:
+    0 14px 32px rgba(196, 30, 58, 0.45),
+    0 0 28px rgba(234, 179, 8, 0.35) !important;
+  border: 2px solid rgba(250, 245, 239, 0.5);
+}
+
+html[data-site-theme='aki'] .hana-chat-launcher-wrap::after {
+  content: '秋';
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  z-index: 8;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #faf5ef;
+  background: linear-gradient(145deg, #c41e3a, #eab308);
+  box-shadow: 0 4px 12px rgba(196, 30, 58, 0.45);
+  pointer-events: none;
+}
+
+html[data-site-theme='aki'] .hana-chat-panel {
+  border: 2px solid rgba(234, 179, 8, 0.35) !important;
+  background:
+    radial-gradient(ellipse 70% 35% at 50% -5%, rgba(196, 30, 58, 0.22), transparent 55%),
+    radial-gradient(ellipse 45% 28% at 100% 100%, rgba(234, 179, 8, 0.1), transparent 50%),
+    linear-gradient(165deg, rgba(26, 21, 40, 0.98), rgba(28, 20, 16, 0.99)) !important;
+  box-shadow:
+    0 28px 64px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(196, 30, 58, 0.15),
+    0 0 40px rgba(234, 179, 8, 0.12) !important;
+  overflow: hidden;
+}
+
+@media (max-width: 640px) {
+  html[data-site-theme='aki'] .hana-chat-panel {
+    border: 0 !important;
+    box-shadow: 0 28px 64px rgba(0, 0, 0, 0.55) !important;
+  }
+}
+
+html[data-site-theme='aki'] .hana-chat-panel::before {
+  content: '月';
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  z-index: 2;
+  font-family: 'Noto Serif JP', 'Yu Mincho', serif;
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+  color: rgba(234, 179, 8, 0.42);
+  pointer-events: none;
+  text-shadow: 0 0 12px rgba(196, 30, 58, 0.3);
+}
+
+html[data-site-theme='aki'] .hana-chat-header {
+  border-bottom: 1px solid rgba(234, 179, 8, 0.28) !important;
+  background:
+    linear-gradient(180deg, rgba(196, 30, 58, 0.22), rgba(234, 179, 8, 0.06) 70%, transparent) !important;
+}
+
+html[data-site-theme='aki'] .hana-chat-messages,
+html[data-site-theme='aki'] .hana-chat-list {
+  background:
+    radial-gradient(ellipse 55% 38% at 85% 12%, rgba(234, 179, 8, 0.07), transparent 50%),
+    radial-gradient(ellipse 40% 30% at 8% 88%, rgba(196, 30, 58, 0.08), transparent 55%);
+}
+
+html[data-site-theme='aki'] .hana-chat-bubble.is-hana {
+  background: linear-gradient(145deg, rgba(196, 30, 58, 0.48), rgba(234, 179, 8, 0.22)) !important;
+  border-color: rgba(234, 179, 8, 0.45) !important;
+  box-shadow: 0 0 16px rgba(196, 30, 58, 0.15);
+}
+
+html[data-site-theme='aki'] .hana-chat-bubble.is-guest {
+  background: linear-gradient(145deg, rgba(42, 32, 48, 0.92), rgba(28, 22, 32, 0.94)) !important;
+  border-color: rgba(234, 179, 8, 0.28) !important;
+}
+
+html[data-site-theme='aki'] .hana-chat-composer {
+  border-top: 1px solid rgba(234, 179, 8, 0.26) !important;
+  background:
+    linear-gradient(180deg, rgba(196, 30, 58, 0.12), transparent 55%),
+    rgba(20, 14, 12, 0.88) !important;
+}
+
+html[data-site-theme='aki'] .hana-chat-sticker-dock {
+  border-top-color: rgba(234, 179, 8, 0.22);
+  background:
+    linear-gradient(180deg, rgba(196, 30, 58, 0.1), transparent 40%),
+    rgba(20, 14, 12, 0.96);
+}
+
+html[data-site-theme='aki'] .hana-chat-send {
+  background: linear-gradient(135deg, #c41e3a, #eab308) !important;
+  color: #1a1020 !important;
+  box-shadow: 0 8px 20px rgba(196, 30, 58, 0.35);
+}
+
+html[data-site-theme='aki'] .hana-chat-composer-action.is-send,
+html[data-site-theme='aki'] .hana-chat-composer-action.is-camera,
+html[data-site-theme='aki'] .hana-chat-composer-action.is-mic {
+  color: rgba(253, 230, 138, 0.88);
+}
+
+html[data-site-theme='aki'] .hana-chat-msg-row.is-other .hana-chat-autolink {
+  color: #fbbf24;
+  text-decoration-color: rgba(234, 179, 8, 0.5);
+}
+
+html[data-site-theme='aki'] .hana-chat-suggest-chip {
+  border-color: rgba(234, 179, 8, 0.26);
+  background: rgba(26, 20, 16, 0.55);
+}
+
+html[data-site-theme='aki'] .hana-chat-composer,
+html[data-site-theme='aki'] .hana-chat-body {
+  position: relative;
+  z-index: 2;
+}
+
+html[data-site-theme='aki'] .hana-chat.is-open .hana-chat-header {
+  background:
+    linear-gradient(180deg, rgba(26, 21, 40, 0.99) 0%, rgba(26, 21, 40, 0.96) 55%, rgba(28, 20, 16, 0.92) 100%),
+    linear-gradient(180deg, rgba(196, 30, 58, 0.22), rgba(234, 179, 8, 0.06) 70%, transparent) !important;
+}
+
+.hana-chat-aki-decor {
+  display: none;
+}
+
+html[data-site-theme='aki'] .hana-chat-aki-decor {
+  display: block;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+html[data-site-theme='aki'] .hana-chat-aki-moon {
+  position: absolute;
+  top: 12px;
+  right: 48px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fffef5, #fde68a 55%, rgba(234, 179, 8, 0.4));
+  box-shadow: 0 0 24px rgba(253, 230, 138, 0.45);
+  opacity: 0.75;
+}
+
+html[data-site-theme='aki'] .hana-chat-aki-susuki {
+  position: absolute;
+  bottom: 72px;
+  left: 6%;
+  width: 36px;
+  height: 52px;
+  background: linear-gradient(180deg, transparent 0%, rgba(250, 245, 239, 0.55) 35%, rgba(250, 245, 239, 0.35) 100%);
+  clip-path: polygon(50% 0%, 62% 100%, 38% 100%);
+  opacity: 0.35;
+  filter: blur(0.3px);
+}
+
+html[data-site-theme='aki'] .hana-chat-aki-leaf {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 0 80% 0 80%;
+  opacity: 0.55;
+  animation: hana-aki-leaf-drift 18s linear infinite;
+}
+
+html[data-site-theme='aki'] .hana-chat-aki-leaf.is-1 {
+  left: 12%;
+  top: 28%;
+  background: #c41e3a;
+  animation-duration: 16s;
+}
+
+html[data-site-theme='aki'] .hana-chat-aki-leaf.is-2 {
+  left: 68%;
+  top: 22%;
+  background: #ea580c;
+  animation-duration: 20s;
+  animation-delay: -4s;
+}
+
+html[data-site-theme='aki'] .hana-chat-aki-leaf.is-3 {
+  left: 42%;
+  top: 52%;
+  background: #eab308;
+  animation-duration: 22s;
+  animation-delay: -8s;
+}
+
+html[data-site-theme='aki'] .hana-chat-aki-leaf.is-4 {
+  left: 82%;
+  top: 62%;
+  background: #c41e3a;
+  animation-duration: 19s;
+  animation-delay: -2s;
+}
+
+@keyframes hana-aki-leaf-drift {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
+    opacity: 0;
+  }
+  8% {
+    opacity: 0.55;
+  }
+  100% {
+    transform: translate(-24px, 120px) rotate(220deg);
+    opacity: 0.15;
+  }
+}

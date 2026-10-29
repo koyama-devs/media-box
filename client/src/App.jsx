@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import AkiAtmosphere from './AkiAtmosphere'
 import './App.css'
 import hanachanArt from './assets/hanachan.svg'
 import { AVATAR_PRESETS, getAvatarPresetSrc } from './avatarPresets'
@@ -3595,6 +3596,7 @@ const playPrevious = useCallback(() => {
       style={shellSpaceStyle}
     >
       <NatsuAtmosphere active={siteThemeId === 'natsu'} />
+      <AkiAtmosphere active={siteThemeId === 'aki'} />
       {!isLoggedIn ? (
         <section className="login-card" aria-labelledby="login-brand-title">
           <div className="login-hero" aria-hidden="true">
@@ -3603,7 +3605,11 @@ const playPrevious = useCallback(() => {
             <span className="login-hero-petal is-2" />
           </div>
           <p className="login-kicker">
-            {siteThemeId === 'natsu' ? '夏・盆・花火大会' : 'Hana Mediabox'}
+            {siteThemeId === 'natsu'
+              ? '夏・盆・花火大会'
+              : siteThemeId === 'aki'
+                ? '秋・紅葉・月見'
+                : 'Hana Mediabox'}
           </p>
           <h1 id="login-brand-title">はなメディボ</h1>
           <p className="lead">

@@ -19,6 +19,14 @@ export const SITE_THEMES = [
     themeColor: '#070e1c',
     preview: ['#07101f', '#ffd24a', '#ff3b2e'],
   },
+  {
+    id: 'aki',
+    label: '秋・紅葉・月見',
+    kicker: 'Aki no Kaze',
+    description: 'もみじ・銀杏・すすき・お月見・食欲の秋',
+    themeColor: '#1a1410',
+    preview: ['#1a1528', '#c41e3a', '#eab308'],
+  },
 ]
 
 export function normalizeSiteThemeId(value) {

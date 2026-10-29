@@ -1,0 +1,73 @@
+/* Japanese autumn — momiji, tsukimi, susuki, twilight */
+
+.aki-atmosphere {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 0;
+}
+
+.aki-atmosphere-sky {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 55% 40% at 78% 12%, rgba(255, 220, 160, 0.22), transparent 55%),
+    radial-gradient(ellipse 70% 50% at 50% 100%, rgba(180, 70, 30, 0.18), transparent 60%),
+    radial-gradient(ellipse 40% 30% at 15% 25%, rgba(200, 60, 40, 0.12), transparent 50%),
+    linear-gradient(180deg, #1a2438 0%, #2a1a14 38%, #1a120c 100%);
+}
+
+.aki-atmosphere-moon {
+  position: absolute;
+  top: 8%;
+  right: 14%;
+  width: min(72px, 14vw);
+  height: min(72px, 14vw);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 32%, #fff8e7, #f5d78e 45%, rgba(245, 215, 142, 0.4) 70%, transparent 72%);
+  box-shadow: 0 0 48px rgba(255, 230, 180, 0.35);
+  opacity: 0.85;
+}
+
+.aki-atmosphere-susuki {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: min(28vh, 200px);
+  opacity: 0.35;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 24px,
+      rgba(220, 200, 160, 0.08) 24px,
+      rgba(220, 200, 160, 0.08) 26px
+    ),
+    linear-gradient(0deg, rgba(40, 28, 18, 0.9) 0%, transparent 100%);
+}
+
+.aki-leaf {
+  position: absolute;
+  top: -24px;
+  width: 14px;
+  height: 14px;
+  opacity: 0.75;
+  animation: aki-leaf-fall linear infinite;
+  clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+}
+
+.aki-leaf.is-0 { background: #c41e3a; }
+.aki-leaf.is-1 { background: #e85d04; }
+.aki-leaf.is-2 { background: #d4a017; transform: scale(0.85); clip-path: polygon(50% 0%, 15% 100%, 85% 100%); }
+
+@keyframes aki-leaf-fall {
+  0% { transform: translateY(0) rotate(0deg) translateX(0); opacity: 0; }
+  8% { opacity: 0.8; }
+  100% { transform: translateY(105vh) rotate(420deg) translateX(40px); opacity: 0.15; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aki-leaf { animation: none; display: none; }
+}
