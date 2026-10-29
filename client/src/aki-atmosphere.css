@@ -1,4 +1,4 @@
-/* Japanese autumn — momiji, ichō, tsukimi, susuki, twilight */
+/* Japanese autumn — momiji, ichō, tsukimi, twilight horizon */
 
 .aki-atmosphere {
   position: fixed;
@@ -51,15 +51,28 @@
   animation: aki-haze-twinkle 8s ease-in-out infinite;
 }
 
+.aki-atmosphere-horizon {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: min(38vh, 280px);
+  opacity: 0.9;
+  background:
+    radial-gradient(ellipse 55% 40% at 18% 100%, rgba(120, 35, 25, 0.35), transparent 58%),
+    radial-gradient(ellipse 48% 36% at 72% 100%, rgba(140, 50, 30, 0.28), transparent 55%),
+    radial-gradient(ellipse 70% 28% at 50% 100%, rgba(80, 45, 35, 0.4), transparent 62%);
+  mask-image: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.35) 35%, #000 72%);
+}
+
 .aki-atmosphere-ground {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  height: min(32vh, 220px);
-  background:
-    linear-gradient(180deg, transparent, rgba(30, 18, 12, 0.55) 45%, rgba(18, 12, 8, 0.85));
-  mask-image: linear-gradient(180deg, transparent, #000 38%);
+  height: min(18vh, 120px);
+  background: linear-gradient(180deg, transparent, rgba(12, 8, 6, 0.75));
+  mask-image: linear-gradient(180deg, transparent, #000 55%);
 }
 
 .aki-atmosphere-moon-halo {
@@ -81,23 +94,6 @@
   height: min(88px, 16vw);
   filter: drop-shadow(0 0 28px rgba(255, 220, 160, 0.45));
   animation: aki-moon-float 9s ease-in-out infinite;
-}
-
-.aki-atmosphere-susuki-field {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: min(26vh, 190px);
-  opacity: 0.55;
-}
-
-.aki-atmosphere-susuki-item {
-  position: absolute;
-  bottom: 0;
-  transform-origin: bottom center;
-  animation: aki-susuki-sway 5.5s ease-in-out infinite;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.25));
 }
 
 .aki-falling-leaf {
@@ -161,16 +157,6 @@
   }
 }
 
-@keyframes aki-susuki-sway {
-  0%,
-  100% {
-    transform: rotate(-2deg);
-  }
-  50% {
-    transform: rotate(3deg);
-  }
-}
-
 @keyframes aki-haze-twinkle {
   0%,
   100% {
@@ -195,8 +181,7 @@
   }
 
   .aki-atmosphere-moon-svg,
-  .aki-atmosphere-moon-halo,
-  .aki-atmosphere-susuki-item {
+  .aki-atmosphere-moon-halo {
     animation: none;
   }
 }

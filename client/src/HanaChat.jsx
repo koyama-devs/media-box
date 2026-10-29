@@ -1,6 +1,6 @@
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal, flushSync } from 'react-dom'
-import AkiLeaf, { AkiSusukiPlume, AkiTsukimiMoon } from './AkiLeaf'
+import { AkiTsukimiMoon } from './AkiLeaf'
 import { setAppUnreadBadge } from './appBadge'
 import hanachanArt from './assets/hanachan.svg'
 import { bootstrapConversationRowsSync } from './chat/chatBootstrap.js'
@@ -10,6 +10,7 @@ import { mergeMessagesByClientId } from './chat/chatMerge.js'
 import { startChatOutboxWorker } from './chat/chatOutboxWorker.js'
 import { ensureChatStorageReady } from './chat/chatStorageInit.js'
 import { useConversationBootstrap } from './chat/useConversationBootstrap.js'
+import ChatAkiFall from './ChatAkiFall'
 import ChatAvatar from './ChatAvatar'
 import { CHAT_CARD_SHARE_EVENT, CHAT_CLOSE_EVENT } from './chatCardShare'
 import {
@@ -5449,23 +5450,13 @@ export default function HanaChat({
           <div className="hana-chat-aki-decor" aria-hidden="true">
             {showSummerFx ? (
               <>
+                <div className="hana-chat-aki-sky" />
+                <div className="hana-chat-aki-moon-halo" />
                 <div className="hana-chat-aki-moon-wrap">
-                  <AkiTsukimiMoon uid="chat" size={36} />
+                  <AkiTsukimiMoon uid="chat" size={54} />
                 </div>
-                <AkiSusukiPlume className="hana-chat-aki-susuki is-a" height={48} />
-                <AkiSusukiPlume className="hana-chat-aki-susuki is-b" height={40} />
-                <span className="hana-chat-aki-leaf is-1">
-                  <AkiLeaf variant="momiji" tone="crimson" size={18} />
-                </span>
-                <span className="hana-chat-aki-leaf is-2">
-                  <AkiLeaf variant="momiji" tone="scarlet" size={16} />
-                </span>
-                <span className="hana-chat-aki-leaf is-3">
-                  <AkiLeaf variant="ginkgo" tone="gold" size={17} />
-                </span>
-                <span className="hana-chat-aki-leaf is-4">
-                  <AkiLeaf variant="momiji" tone="amber" size={15} />
-                </span>
+                <div className="hana-chat-aki-horizon" />
+                <ChatAkiFall />
               </>
             ) : null}
           </div>

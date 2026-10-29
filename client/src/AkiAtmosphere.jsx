@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import AkiLeaf, { AkiSusukiPlume, AkiTsukimiMoon } from './AkiLeaf'
+import AkiLeaf, { AkiTsukimiMoon } from './AkiLeaf'
 import './aki-atmosphere.css'
 
 const LEAF_TONES = ['crimson', 'scarlet', 'gold', 'amber']
@@ -16,13 +16,6 @@ const FALLING = Array.from({ length: 22 }, (_, i) => ({
   variant: LEAF_VARIANTS[i % LEAF_VARIANTS.length],
   size: 16 + (i % 4) * 5,
   drift: i % 2 === 0 ? 1 : -1,
-}))
-
-const SUSUKI = Array.from({ length: 18 }, (_, i) => ({
-  id: i,
-  left: `${(i * 5.8) % 100}%`,
-  height: 52 + (i % 5) * 14,
-  delay: `${-(i * 0.35)}s`,
 }))
 
 function prefersReducedMotion() {
@@ -50,6 +43,7 @@ export default function AkiAtmosphere({ active }) {
           <div className="aki-atmosphere-sky" />
           <div className="aki-atmosphere-dusk" />
           <div className="aki-atmosphere-haze" />
+          <div className="aki-atmosphere-horizon" />
           <div className="aki-atmosphere-ground" />
         </div>,
         document.body,
@@ -65,20 +59,6 @@ export default function AkiAtmosphere({ active }) {
 
       {createPortal(
         <div className={`aki-atmosphere aki-atmosphere--front${reducedClass}`} aria-hidden="true">
-          <div className="aki-atmosphere-susuki-field">
-            {SUSUKI.map((plume) => (
-              <AkiSusukiPlume
-                key={plume.id}
-                className="aki-atmosphere-susuki-item"
-                height={plume.height}
-                style={{
-                  left: plume.left,
-                  animationDelay: plume.delay,
-                }}
-              />
-            ))}
-          </div>
-
           {!reduced
             ? FALLING.map((leaf) => (
               <span
