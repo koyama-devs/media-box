@@ -9698,24 +9698,13 @@ html[data-site-theme='aki'] .hana-chat-aki-sky {
   opacity: 1;
 }
 
-html[data-site-theme='aki'] .hana-chat-aki-moon-halo {
-  position: absolute;
-  top: 4px;
-  right: 38px;
-  width: 72px;
-  height: 72px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(255, 230, 150, 0.45) 0%, rgba(255, 200, 80, 0.08) 55%, transparent 72%);
-  animation: aki-moon-halo 6s ease-in-out infinite;
-}
-
 html[data-site-theme='aki'] .hana-chat-aki-moon-wrap {
   position: absolute;
-  top: 10px;
-  right: 46px;
+  top: 6px;
+  right: 40px;
   z-index: 2;
-  filter: drop-shadow(0 0 20px rgba(255, 220, 120, 0.65));
-  animation: aki-moon-float 9s ease-in-out infinite;
+  filter: drop-shadow(0 0 32px rgba(255, 210, 130, 0.5));
+  animation: aki-moon-float 11s ease-in-out infinite;
 }
 
 html[data-site-theme='aki'] .hana-chat-aki-horizon {

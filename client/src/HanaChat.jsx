@@ -5455,9 +5455,8 @@ export default function HanaChat({
             {showAkiSeasonFx ? (
               <>
                 <div className="hana-chat-aki-sky" />
-                <div className="hana-chat-aki-moon-halo" />
                 <div className="hana-chat-aki-moon-wrap">
-                  <AkiTsukimiMoon uid="chat" size={64} />
+                  <AkiTsukimiMoon size={72} />
                 </div>
                 <div className="hana-chat-aki-horizon" />
                 <ChatAkiFall />

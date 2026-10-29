@@ -51,8 +51,7 @@ export default function AkiAtmosphere({ active }) {
 
       {createPortal(
         <div className={`aki-atmosphere aki-atmosphere--moon${reducedClass}`} aria-hidden="true">
-          <div className="aki-atmosphere-moon-halo" />
-          <AkiTsukimiMoon className="aki-atmosphere-moon-svg" size={88} uid="site" />
+          <AkiTsukimiMoon className="aki-atmosphere-moon-stack" size={112} />
         </div>,
         document.body,
       )}

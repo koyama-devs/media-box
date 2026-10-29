@@ -1,0 +1,106 @@
+/* Tsukimi moon — soft luminous stack (not flat cartoon SVG). */
+
+.aki-tsukimi-moon-stack {
+  position: relative;
+  display: block;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.aki-tsukimi-moon-stack .aki-moon-aura {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.aki-tsukimi-moon-stack .aki-moon-aura.is-outer {
+  inset: -95%;
+  background: radial-gradient(circle, rgba(255, 210, 150, 0.22) 0%, rgba(255, 180, 100, 0.08) 42%, transparent 68%);
+  filter: blur(18px);
+  animation: aki-moon-breathe 10s ease-in-out infinite;
+}
+
+.aki-tsukimi-moon-stack .aki-moon-aura.is-mid {
+  inset: -55%;
+  background: radial-gradient(circle, rgba(255, 225, 170, 0.38) 0%, rgba(255, 200, 120, 0.12) 50%, transparent 72%);
+  filter: blur(10px);
+  animation: aki-moon-breathe 10s ease-in-out infinite;
+  animation-delay: -2.5s;
+}
+
+.aki-tsukimi-moon-stack .aki-moon-aura.is-inner {
+  inset: -28%;
+  background: radial-gradient(circle, rgba(255, 240, 210, 0.45) 0%, transparent 62%);
+  filter: blur(5px);
+}
+
+.aki-tsukimi-moon-stack .aki-moon-disc {
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 38% 32%, rgba(255, 255, 252, 0.95) 0%, rgba(255, 248, 220, 0.85) 18%, transparent 42%),
+    radial-gradient(circle at 50% 52%, #fff3c4 0%, #ffe082 38%, #f5c842 68%, #e8a820 100%);
+  box-shadow:
+    0 0 32px rgba(255, 220, 150, 0.65),
+    0 0 64px rgba(255, 200, 110, 0.4),
+    0 0 96px rgba(255, 180, 90, 0.22),
+    inset 0 -8px 20px rgba(200, 140, 40, 0.15),
+    inset 0 4px 16px rgba(255, 255, 250, 0.25);
+}
+
+.aki-tsukimi-moon-stack .aki-moon-disc::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 62% 58%, transparent 55%, rgba(220, 160, 60, 0.08) 100%);
+  opacity: 0.9;
+}
+
+.aki-tsukimi-moon-stack .aki-moon-shimmer {
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+  overflow: hidden;
+  opacity: 0.35;
+  mix-blend-mode: soft-light;
+  background: linear-gradient(
+    125deg,
+    transparent 40%,
+    rgba(255, 255, 255, 0.55) 48%,
+    transparent 56%
+  );
+  animation: aki-moon-shimmer 14s ease-in-out infinite;
+}
+
+@keyframes aki-moon-breathe {
+  0%,
+  100% {
+    opacity: 0.88;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
+@keyframes aki-moon-shimmer {
+  0%,
+  100% {
+    transform: translateX(-8%) rotate(0deg);
+    opacity: 0.2;
+  }
+  50% {
+    transform: translateX(8%) rotate(0deg);
+    opacity: 0.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aki-tsukimi-moon-stack .aki-moon-aura,
+  .aki-tsukimi-moon-stack .aki-moon-shimmer {
+    animation: none;
+  }
+}

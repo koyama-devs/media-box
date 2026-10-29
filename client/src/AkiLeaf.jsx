@@ -1,4 +1,5 @@
 import { useId } from 'react'
+import './aki-moon.css'
 
 /** Momiji + ichō SVG for autumn theme (site + chat). */
 
@@ -130,35 +131,19 @@ export default function AkiLeaf({
   )
 }
 
-/** Bright golden tsukimi moon — luminous, no dark patches. */
-export function AkiTsukimiMoon({ className = '', size = 72, uid: uidProp = 'aki' }) {
-  const reactUid = useId().replace(/:/g, '')
-  const uid = `${uidProp}-${reactUid}`
+/** Luminous tsukimi moon (CSS halos — soft 月見, not cartoon SVG). */
+export function AkiTsukimiMoon({ className = '', size = 96 }) {
   return (
-    <svg
-      className={`aki-tsukimi-moon ${className}`.trim()}
-      viewBox="0 0 96 96"
-      width={size}
-      height={size}
+    <div
+      className={`aki-tsukimi-moon-stack ${className}`.trim()}
+      style={{ width: size, height: size }}
       aria-hidden="true"
     >
-      <defs>
-        <radialGradient id={`${uid}-halo`} cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="rgba(255, 245, 200, 0.65)" />
-          <stop offset="55%" stopColor="rgba(255, 220, 130, 0.2)" />
-          <stop offset="100%" stopColor="rgba(255, 200, 80, 0)" />
-        </radialGradient>
-        <radialGradient id={`${uid}-disc`} cx="36%" cy="28%" r="65%">
-          <stop offset="0%" stopColor="#fffff8" />
-          <stop offset="30%" stopColor="#fff4a8" />
-          <stop offset="65%" stopColor="#ffd54a" />
-          <stop offset="100%" stopColor="#f0b020" />
-        </radialGradient>
-      </defs>
-      <circle cx="48" cy="48" r="46" fill={`url(#${uid}-halo)`} />
-      <circle cx="48" cy="48" r="34" fill={`url(#${uid}-disc)`} />
-      <circle cx="48" cy="48" r="35" fill="none" stroke="rgba(255, 252, 230, 0.65)" strokeWidth="1.8" />
-      <ellipse cx="38" cy="34" rx="11" ry="8" fill="rgba(255, 255, 248, 0.42)" />
-    </svg>
+      <span className="aki-moon-aura is-outer" />
+      <span className="aki-moon-aura is-mid" />
+      <span className="aki-moon-aura is-inner" />
+      <span className="aki-moon-disc" />
+      <span className="aki-moon-shimmer" />
+    </div>
   )
 }
