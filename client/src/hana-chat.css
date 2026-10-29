@@ -9683,7 +9683,7 @@ html[data-site-theme='aki'] .hana-chat-aki-decor {
   display: block;
   position: absolute;
   inset: 0;
-  z-index: 1;
+  z-index: 8;
   pointer-events: none;
   overflow: hidden;
 }
@@ -9692,10 +9692,10 @@ html[data-site-theme='aki'] .hana-chat-aki-sky {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse 70% 45% at 85% 0%, rgba(255, 200, 100, 0.22), transparent 58%),
-    radial-gradient(ellipse 55% 40% at 15% 100%, rgba(180, 50, 40, 0.15), transparent 55%),
-    linear-gradient(180deg, rgba(196, 30, 58, 0.08) 0%, transparent 35%, rgba(234, 179, 8, 0.06) 100%);
-  opacity: 0.95;
+    radial-gradient(ellipse 70% 45% at 85% 0%, rgba(255, 200, 100, 0.32), transparent 58%),
+    radial-gradient(ellipse 55% 40% at 15% 100%, rgba(180, 50, 40, 0.22), transparent 55%),
+    linear-gradient(180deg, rgba(196, 30, 58, 0.12) 0%, transparent 35%, rgba(234, 179, 8, 0.1) 100%);
+  opacity: 1;
 }
 
 html[data-site-theme='aki'] .hana-chat-aki-moon-halo {
@@ -9737,15 +9737,15 @@ html[data-site-theme='aki'] .hana-chat-aki-fall {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  z-index: 2;
+  z-index: 9;
 }
 
 html[data-site-theme='aki'] .hana-chat-aki-fall-item {
   position: absolute;
-  top: -40px;
+  top: -12%;
   display: block;
   animation: hana-chat-aki-leaf-fall linear forwards;
-  will-change: transform, opacity;
+  will-change: top, transform, opacity;
 }
 
 html[data-site-theme='aki'] .hana-chat-aki-fall-item .aki-leaf-svg {
@@ -9755,14 +9755,16 @@ html[data-site-theme='aki'] .hana-chat-aki-fall-item .aki-leaf-svg {
 
 @keyframes hana-chat-aki-leaf-fall {
   0% {
-    transform: translateY(0) translateX(0) rotate(0deg);
+    top: -12%;
+    transform: translateX(0) rotate(0deg);
     opacity: 0;
   }
-  5% {
-    opacity: 0.88;
+  6% {
+    opacity: 0.92;
   }
   100% {
-    transform: translateY(calc(100vh + 60px)) translateX(calc(var(--aki-drift, 1) * 36px)) rotate(480deg);
-    opacity: 0.2;
+    top: 108%;
+    transform: translateX(calc(var(--aki-drift, 1) * 42px)) rotate(520deg);
+    opacity: 0.22;
   }
 }

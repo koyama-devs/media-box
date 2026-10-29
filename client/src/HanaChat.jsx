@@ -149,6 +149,7 @@ import {
 } from './OwnerMessageAssist'
 import { POKE_ZUKAN_GUEST, tokyoZukanYmd, worldActiveMon } from './pokeZukan'
 import useComposerVoiceNote, { formatVoiceClock } from './useComposerVoiceNote'
+import { useSiteThemeId } from './useSiteThemeId.js'
 import { bindForegroundPush, ensureWebPush } from './webPush'
 
 const CHANNEL_PREFIX = 'hana-chat-channel-'
@@ -717,6 +718,9 @@ export default function HanaChat({
   const [messagesHydrated, setMessagesHydrated] = useState(false)
   /** Summer décor waits until messages have painted. */
   const [showSummerFx, setShowSummerFx] = useState(false)
+  const siteThemeId = useSiteThemeId()
+  const showNatsuSeasonFx = open && siteThemeId === 'natsu' && showSummerFx
+  const showAkiSeasonFx = open && siteThemeId === 'aki'
   const [threads, setThreads] = useState([])
   const [ownThread, setOwnThread] = useState(null)
   const [activeThreadId, setActiveThreadId] = useState(null)
@@ -5438,7 +5442,7 @@ export default function HanaChat({
           aria-label="はなちゃんチャット"
         >
           <div className="hana-chat-natsu-decor" aria-hidden="true">
-            {showSummerFx ? (
+            {showNatsuSeasonFx ? (
               <>
                 <span className="hana-chat-natsu-lantern is-a" />
                 <span className="hana-chat-natsu-lantern is-b" />
@@ -5448,12 +5452,12 @@ export default function HanaChat({
             ) : null}
           </div>
           <div className="hana-chat-aki-decor" aria-hidden="true">
-            {showSummerFx ? (
+            {showAkiSeasonFx ? (
               <>
                 <div className="hana-chat-aki-sky" />
                 <div className="hana-chat-aki-moon-halo" />
                 <div className="hana-chat-aki-moon-wrap">
-                  <AkiTsukimiMoon uid="chat" size={54} />
+                  <AkiTsukimiMoon uid="chat" size={64} />
                 </div>
                 <div className="hana-chat-aki-horizon" />
                 <ChatAkiFall />

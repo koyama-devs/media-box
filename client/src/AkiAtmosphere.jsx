@@ -14,7 +14,7 @@ const FALLING = Array.from({ length: 22 }, (_, i) => ({
   sway: `${3 + (i % 5)}s`,
   tone: LEAF_TONES[i % LEAF_TONES.length],
   variant: LEAF_VARIANTS[i % LEAF_VARIANTS.length],
-  size: 16 + (i % 4) * 5,
+  size: 24 + (i % 4) * 8,
   drift: i % 2 === 0 ? 1 : -1,
 }))
 

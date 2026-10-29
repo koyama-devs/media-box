@@ -9,63 +9,61 @@ const TONES = {
   amber: { light: '#fcd34d', mid: '#f59e0b', dark: '#b45309' },
 }
 
-/** Stylized Japanese maple (palmatum) — deep lobes, not a star/triangle. */
+/** Japanese maple (momiji) — palmate lobes with serrated silhouette. */
 function MomijiShape({ tone, gid }) {
   const c = TONES[tone] || TONES.crimson
   return (
     <>
       <defs>
-        <linearGradient id={gid} x1="30%" y1="5%" x2="70%" y2="95%">
+        <linearGradient id={gid} x1="35%" y1="0%" x2="65%" y2="100%">
           <stop offset="0%" stopColor={c.light} />
-          <stop offset="45%" stopColor={c.mid} />
+          <stop offset="50%" stopColor={c.mid} />
           <stop offset="100%" stopColor={c.dark} />
         </linearGradient>
       </defs>
       <path
         fill={`url(#${gid})`}
-        d="M32 5
-           C31 11 27 13 23 15
-           C26 17 27 20 26 23
-           C23 21 20 22 17 25
-           C19 25 21 28 21 31
-           C18 30 16 33 15 37
-           C18 36 20 38 22 41
-           C19 42 18 45 19 48
-           C22 45 25 44 28 46
-           C27 43 28 40 30 38
-           L32 34
-           L34 38
-           C36 40 37 43 36 46
-           C39 44 42 45 45 48
-           C46 45 45 42 42 41
-           C44 38 46 36 49 37
-           C48 33 46 30 43 31
-           C43 28 45 25 47 25
-           C44 22 41 21 38 23
-           C37 20 38 17 41 15
-           C37 13 33 11 32 5 Z"
+        d="M50 4
+           C46 14 38 16 32 22
+           C38 20 42 26 41 32
+           C36 28 30 30 24 36
+           C30 34 34 40 33 46
+           C28 42 22 44 18 50
+           C24 48 30 52 34 58
+           C30 54 26 58 24 64
+           C30 60 38 60 44 66
+           C42 60 44 54 50 50
+           C56 54 58 60 56 66
+           C62 60 70 60 76 64
+           C74 58 70 54 66 58
+           C70 52 76 48 82 50
+           C78 44 72 42 67 46
+           C66 40 70 34 76 36
+           C70 30 64 28 59 32
+           C58 26 62 20 68 22
+           C62 16 54 14 50 4 Z"
       />
       <path
         fill="none"
         stroke={c.dark}
-        strokeWidth="1.2"
+        strokeWidth="1.4"
         strokeLinecap="round"
-        opacity="0.75"
-        d="M32 16 V46"
+        opacity="0.8"
+        d="M50 18 V66"
       />
       <path
         fill="none"
         stroke={c.dark}
-        strokeWidth="0.65"
+        strokeWidth="0.75"
         strokeLinecap="round"
-        opacity="0.45"
-        d="M32 22 L26 28 M32 24 L38 29 M32 30 L24 34 M32 32 L40 35"
+        opacity="0.5"
+        d="M50 24 L42 30 M50 26 L58 31 M50 34 L38 38 M50 36 L62 40 M50 44 L40 48 M50 46 L60 50"
       />
     </>
   )
 }
 
-/** Ichō (ginkgo) — wide fan, central slit, soft waves at the top edge. */
+/** Ichō (ginkgo) — fan leaf with central cleft at the top. */
 function GinkgoShape({ tone, gid }) {
   const c = TONES[tone] || TONES.gold
   return (
@@ -79,31 +77,31 @@ function GinkgoShape({ tone, gid }) {
       </defs>
       <path
         fill={`url(#${gid})`}
-        d="M32 5
-           L27 11
-           C17 16 13 26 14 36
-           C15 44 19 49 25 51
-           C28 52 30 52 32 52
-           C34 52 36 52 39 51
-           C45 49 49 44 50 36
-           C51 26 47 16 37 11
-           L32 5 Z"
+        d="M50 6
+           L46 12
+           C34 18 28 30 28 42
+           C28 52 32 62 38 68
+           C42 72 46 74 50 74
+           C54 74 58 72 62 68
+           C68 62 72 52 72 42
+           C72 30 66 18 54 12
+           L50 6 Z"
       />
       <path
         fill="none"
         stroke={c.dark}
-        strokeWidth="1"
+        strokeWidth="1.2"
         strokeLinecap="round"
-        opacity="0.5"
-        d="M32 10 V48"
+        opacity="0.55"
+        d="M50 10 V70"
       />
       <path
         fill="none"
         stroke={c.dark}
-        strokeWidth="0.55"
+        strokeWidth="0.7"
         strokeLinecap="round"
-        opacity="0.35"
-        d="M32 14 C26 20 24 28 25 36 M32 14 C38 20 40 28 39 36"
+        opacity="0.4"
+        d="M50 16 C42 24 38 34 38 44 M50 16 C58 24 62 34 62 44"
       />
     </>
   )
@@ -121,7 +119,7 @@ export default function AkiLeaf({
   return (
     <svg
       className={`aki-leaf-svg ${className}`.trim()}
-      viewBox="0 0 64 64"
+      viewBox="0 0 100 100"
       width={size}
       height={size}
       style={style}
@@ -132,7 +130,7 @@ export default function AkiLeaf({
   )
 }
 
-/** Bright golden tsukimi moon — no crater spots, soft luminous halo. */
+/** Bright golden tsukimi moon — luminous, no dark patches. */
 export function AkiTsukimiMoon({ className = '', size = 72, uid: uidProp = 'aki' }) {
   const reactUid = useId().replace(/:/g, '')
   const uid = `${uidProp}-${reactUid}`
@@ -145,29 +143,22 @@ export function AkiTsukimiMoon({ className = '', size = 72, uid: uidProp = 'aki'
       aria-hidden="true"
     >
       <defs>
-        <radialGradient id={`${uid}-glow`} cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="rgba(255, 248, 210, 0.55)" />
-          <stop offset="70%" stopColor="rgba(255, 220, 120, 0.12)" />
+        <radialGradient id={`${uid}-halo`} cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="rgba(255, 245, 200, 0.65)" />
+          <stop offset="55%" stopColor="rgba(255, 220, 130, 0.2)" />
           <stop offset="100%" stopColor="rgba(255, 200, 80, 0)" />
         </radialGradient>
-        <radialGradient id={`${uid}-disc`} cx="38%" cy="32%" r="62%">
-          <stop offset="0%" stopColor="#fffef5" />
-          <stop offset="28%" stopColor="#fff3b0" />
-          <stop offset="62%" stopColor="#ffd54a" />
-          <stop offset="100%" stopColor="#f5b820" />
+        <radialGradient id={`${uid}-disc`} cx="36%" cy="28%" r="65%">
+          <stop offset="0%" stopColor="#fffff8" />
+          <stop offset="30%" stopColor="#fff4a8" />
+          <stop offset="65%" stopColor="#ffd54a" />
+          <stop offset="100%" stopColor="#f0b020" />
         </radialGradient>
       </defs>
-      <circle cx="48" cy="48" r="44" fill={`url(#${uid}-glow)`} />
-      <circle cx="48" cy="48" r="36" fill={`url(#${uid}-disc)`} />
-      <circle
-        cx="48"
-        cy="48"
-        r="37"
-        fill="none"
-        stroke="rgba(255, 250, 220, 0.55)"
-        strokeWidth="1.5"
-      />
-      <ellipse cx="40" cy="36" rx="10" ry="7" fill="rgba(255, 255, 250, 0.35)" />
+      <circle cx="48" cy="48" r="46" fill={`url(#${uid}-halo)`} />
+      <circle cx="48" cy="48" r="34" fill={`url(#${uid}-disc)`} />
+      <circle cx="48" cy="48" r="35" fill="none" stroke="rgba(255, 252, 230, 0.65)" strokeWidth="1.8" />
+      <ellipse cx="38" cy="34" rx="11" ry="8" fill="rgba(255, 255, 248, 0.42)" />
     </svg>
   )
 }

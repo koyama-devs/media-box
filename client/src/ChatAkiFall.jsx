@@ -10,7 +10,7 @@ function makeFallingLeaf(seq) {
   return {
     id: `chat-leaf-${seq}-${Math.random().toString(36).slice(2, 7)}`,
     left: 4 + Math.random() * 90,
-    size: 22 + Math.floor(Math.random() * 14),
+    size: 34 + Math.floor(Math.random() * 18),
     duration: 9 + Math.random() * 8,
     delay: Math.random() * 0.4,
     drift: Math.random() > 0.5 ? 1 : -1,
@@ -41,7 +41,7 @@ export default function ChatAkiFall() {
     }
 
     spawn()
-    const timer = window.setInterval(spawn, 950)
+    const timer = window.setInterval(spawn, 720)
     return () => {
       cancelled = true
       window.clearInterval(timer)
